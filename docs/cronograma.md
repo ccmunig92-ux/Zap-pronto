@@ -43,6 +43,9 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   repetição; registro da migration é atômico ao DDL; RLS comercial e clínica isola filiais.
 - Gate final da Fase 2: handoff concorrente com replay único, recebimento/extracão/revisão médica
   concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
+- Fase 3A iniciada em branch empilhada própria: workspace full-stack único, contratos TypeBox,
+  composition root Fastify, OpenAPI gerado e shell React sem acesso direto ao banco.
+- A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
 - Fases 3–9: não iniciadas.
 
 ## Premissas
