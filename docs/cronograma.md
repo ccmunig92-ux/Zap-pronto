@@ -45,10 +45,12 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
 - Fase 3A iniciada em branch empilhada própria: workspace full-stack único, contratos TypeBox,
   composition root Fastify, OpenAPI gerado e shell React sem acesso direto ao banco.
-- Fase 3A identidade/RBAC iniciada: catálogo persistido alinhado a `user_units`, provedores OIDC e
+- Fase 3A identidade/RBAC em validação: catálogo persistido alinhado a `user_units`, provedores OIDC e
   identidades resolvidas por issuer, audience, organização e subject, com RLS e função estreita.
+- Boundary HTTP fail-closed em validação: toda rota `/v1` exige declaração explícita e rotas protegidas
+  executam resolução OIDC, contexto RLS e autorização RBAC na mesma transação do caso de uso.
 - A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
-- Fases 3–9: não iniciadas.
+- Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
 
 ## Premissas
 
@@ -190,9 +192,11 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Validar o gate da Fase 2 no CI remoto e manter o PR sem merge até revisão da integração.
-2. Integrar a Fase 2 ao `main` somente após decisão explícita de merge.
-3. Iniciar a Fase 3 em branch próprio: contrato OpenAPI, autenticação substituível e RBAC por unidade.
-4. Implementar primeiro a matriz de autorização e os testes IDOR; rotas vêm depois dos contratos.
+1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
+   runner remoto não produzir evidência.
+2. Fechar o gate HTTP da Fase 3A com matriz por rota, RBAC transacional e testes IDOR por unidade.
+3. Implementar convites, ativação, bloqueio e revogação no mesmo módulo de identidade existente.
+4. Expor o primeiro fluxo vertical da inbox somente depois dos gates anteriores, reutilizando contratos,
+   API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

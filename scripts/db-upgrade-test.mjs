@@ -116,6 +116,7 @@ try {
   assert.match(firstRun, /applied 0005_workflow_foundation\.sql/);
   assert.match(firstRun, /applied 0008_medical_orders\.sql/);
   assert.match(firstRun, /applied 0010_identity_rbac\.sql/);
+  assert.match(firstRun, /applied 0011_permission_policy\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -156,9 +157,11 @@ try {
       (SELECT count(*)::integer FROM app_permissions) AS permission_count,
       (SELECT count(*)::integer FROM oidc_providers) AS provider_count,
       (SELECT count(*)::integer FROM user_oidc_identities) AS identity_count,
-      (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count`);
+      (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count,
+      to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
       role_count: 5, permission_count: 9, provider_count: 0, identity_count: 0, membership_count: 1,
+      permission_policy_exists: true,
     });
   } finally {
     await verify.end();
