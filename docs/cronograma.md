@@ -5,21 +5,27 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 ## Status de execução — 06/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
-- Fase atual: **Fase 1 — isolamento e integridade**.
+- Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
+- Fase atual: **Fase 2 — domínio operacional e persistência**.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
 - Atribuição de atendente fora da unidade: bloqueada em teste real.
 - Controle de migrations por checksum e advisory lock: aprovado localmente.
-- CI com PostgreSQL 18, typecheck e testes: configurado; execução remota pendente do primeiro push.
+- CI com PostgreSQL 18, typecheck e testes: aprovado no `main`.
 - Primeiro commit canônico local: criado e validado.
 - Contexto transacional parametrizado e testes de pool: concluídos.
 - Membership ator/tenant validado no banco: implementado localmente.
 - Matriz RLS das 19 tabelas: SELECT/INSERT/UPDATE/DELETE cruzados testados localmente.
 - Membership ator/tenant e matriz CRUD RLS: concluídos.
 - Papéis separados de API e worker: concluídos e reauditos.
-- Pendente para integrar a Fase 1: CI remoto verde e revisão/merge do PR.
-- Fases 1–9: não iniciadas.
+- Fase 2A em execução no branch `codex/phase-2-operational-domain`:
+  lifecycle tipado, histórico tenant-aware e outbox com lease/dead-letter modelados;
+  solicitação de handoff atômica e claim otimista implementados.
+- Prova local da Fase 2A: migration do zero, RLS e dois claims concorrentes com exatamente um vencedor.
+- Pendências do gate da Fase 2: transições completas, worker de outbox, orçamento reproduzível,
+  pedido médico/OCR revisável e suíte integral de concorrência/rollback.
+- Fases 3–9: não iniciadas.
 
 ## Premissas
 
@@ -161,10 +167,10 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Corrigir a migration atual.
-2. Subir PostgreSQL local real.
-3. Provar RLS com dois tenants.
-4. Provar integridade de handoff e atribuição por unidade.
-5. Criar primeiro commit canônico somente depois dos gates verdes.
+1. Concluir worker transacional de outbox: claim, lease, retry, backoff, ACK e dead-letter.
+2. Implementar orçamento com snapshot imutável da versão de preço e cálculo em centavos.
+3. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
+4. Ampliar provas de rollback, idempotência concorrente e upgrade de dados legados.
+5. Publicar a Fase 2 em PR próprio; manter Fases 3–9 bloqueadas até o gate verde.
 
-Não iniciar API, interface, Hermes ou Meta antes desses cinco passos.
+Não iniciar API, interface, Hermes ou Meta antes do gate completo da Fase 2.

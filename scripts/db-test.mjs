@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
+import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -43,6 +44,7 @@ try {
       "0002_tenant_context_hardening.sql",
       "0003_actor_context_authorization.sql",
       "0004_component_roles.sql",
+      "0005_workflow_foundation.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -109,7 +111,7 @@ try {
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
       "contact_identities", "contacts", "conversations", "human_handoffs", "message_attachments",
       "messages", "outbox_events", "price_list_versions", "price_lists", "prices", "service_cases",
-      "tenants", "units", "user_units", "users",
+      "tenants", "units", "user_units", "users", "workflow_transitions",
     ];
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -178,7 +180,7 @@ try {
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
     ]);
-    const apiInsertOnly = new Set(["messages", "outbox_events", "audit_events"]);
+    const apiInsertOnly = new Set(["messages", "outbox_events", "audit_events", "workflow_transitions"]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -258,9 +260,9 @@ try {
       INSERT INTO message_attachments (tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
         ('40000000-0000-4000-8000-000000000001', '46000000-0000-4000-8000-000000000001', 'AUDIO', 'tenant-a/audio', 'audio/ogg', repeat('a',64)),
         ('50000000-0000-4000-8000-000000000002', '56000000-0000-4000-8000-000000000002', 'AUDIO', 'tenant-b/audio', 'audio/ogg', repeat('b',64));
-      INSERT INTO human_handoffs (tenant_id, conversation_id, service_case_id, unit_id, reason, idempotency_key) VALUES
-        ('40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'COMPLETED_COLLECTION', 'handoff-a'),
-        ('50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'COMPLETED_COLLECTION', 'handoff-b');
+      INSERT INTO human_handoffs (tenant_id, conversation_id, service_case_id, unit_id, reason, status, queued_at, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-a'),
+        ('50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-b');
       INSERT INTO catalog_items (id, tenant_id, code, name) VALUES
         ('47000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'ITEM-A', 'Item A'),
         ('57000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', 'ITEM-B', 'Item B');
@@ -276,15 +278,29 @@ try {
       INSERT INTO outbox_events (tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key) VALUES
         ('40000000-0000-4000-8000-000000000001', 'conversation', '44000000-0000-4000-8000-000000000001', 'test.a', '{}', 'outbox-a'),
         ('50000000-0000-4000-8000-000000000002', 'conversation', '54000000-0000-4000-8000-000000000002', 'test.b', '{}', 'outbox-b');
+      INSERT INTO workflow_transitions
+        (tenant_id, aggregate_type, aggregate_id, from_status, to_status, reason, actor_id, correlation_id) VALUES
+        ('40000000-0000-4000-8000-000000000001', 'CONVERSATION', '44000000-0000-4000-8000-000000000001', NULL, 'OPEN', 'TEST_SEED', '60000000-0000-4000-8000-000000000003', 'workflow-a'),
+        ('50000000-0000-4000-8000-000000000002', 'CONVERSATION', '54000000-0000-4000-8000-000000000002', NULL, 'OPEN', 'TEST_SEED', '70000000-0000-4000-8000-000000000004', 'workflow-b');
       INSERT INTO audit_events (tenant_id, actor_type, actor_id, action, entity_type, entity_id) VALUES
         ('40000000-0000-4000-8000-000000000001', 'USER', 'actor-a', 'TEST', 'tenant', 'a'),
         ('50000000-0000-4000-8000-000000000002', 'USER', 'actor-b', 'TEST', 'tenant', 'b');
     `);
 
+    await assert.rejects(
+      target.query(`
+        UPDATE conversations SET status = 'CLOSED', closed_at = now(), automation_status = 'HUMAN_ACTIVE'
+        WHERE id = '54000000-0000-4000-8000-000000000002'
+      `),
+      (error) => error instanceof Error && "code" in error && error.code === "23514"
+        && /INVALID_WORKFLOW_TRANSITION/.test(error.message),
+    );
+
     const runtimeUrl = new URL(targetUrl);
     runtimeUrl.username = runtimeRole;
     runtimeUrl.password = runtimePassword;
     const runtimePool = new pg.Pool({ connectionString: runtimeUrl.toString(), max: 1 });
+    const competingRuntimePool = new pg.Pool({ connectionString: runtimeUrl.toString(), max: 1 });
     const workerUrl = new URL(targetUrl);
     workerUrl.username = workerRuntimeRole;
     workerUrl.password = workerRuntimePassword;
@@ -497,6 +513,112 @@ try {
       );
       assert.deepEqual(afterRollback.rows.map((row) => row.code), ["POOL-B"]);
 
+      const handoffA = await target.query(
+        "SELECT id, version FROM human_handoffs WHERE idempotency_key = 'handoff-a'",
+      );
+      await target.query(`
+        UPDATE conversations SET automation_status = 'HUMAN_REQUESTED'
+        WHERE id = '44000000-0000-4000-8000-000000000001';
+        UPDATE conversations SET automation_status = 'HUMAN_QUEUED'
+        WHERE id = '44000000-0000-4000-8000-000000000001';
+        UPDATE service_cases SET status = 'WAITING_HUMAN'
+        WHERE id = '45000000-0000-4000-8000-000000000001';
+      `);
+      const claimContext = {
+        tenantId: "40000000-0000-4000-8000-000000000001",
+        actorId: actorAId,
+      };
+      const claimInput = {
+        handoffId: handoffA.rows[0].id,
+        expectedVersion: handoffA.rows[0].version,
+      };
+      const claimResults = await Promise.allSettled([
+        withTenantTransaction(
+          runtimePool,
+          { ...claimContext, correlationId: "concurrent-claim-a" },
+          (client) => claimHandoff(client, claimInput),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...claimContext, correlationId: "concurrent-claim-b" },
+          (client) => claimHandoff(client, claimInput),
+        ),
+      ]);
+      assert.equal(
+        claimResults.filter((result) => result.status === "fulfilled").length,
+        1,
+        claimResults.map((result) => result.status === "rejected"
+          ? String(result.reason?.message ?? result.reason)
+          : "FULFILLED").join(" | "),
+      );
+      assert.equal(claimResults.filter((result) => result.status === "rejected").length, 1);
+      const rejectedClaim = claimResults.find((result) => result.status === "rejected");
+      assert.match(rejectedClaim.reason.message, /HANDOFF_CLAIM_CONFLICT/);
+
+      const claimEvidence = await target.query(`
+        SELECT h.status, h.version, h.assigned_user_id,
+          (SELECT count(*)::integer FROM workflow_transitions wt
+            WHERE wt.aggregate_type = 'HANDOFF' AND wt.aggregate_id = h.id AND wt.to_status = 'ACTIVE') AS transitions,
+          (SELECT count(*)::integer FROM outbox_events oe
+            WHERE oe.idempotency_key = 'handoff.claimed:' || h.id::text) AS outbox_events
+        FROM human_handoffs h WHERE h.id = $1
+      `, [handoffA.rows[0].id]);
+      assert.deepEqual(claimEvidence.rows[0], {
+        status: "ACTIVE",
+        version: 2,
+        assigned_user_id: actorAId,
+        transitions: 1,
+        outbox_events: 1,
+      });
+      const claimedCase = await target.query(
+        "SELECT status, version FROM service_cases WHERE id = '45000000-0000-4000-8000-000000000001'",
+      );
+      assert.deepEqual(claimedCase.rows[0], { status: "IN_REVIEW", version: 2 });
+      const claimTransitionCount = await target.query(
+        "SELECT count(*)::integer AS count FROM workflow_transitions WHERE correlation_id IN ('concurrent-claim-a', 'concurrent-claim-b')",
+      );
+      assert.equal(claimTransitionCount.rows[0].count, 3);
+
+      await target.query("DELETE FROM human_handoffs WHERE idempotency_key = 'handoff-b'");
+      const requestedHandoff = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "50000000-0000-4000-8000-000000000002",
+          actorId: actorBId,
+          correlationId: "request-handoff-b",
+        },
+        (client) => requestHandoff(client, {
+          serviceCaseId: "55000000-0000-4000-8000-000000000002",
+          expectedCaseVersion: 1,
+          reason: "COMPLETED_COLLECTION",
+          priority: "NORMAL",
+          idempotencyKey: "handoff-request-b",
+        }),
+      );
+      assert.equal(requestedHandoff.status, "QUEUED");
+      const requestEvidence = await target.query(`
+        SELECT c.automation_status, c.assigned_user_id, sc.status AS case_status, sc.version AS case_version,
+          h.status AS handoff_status, h.queued_at IS NOT NULL AS was_queued,
+          (SELECT count(*)::integer FROM workflow_transitions wt
+            WHERE wt.correlation_id = 'request-handoff-b') AS transitions,
+          (SELECT count(*)::integer FROM outbox_events oe
+            WHERE oe.idempotency_key = 'handoff.queued:' || h.id::text) AS outbox_events
+        FROM human_handoffs h
+        JOIN service_cases sc ON sc.tenant_id = h.tenant_id AND sc.id = h.service_case_id
+        JOIN conversations c ON c.tenant_id = h.tenant_id AND c.id = h.conversation_id
+        WHERE h.id = $1
+      `, [requestedHandoff.id]);
+      assert.deepEqual(requestEvidence.rows[0], {
+        automation_status: "HUMAN_QUEUED",
+        assigned_user_id: null,
+        case_status: "WAITING_HUMAN",
+        case_version: 2,
+        handoff_status: "QUEUED",
+        was_queued: true,
+        transitions: 4,
+        outbox_events: 1,
+      });
+
       const worker = await workerPool.connect();
       try {
         await worker.query("BEGIN");
@@ -534,6 +656,7 @@ try {
       }
     } finally {
       await runtimePool.end();
+      await competingRuntimePool.end();
       await workerPool.end();
     }
     process.stdout.write("database integration tests passed\n");

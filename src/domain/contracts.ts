@@ -68,8 +68,8 @@ export interface HumanHandoff extends TenantScoped {
   serviceCaseId: ServiceCaseId;
   unitId: UnitId | null;
   reason: HandoffReason;
-  priority: "NORMAL" | "ATTENTION" | "HIGH" | "URGENT";
-  status: "REQUESTED" | "QUEUED" | "ASSIGNED" | "ACTIVE" | "RESOLVED" | "FAILED";
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  status: "REQUESTED" | "QUEUED" | "ACTIVE" | "RESOLVED" | "FAILED" | "CANCELLED";
   idempotencyKey: string;
 }
 
@@ -82,4 +82,3 @@ export interface PriceEvidence extends TenantScoped {
   source: "PLATFORM" | "EXTERNAL_SNAPSHOT" | "EXTERNAL_REALTIME";
   effectiveAt: string;
 }
-
