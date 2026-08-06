@@ -41,3 +41,6 @@ jobs:
       - run: pnpm db:test
         env:
           DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      - run: pnpm db:test:upgrade
+        env:
+          DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres

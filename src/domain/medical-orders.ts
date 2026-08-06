@@ -65,6 +65,10 @@ async function ensureMedicalOrderHandoff(
   input: { serviceCaseId: string; conversationId: string; expectedCaseVersion: number;
     reason: string; priority: "NORMAL" | "HIGH"; idempotencyKey: string },
 ): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':handoff-case:' || $1, 0))",
+    [input.serviceCaseId],
+  );
   const existing = await query<{ id: string; service_case_id: string }>(client, `
     SELECT id, service_case_id FROM human_handoffs
     WHERE conversation_id=$1 AND status IN ('REQUESTED','QUEUED','ACTIVE')
@@ -112,8 +116,8 @@ export async function receiveMedicalOrder(
     throw new Error("INVALID_PAGE_COUNT");
   }
   await client.query(
-    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':' || $1, 0))",
-    [idempotencyKey],
+    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':medical-source:' || $1 || ':' || $2, 0))",
+    [input.serviceCaseId, input.documentSha256],
   );
   const existing = await query<{ id: string; status: MedicalOrderResult["status"]; version: number;
     service_case_id: string; message_id: string; message_attachment_id: string;
@@ -126,6 +130,17 @@ export async function receiveMedicalOrder(
     if (row.service_case_id !== input.serviceCaseId || row.message_id !== input.messageId
       || row.message_attachment_id !== input.attachmentId || row.page_count !== input.pageCount
       || row.document_sha256 !== input.documentSha256) throw new Error("IDEMPOTENCY_KEY_REUSED");
+    return { id: row.id, status: row.status, version: row.version };
+  }
+  const sameDocument = await query<{ id: string; status: MedicalOrderResult["status"]; version: number;
+    message_id: string; message_attachment_id: string; page_count: number }>(client, `
+    SELECT id,status,version,message_id,message_attachment_id,page_count FROM medical_orders
+    WHERE service_case_id=$1 AND document_sha256=$2
+  `, [input.serviceCaseId, input.documentSha256]);
+  if (sameDocument.rowCount === 1) {
+    const row = sameDocument.rows[0]!;
+    if (row.message_id !== input.messageId || row.message_attachment_id !== input.attachmentId
+      || row.page_count !== input.pageCount) throw new Error("MEDICAL_ORDER_DOCUMENT_REUSED");
     return { id: row.id, status: row.status, version: row.version };
   }
   const source = await query<{ conversation_id: string; unit_id: string; sha256: string }>(client, `
@@ -282,12 +297,33 @@ export async function reviewMedicalOrder(
   expectedVersion: number,
   decisions: readonly ReviewDecision[],
 ): Promise<MedicalOrderResult> {
+  if (new Set(decisions.map((decision) => decision.itemId)).size !== decisions.length) {
+    throw new Error("MEDICAL_ORDER_REVIEW_DUPLICATE_ITEM");
+  }
   const order = await query<{ status: string; version: number }>(client, `
     SELECT medical.status, medical.version FROM medical_orders medical
     WHERE medical.id=$1 AND EXISTS (SELECT 1 FROM user_units membership
       WHERE membership.tenant_id=medical.tenant_id AND membership.unit_id=medical.unit_id
         AND membership.user_id=current_app_actor_id()) FOR UPDATE
   `, [medicalOrderId]);
+  if (order.rowCount === 1 && order.rows[0]!.status === "REVIEWED") {
+    if (decisions.length < 1) throw new Error("MEDICAL_ORDER_REVIEW_EMPTY");
+    const reviewedItems = await query<{ id: string; status: string; confirmed_catalog_item_id: string | null;
+      rejection_reason: string | null }>(client, `
+      SELECT id,status,confirmed_catalog_item_id,rejection_reason FROM medical_order_items
+      WHERE medical_order_id=$1 ORDER BY sequence
+    `, [medicalOrderId]);
+    if (reviewedItems.rowCount !== decisions.length) throw new Error("MEDICAL_ORDER_REVIEW_CONFLICT");
+    const byId = new Map(reviewedItems.rows.map((item) => [item.id, item]));
+    const replay = decisions.every((decision) => {
+      const item = byId.get(decision.itemId);
+      return decision.action === "CONFIRM"
+        ? item?.status === "CONFIRMED" && item.confirmed_catalog_item_id === decision.confirmedCatalogItemId
+        : item?.status === "REJECTED" && item.rejection_reason === decision.reason?.trim();
+    });
+    if (!replay) throw new Error("MEDICAL_ORDER_REVIEW_CONFLICT");
+    return { id: medicalOrderId, status: "REVIEWED", version: order.rows[0]!.version };
+  }
   if (order.rowCount !== 1 || order.rows[0]!.status !== "REVIEW_REQUIRED"
     || order.rows[0]!.version !== expectedVersion) throw new Error("MEDICAL_ORDER_REVIEW_CONFLICT");
   if (decisions.length < 1) throw new Error("MEDICAL_ORDER_REVIEW_EMPTY");
@@ -350,6 +386,10 @@ export async function markMedicalOrderUnreadable(
       WHERE membership.tenant_id=medical.tenant_id AND membership.unit_id=medical.unit_id
         AND membership.user_id=current_app_actor_id()) FOR UPDATE
   `, [medicalOrderId]);
+  if (order.rowCount === 1 && order.rows[0]!.status === "UNREADABLE") {
+    if (order.rows[0]!.failure_code !== failureCode) throw new Error("MEDICAL_ORDER_UNREADABLE_CONFLICT");
+    return { id: medicalOrderId, status: "UNREADABLE", version: order.rows[0]!.version };
+  }
   if (order.rowCount !== 1 || !["PROCESSING", "REVIEW_REQUIRED"].includes(order.rows[0]!.status)
     || order.rows[0]!.version !== expectedOrderVersion) throw new Error("MEDICAL_ORDER_UNREADABLE_CONFLICT");
   const marked = await query<{ version: number }>(client, `

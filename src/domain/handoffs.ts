@@ -60,6 +60,11 @@ export async function requestHandoff(
   const reason = requiredText(input.reason, "INVALID_HANDOFF_REASON", 200);
   const idempotencyKey = requiredText(input.idempotencyKey, "INVALID_IDEMPOTENCY_KEY", 200);
 
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':handoff-case:' || $1, 0))",
+    [input.serviceCaseId],
+  );
+
   const existing = await query<HandoffResult & { conversationId: string; serviceCaseId: string }>(client, `
     SELECT id, conversation_id AS "conversationId", service_case_id AS "serviceCaseId", status, version
     FROM human_handoffs WHERE idempotency_key = $1

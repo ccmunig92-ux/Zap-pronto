@@ -205,6 +205,7 @@ export async function publishPriceListVersion(
   let version = await query<{ price_list_id: string; status: string }>(client, `
     SELECT price_list_id, status FROM price_list_versions WHERE id = $1
   `, [priceListVersionId]);
+  if (version.rowCount === 1 && ["PUBLISHED", "RETIRED"].includes(String(version.rows[0]!.status))) return;
   if (version.rowCount !== 1 || version.rows[0]!.status !== "DRAFT") {
     throw new Error("PRICE_VERSION_NOT_DRAFT");
   }
@@ -213,6 +214,7 @@ export async function publishPriceListVersion(
   version = await query<{ price_list_id: string; status: string }>(client, `
     SELECT price_list_id, status FROM price_list_versions WHERE id = $1 FOR UPDATE
   `, [priceListVersionId]);
+  if (version.rowCount === 1 && ["PUBLISHED", "RETIRED"].includes(String(version.rows[0]!.status))) return;
   if (version.rowCount !== 1 || version.rows[0]!.status !== "DRAFT") {
     throw new Error("PRICE_VERSION_NOT_DRAFT");
   }

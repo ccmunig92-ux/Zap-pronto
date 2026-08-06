@@ -6,7 +6,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
-- Fase atual: **Fase 2 — domínio operacional e persistência**.
+- Fase atual: **Fase 3 — API, autenticação e RBAC** (aguardando integração da Fase 2).
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -39,8 +39,10 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Prova local da Fase 2D: replay e divergência idempotente, baixa confiança e ilegibilidade em handoff,
   evento clínico compatível com o estado real, isolamento por unidade e rollback integral quando há
   handoff aberto para outro caso; nenhum orçamento ou agendamento é criado.
-- Pendências do gate da Fase 2: upgrade de fixtures legadas e ampliação final da suíte de
-  idempotência/concorrência do domínio completo.
+- Fase 2 concluída localmente: upgrade legado 0001–0004 até 0009 preserva dados e é no-op na
+  repetição; registro da migration é atômico ao DDL; RLS comercial e clínica isola filiais.
+- Gate final da Fase 2: handoff concorrente com replay único, recebimento/extracão/revisão médica
+  concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
 - Fases 3–9: não iniciadas.
 
 ## Premissas
@@ -183,9 +185,9 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Ampliar as provas concorrentes cruzadas de handoff, orçamento e pedido médico.
-2. Implementar e provar o upgrade de dados/fixtures legadas sobre as migrations da Fase 2.
-3. Reauditar o domínio completo da Fase 2 com agentes especialistas.
-4. Manter o PR da Fase 2 como draft até todos os critérios do gate ficarem verdes.
+1. Validar o gate da Fase 2 no CI remoto e manter o PR sem merge até revisão da integração.
+2. Integrar a Fase 2 ao `main` somente após decisão explícita de merge.
+3. Iniciar a Fase 3 em branch próprio: contrato OpenAPI, autenticação substituível e RBAC por unidade.
+4. Implementar primeiro a matriz de autorização e os testes IDOR; rotas vêm depois dos contratos.
 
-Não iniciar API, interface, Hermes ou Meta antes do gate completo da Fase 2.
+Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

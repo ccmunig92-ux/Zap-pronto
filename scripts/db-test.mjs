@@ -50,6 +50,7 @@ try {
       "0006_outbox_worker.sql",
       "0007_quotes.sql",
       "0008_medical_orders.sql",
+      "0009_phase2_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -662,27 +663,32 @@ try {
       assert.equal(claimTransitionCount.rows[0].count, 3);
 
       await target.query("DELETE FROM human_handoffs WHERE idempotency_key = 'handoff-b'");
-      const requestedHandoff = await withTenantTransaction(
-        runtimePool,
-        {
-          tenantId: "50000000-0000-4000-8000-000000000002",
-          actorId: actorBId,
-          correlationId: "request-handoff-b",
-        },
-        (client) => requestHandoff(client, {
+      const concurrentHandoffRequest = {
           serviceCaseId: "55000000-0000-4000-8000-000000000002",
           expectedCaseVersion: 1,
           reason: "COMPLETED_COLLECTION",
           priority: "NORMAL",
           idempotencyKey: "handoff-request-b",
-        }),
-      );
+      };
+      const concurrentHandoffRequests = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "request-handoff-b",
+        }, (client) => requestHandoff(client, concurrentHandoffRequest)),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "request-handoff-b-replay",
+        }, (client) => requestHandoff(client, concurrentHandoffRequest)),
+      ]);
+      assert.equal(concurrentHandoffRequests.filter((result) => result.status === "fulfilled").length, 2);
+      const requestedHandoff = concurrentHandoffRequests[0].value;
+      assert.equal(concurrentHandoffRequests[1].value.id, requestedHandoff.id);
       assert.equal(requestedHandoff.status, "QUEUED");
       const requestEvidence = await target.query(`
         SELECT c.automation_status, c.assigned_user_id, sc.status AS case_status, sc.version AS case_version,
           h.status AS handoff_status, h.queued_at IS NOT NULL AS was_queued,
           (SELECT count(*)::integer FROM workflow_transitions wt
-            WHERE wt.correlation_id = 'request-handoff-b') AS transitions,
+            WHERE wt.correlation_id IN ('request-handoff-b','request-handoff-b-replay')) AS transitions,
           (SELECT count(*)::integer FROM outbox_events oe
             WHERE oe.idempotency_key = 'handoff.queued:' || h.id::text) AS outbox_events
         FROM human_handoffs h
@@ -1023,6 +1029,164 @@ try {
         { status: "PUBLISHED", count: 1 },
         { status: "RETIRED", count: 3 },
       ]);
+      await withTenantTransaction(runtimePool,
+        { ...sendContext, correlationId: "price-publish-retired-replay" },
+        (client) => publishPriceListVersion(client, "5e000000-0000-4000-8000-000000000003"));
+
+      await target.query(`
+        INSERT INTO conversations
+          (id, tenant_id, channel_connection_id, contact_id, contact_identity_id, unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001', '42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id, tenant_id, conversation_id, unit_id, kind)
+        VALUES ('65000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000009', (SELECT id FROM units WHERE code='POOL-A'), 'MEDICAL_ORDER');
+        INSERT INTO messages
+          (id, tenant_id, conversation_id, direction, actor, external_message_id, body) VALUES
+          ('66000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+            '64000000-0000-4000-8000-000000000009', 'INBOUND', 'CUSTOMER',
+            'medical-concurrent-first-a', 'Primeiro pedido concorrente'),
+          ('66000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+            '64000000-0000-4000-8000-000000000009', 'INBOUND', 'CUSTOMER',
+            'medical-concurrent-second-a', 'Segundo pedido concorrente');
+        INSERT INTO message_attachments
+          (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
+          ('6c000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+            '66000000-0000-4000-8000-000000000009', 'DOCUMENT',
+            'tenant-a/concurrent-first.pdf', 'application/pdf', repeat('9',64)),
+          ('6c000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+            '66000000-0000-4000-8000-00000000000a', 'DOCUMENT',
+            'tenant-a/concurrent-second.pdf', 'application/pdf', repeat('a',64));
+        INSERT INTO users (id, tenant_id, email, display_name)
+        VALUES ('60000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+          'reviewer-a2@example.test', 'Reviewer A2');
+        INSERT INTO user_units (tenant_id, user_id, unit_id, role)
+        SELECT '40000000-0000-4000-8000-000000000001',
+          '60000000-0000-4000-8000-00000000000a', id, 'ATTENDANT'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A';
+      `);
+      const concurrentReceiveInput = {
+        serviceCaseId: "65000000-0000-4000-8000-000000000009",
+        messageId: "66000000-0000-4000-8000-000000000009",
+        attachmentId: "6c000000-0000-4000-8000-000000000009",
+        documentSha256: "9".repeat(64), pageCount: 1, idempotencyKey: "medical-concurrent-receive-a",
+      };
+      const concurrentReceives = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-receive-a-1",
+        }, (client) => receiveMedicalOrder(client, concurrentReceiveInput)),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-receive-a-2",
+        }, (client) => receiveMedicalOrder(client, concurrentReceiveInput)),
+      ]);
+      assert.equal(concurrentReceives.filter((result) => result.status === "fulfilled").length, 2);
+      const concurrentFirstOrder = concurrentReceives[0].value;
+      assert.equal(concurrentReceives[1].value.id, concurrentFirstOrder.id);
+      const concurrentReceiveEvidence = await target.query(`
+        SELECT count(*)::integer AS orders,
+          (SELECT count(*)::integer FROM medical_order_pages page
+            WHERE page.medical_order_id=$1) AS pages
+        FROM medical_orders medical WHERE medical.idempotency_key='medical-concurrent-receive-a'
+      `, [concurrentFirstOrder.id]);
+      assert.deepEqual(concurrentReceiveEvidence.rows[0], { orders: 1, pages: 1 });
+
+      const concurrentSecondOrder = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-concurrent-second-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000009",
+        messageId: "66000000-0000-4000-8000-00000000000a",
+        attachmentId: "6c000000-0000-4000-8000-00000000000a",
+        documentSha256: "a".repeat(64), pageCount: 1, idempotencyKey: "medical-concurrent-second-a",
+      }));
+      const extractionFor = (medicalOrderId, expectedOrderVersion, text, idempotencyKey) => ({
+        medicalOrderId, expectedOrderVersion, expectedCaseVersion: 1,
+        provider: "TEST_OCR", model: "test-model", modelVersion: "1",
+        confidenceThreshold: 0.8, confidencePolicyVersion: "medical-ocr-v1",
+        pages: [{ pageNumber: 1, ocrText: text, confidence: 0.9,
+          items: [{ sequence: 1, rawText: text, confidence: 0.9 }] }], idempotencyKey,
+      });
+      const concurrentExtractions = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-shared-handoff-extract-a-1",
+        }, (client) => applyMedicalOrderExtraction(client,
+          extractionFor(concurrentFirstOrder.id, concurrentFirstOrder.version,
+            "Hemograma concorrente", "medical-shared-handoff-extract-a-1"))),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-shared-handoff-extract-a-2",
+        }, (client) => applyMedicalOrderExtraction(client,
+          extractionFor(concurrentSecondOrder.id, concurrentSecondOrder.version,
+            "Glicose concorrente", "medical-shared-handoff-extract-a-2"))),
+      ]);
+      assert.equal(concurrentExtractions.filter((result) => result.status === "fulfilled").length, 2,
+        concurrentExtractions.map((result) => result.status === "rejected"
+          ? String(result.reason?.message ?? result.reason) : "FULFILLED").join(" | "));
+      const sharedHandoffEvidence = await target.query(`
+        SELECT (SELECT count(*)::integer FROM medical_orders medical
+            WHERE medical.service_case_id='65000000-0000-4000-8000-000000000009'
+              AND medical.status='REVIEW_REQUIRED') AS review_orders,
+          (SELECT count(*)::integer FROM medical_order_items item JOIN medical_orders medical
+            ON medical.id=item.medical_order_id
+            WHERE medical.service_case_id='65000000-0000-4000-8000-000000000009') AS items,
+          (SELECT count(*)::integer FROM human_handoffs handoff
+            WHERE handoff.conversation_id='64000000-0000-4000-8000-000000000009'
+              AND handoff.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+          (SELECT status FROM service_cases WHERE id='65000000-0000-4000-8000-000000000009') AS case_status,
+          (SELECT automation_status FROM conversations
+            WHERE id='64000000-0000-4000-8000-000000000009') AS automation_status
+      `);
+      assert.deepEqual(sharedHandoffEvidence.rows[0], {
+        review_orders: 2, items: 2, open_handoffs: 1,
+        case_status: "WAITING_HUMAN", automation_status: "HUMAN_QUEUED",
+      });
+
+      const concurrentReviewItem = await target.query(
+        "SELECT id FROM medical_order_items WHERE medical_order_id=$1",
+        [concurrentFirstOrder.id],
+      );
+      const concurrentReviewVersion = concurrentExtractions.find((result) =>
+        result.status === "fulfilled" && result.value.id === concurrentFirstOrder.id).value.version;
+      const concurrentReviews = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-review-a-1",
+        }, (client) => reviewMedicalOrder(client, concurrentFirstOrder.id, concurrentReviewVersion, [{
+          itemId: concurrentReviewItem.rows[0].id, action: "REJECT",
+          reason: "DECISAO_CONCORRENTE_DIVERGENTE",
+        } ])),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: "60000000-0000-4000-8000-00000000000a",
+          correlationId: "medical-concurrent-review-a-2",
+        }, (client) => reviewMedicalOrder(client, concurrentFirstOrder.id, concurrentReviewVersion, [{
+          itemId: concurrentReviewItem.rows[0].id, action: "CONFIRM",
+          confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+        } ])),
+      ]);
+      assert.equal(concurrentReviews.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(concurrentReviews.filter((result) => result.status === "rejected").length, 1);
+      assert.match(concurrentReviews.find((result) => result.status === "rejected").reason.message,
+        /MEDICAL_ORDER_REVIEW_CONFLICT/);
+      const concurrentReviewEvidence = await target.query(`
+        SELECT medical.status, medical.version, medical.reviewed_by_user_id,
+          item.status AS item_status, item.reviewed_by_user_id AS item_reviewer,
+          (SELECT count(*)::integer FROM medical_order_review_events event
+            WHERE event.medical_order_id=medical.id) AS events
+        FROM medical_orders medical JOIN medical_order_items item
+          ON item.tenant_id=medical.tenant_id AND item.medical_order_id=medical.id
+        WHERE medical.id=$1
+      `, [concurrentFirstOrder.id]);
+      assert.equal(concurrentReviewEvidence.rows[0].status, "REVIEWED");
+      assert.equal(concurrentReviewEvidence.rows[0].version, concurrentReviewVersion + 1);
+      assert.ok(["CONFIRMED", "REJECTED"].includes(concurrentReviewEvidence.rows[0].item_status));
+      assert.equal(concurrentReviewEvidence.rows[0].reviewed_by_user_id,
+        concurrentReviewEvidence.rows[0].item_reviewer);
+      assert.equal(concurrentReviewEvidence.rows[0].events, 2);
 
       await target.query(`
         INSERT INTO conversations
@@ -1157,6 +1321,16 @@ try {
         }]),
       );
       assert.equal(reviewedOrder.status, "REVIEWED");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-review-duplicate-replay-a",
+      }, (client) => reviewMedicalOrder(client, receivedOrder.id, reviewedOrder.version, [{
+        itemId: extractedItem.rows[0].id, action: "CONFIRM",
+        confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+      }, {
+        itemId: extractedItem.rows[0].id, action: "CONFIRM",
+        confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+      }])), /MEDICAL_ORDER_REVIEW_DUPLICATE_ITEM/);
       await target.query(`
         INSERT INTO service_cases (id,tenant_id,conversation_id,unit_id,kind)
         VALUES ('65000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
@@ -1247,6 +1421,21 @@ try {
       await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
         VALUES ($1,'40000000-0000-4000-8000-000000000001','no-unit@example.test','No Unit')`,
       [actorWithoutUnit]);
+      await target.query(`INSERT INTO units (tenant_id,code,name)
+        VALUES ('40000000-0000-4000-8000-000000000001','POOL-A2','Pool A2')`);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
+      [actorWithoutUnit]);
+      const crossUnitCommercialVisibility = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
+        correlationId: "cross-unit-commercial-deny-a",
+      }, async (client) => ({
+        priceLists: Number((await client.query("SELECT count(*)::integer AS count FROM price_lists")).rows[0].count),
+        quotes: Number((await client.query("SELECT count(*)::integer AS count FROM quotes")).rows[0].count),
+        medicalOrders: Number((await client.query("SELECT count(*)::integer AS count FROM medical_orders")).rows[0].count),
+      }));
+      assert.deepEqual(crossUnitCommercialVisibility, { priceLists: 0, quotes: 0, medicalOrders: 0 });
       await assert.rejects(withTenantTransaction(runtimePool, {
         tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
         correlationId: "medical-unreadable-forbidden-a",
