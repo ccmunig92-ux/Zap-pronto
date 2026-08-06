@@ -1,5 +1,5 @@
 {
-  "name": "zap-pronto",
+  "name": "@zap-pronto/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,11 +9,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:all": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web build",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:test": "pnpm build && node scripts/db-test.mjs",
     "db:test:upgrade": "node scripts/db-upgrade-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test dist"
+    "test": "pnpm build && node --test dist",
+    "test:all": "pnpm build:all && pnpm test && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web test",
+    "typecheck:all": "pnpm typecheck && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web typecheck"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
@@ -22,5 +25,10 @@
   },
   "dependencies": {
     "pg": "^8.22.0"
-  }
+  },
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
+    "./database/tenant-transaction": { "types": "./src/database/tenant-transaction.ts", "default": "./dist/database/tenant-transaction.js" }
+  },
+  "types": "./src/index.ts"
 }
