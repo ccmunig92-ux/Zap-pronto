@@ -34,8 +34,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Prova local da Fase 2C: versão publicada não é alterável; nova versão preserva o snapshot anterior;
   totais adulterados e snapshots falsos falham; envio concorrente gera uma mutação e replay idempotente;
   aceite vencido falha; eventos e outbox são atômicos às transições.
-- Pendências do gate da Fase 2: pedido médico/OCR revisável, upgrade de fixtures legadas
-  e ampliação final da suíte de rollback/idempotência concorrente.
+- Fase 2D concluída localmente: pedido médico com origem inbound validada, páginas OCR e itens
+  imutáveis, confiança/política versionadas, revisão humana obrigatória e ilegibilidade fail-closed.
+- Prova local da Fase 2D: replay e divergência idempotente, baixa confiança e ilegibilidade em handoff,
+  evento clínico compatível com o estado real, isolamento por unidade e rollback integral quando há
+  handoff aberto para outro caso; nenhum orçamento ou agendamento é criado.
+- Pendências do gate da Fase 2: upgrade de fixtures legadas e ampliação final da suíte de
+  idempotência/concorrência do domínio completo.
 - Fases 3–9: não iniciadas.
 
 ## Premissas
@@ -178,10 +183,9 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
-2. Integrar baixa confiança/ilegibilidade ao handoff atômico já existente.
-3. Ampliar provas de rollback, idempotência concorrente e upgrade de dados legados.
-4. Reauditar o domínio completo da Fase 2 com agentes especialistas.
-5. Manter o PR da Fase 2 como draft até todos os critérios do gate ficarem verdes.
+1. Ampliar as provas concorrentes cruzadas de handoff, orçamento e pedido médico.
+2. Implementar e provar o upgrade de dados/fixtures legadas sobre as migrations da Fase 2.
+3. Reauditar o domínio completo da Fase 2 com agentes especialistas.
+4. Manter o PR da Fase 2 como draft até todos os critérios do gate ficarem verdes.
 
 Não iniciar API, interface, Hermes ou Meta antes do gate completo da Fase 2.

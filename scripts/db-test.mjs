@@ -6,6 +6,7 @@ import pg from "pg";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
 import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
 import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
+import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -48,6 +49,7 @@ try {
       "0005_workflow_foundation.sql",
       "0006_outbox_worker.sql",
       "0007_quotes.sql",
+      "0008_medical_orders.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -112,8 +114,9 @@ try {
 
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
-      "contact_identities", "contacts", "conversations", "human_handoffs", "message_attachments",
-      "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
+      "contact_identities", "contacts", "conversations", "human_handoffs",
+      "medical_order_items", "medical_order_pages", "medical_order_review_events", "medical_orders",
+      "message_attachments", "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
       "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
     ];
     const rlsCatalog = await target.query(`
@@ -182,10 +185,11 @@ try {
       "units", "users", "user_units", "channel_connections", "channel_connection_units",
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
-      "quotes",
+      "quotes", "medical_orders", "medical_order_pages", "medical_order_items",
     ]);
     const apiInsertOnly = new Set([
       "messages", "audit_events", "workflow_transitions", "quote_items",
+      "medical_order_review_events",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
@@ -295,9 +299,26 @@ try {
       INSERT INTO messages (id, tenant_id, conversation_id, direction, actor, external_message_id, body) VALUES
         ('46000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', 'INBOUND', 'CUSTOMER', 'message-a', 'A'),
         ('56000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', 'INBOUND', 'CUSTOMER', 'message-b', 'B');
-      INSERT INTO message_attachments (tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
-        ('40000000-0000-4000-8000-000000000001', '46000000-0000-4000-8000-000000000001', 'AUDIO', 'tenant-a/audio', 'audio/ogg', repeat('a',64)),
-        ('50000000-0000-4000-8000-000000000002', '56000000-0000-4000-8000-000000000002', 'AUDIO', 'tenant-b/audio', 'audio/ogg', repeat('b',64));
+      INSERT INTO message_attachments (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
+        ('4c000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '46000000-0000-4000-8000-000000000001', 'DOCUMENT', 'tenant-a/order.pdf', 'application/pdf', repeat('a',64)),
+        ('5c000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '56000000-0000-4000-8000-000000000002', 'DOCUMENT', 'tenant-b/order.pdf', 'application/pdf', repeat('b',64));
+      INSERT INTO medical_orders
+        (id, tenant_id, service_case_id, conversation_id, unit_id, message_id, message_attachment_id,
+         document_sha256, page_count, idempotency_key) VALUES
+        ('4d000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), '46000000-0000-4000-8000-000000000001', '4c000000-0000-4000-8000-000000000001', repeat('a',64), 1, 'medical-seed-a'),
+        ('5d000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), '56000000-0000-4000-8000-000000000002', '5c000000-0000-4000-8000-000000000002', repeat('b',64), 1, 'medical-seed-b');
+      UPDATE medical_orders SET status='PROCESSING',version=version+1 WHERE status='RECEIVED';
+      INSERT INTO medical_order_pages (id, tenant_id, medical_order_id, page_number) VALUES
+        ('4e000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', 1),
+        ('5e000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', 1);
+      INSERT INTO medical_order_items
+        (id, tenant_id, medical_order_id, page_id, sequence, raw_text) VALUES
+        ('4f000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', '4e000000-0000-4000-8000-000000000001', 1, 'Seed A'),
+        ('5f000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', '5e000000-0000-4000-8000-000000000002', 1, 'Seed B');
+      INSERT INTO medical_order_review_events
+        (tenant_id, medical_order_id, medical_order_item_id, action, actor_id, correlation_id, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', '4f000000-0000-4000-8000-000000000001', 'CONFIRMED', '60000000-0000-4000-8000-000000000003', 'medical-seed-a', 'medical-event-a'),
+        ('50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', '5f000000-0000-4000-8000-000000000002', 'CONFIRMED', '70000000-0000-4000-8000-000000000004', 'medical-seed-b', 'medical-event-b');
       INSERT INTO human_handoffs (tenant_id, conversation_id, service_case_id, unit_id, reason, status, queued_at, idempotency_key) VALUES
         ('40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-a'),
         ('50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-b');
@@ -421,7 +442,9 @@ try {
         const tenantColumn = table === "tenants" ? "id" : "tenant_id";
         const insertOverrides = table === "quotes"
           ? { status: "DRAFT", version: 1, subtotal_minor: 0, discount_minor: 0, total_minor: 0 }
-          : {};
+          : table === "medical_orders"
+            ? { status: "RECEIVED", version: 1, overall_confidence: null, extraction_fingerprint: null }
+            : {};
         await assert.rejects(
           withTenantTransaction(
             runtimePool,
@@ -1000,6 +1023,258 @@ try {
         { status: "PUBLISHED", count: 1 },
         { status: "RETIRED", count: 3 },
       ]);
+
+      await target.query(`
+        INSERT INTO conversations
+          (id, tenant_id, channel_connection_id, contact_id, contact_identity_id, unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001', '42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id, tenant_id, conversation_id, unit_id, kind)
+        VALUES ('65000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006', (SELECT id FROM units WHERE code='POOL-A'), 'MEDICAL_ORDER');
+        INSERT INTO messages
+          (id, tenant_id, conversation_id, direction, actor, external_message_id, body)
+        VALUES ('66000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006', 'INBOUND', 'CUSTOMER', 'medical-runtime-a', 'Pedido médico');
+        INSERT INTO message_attachments
+          (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000006', 'DOCUMENT', 'tenant-a/runtime-order.pdf',
+          'application/pdf', repeat('c',64));
+      `);
+      const receivedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-receive-a",
+        },
+        (client) => receiveMedicalOrder(client, {
+          serviceCaseId: "65000000-0000-4000-8000-000000000006",
+          messageId: "66000000-0000-4000-8000-000000000006",
+          attachmentId: "6c000000-0000-4000-8000-000000000006",
+          documentSha256: "c".repeat(64),
+          pageCount: 1,
+          idempotencyKey: "medical-runtime-a",
+        }),
+      );
+      assert.equal(receivedOrder.status, "PROCESSING");
+      const replayedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-receive-replay-a",
+        },
+        (client) => receiveMedicalOrder(client, {
+          serviceCaseId: "65000000-0000-4000-8000-000000000006",
+          messageId: "66000000-0000-4000-8000-000000000006",
+          attachmentId: "6c000000-0000-4000-8000-000000000006",
+          documentSha256: "c".repeat(64),
+          pageCount: 1,
+          idempotencyKey: "medical-runtime-a",
+        }),
+      );
+      assert.equal(replayedOrder.id, receivedOrder.id);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-receive-mismatch-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000006",
+        messageId: "66000000-0000-4000-8000-000000000006",
+        attachmentId: "6c000000-0000-4000-8000-000000000006", documentSha256: "c".repeat(64),
+        pageCount: 2, idempotencyKey: "medical-runtime-a",
+      })), /IDEMPOTENCY_KEY_REUSED/);
+      const extractedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-extraction-a",
+        },
+        (client) => applyMedicalOrderExtraction(client, {
+          medicalOrderId: receivedOrder.id,
+          expectedOrderVersion: receivedOrder.version,
+          expectedCaseVersion: 1,
+          provider: "TEST_OCR",
+          model: "test-model",
+          modelVersion: "1",
+          confidenceThreshold: 0.8,
+          confidencePolicyVersion: "medical-ocr-v1",
+          pages: [{
+            pageNumber: 1,
+            ocrText: "Hemograma completo",
+            confidence: 0.7,
+            items: [{
+              sequence: 1,
+              rawText: "Hemograma completo",
+              normalizedText: "hemograma completo",
+              suggestedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+              confidence: 0.55,
+            }],
+          }],
+          idempotencyKey: "medical-extraction-a",
+        }),
+      );
+      assert.equal(extractedOrder.status, "REVIEW_REQUIRED");
+      const extractionReplay = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-extraction-replay-a",
+      }, (client) => applyMedicalOrderExtraction(client, {
+        medicalOrderId: receivedOrder.id, expectedOrderVersion: receivedOrder.version, expectedCaseVersion: 1,
+        provider: "TEST_OCR", model: "test-model", modelVersion: "1", confidenceThreshold: 0.8,
+        confidencePolicyVersion: "medical-ocr-v1", pages: [{ pageNumber: 1,
+          ocrText: "Hemograma completo", confidence: 0.7, items: [{ sequence: 1,
+            rawText: "Hemograma completo", normalizedText: "hemograma completo",
+            suggestedCatalogItemId: "47000000-0000-4000-8000-000000000001", confidence: 0.55 }] }],
+        idempotencyKey: "medical-extraction-a",
+      }));
+      assert.equal(extractionReplay.version, extractedOrder.version);
+      const extractedItem = await target.query(
+        "SELECT id FROM medical_order_items WHERE medical_order_id=$1",
+        [receivedOrder.id],
+      );
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-false-event-a",
+      }, (client) => client.query(`INSERT INTO medical_order_review_events
+        (tenant_id,medical_order_id,medical_order_item_id,action,actor_id,correlation_id,idempotency_key)
+        VALUES (current_app_tenant_id(),$1,$2,'CONFIRMED',current_app_actor_id(),
+          current_setting('app.correlation_id'),'false-confirmation-event')`,
+      [receivedOrder.id, extractedItem.rows[0].id])), /MEDICAL_ORDER_REVIEW_EVENT_STATE_INVALID/);
+      const reviewedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-review-a",
+        },
+        (client) => reviewMedicalOrder(client, receivedOrder.id, extractedOrder.version, [{
+          itemId: extractedItem.rows[0].id,
+          action: "CONFIRM",
+          confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+        }]),
+      );
+      assert.equal(reviewedOrder.status, "REVIEWED");
+      await target.query(`
+        INSERT INTO service_cases (id,tenant_id,conversation_id,unit_id,kind)
+        VALUES ('65000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006',(SELECT id FROM units WHERE code='POOL-A'),'MEDICAL_ORDER');
+        INSERT INTO messages (id,tenant_id,conversation_id,direction,actor,external_message_id,body)
+        VALUES ('66000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006','INBOUND','CUSTOMER','medical-handoff-conflict-a','Outro pedido');
+        INSERT INTO message_attachments (id,tenant_id,message_id,media_type,storage_key,mime_type,sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000008','DOCUMENT','tenant-a/conflict.pdf','application/pdf',repeat('e',64));
+      `);
+      const conflictingReceived = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-handoff-conflict-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000008",
+        messageId: "66000000-0000-4000-8000-000000000008",
+        attachmentId: "6c000000-0000-4000-8000-000000000008", documentSha256: "e".repeat(64),
+        pageCount: 1, idempotencyKey: "medical-handoff-conflict-receive-a",
+      }));
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-handoff-conflict-extract-a",
+      }, (client) => applyMedicalOrderExtraction(client, {
+        medicalOrderId: conflictingReceived.id, expectedOrderVersion: conflictingReceived.version,
+        expectedCaseVersion: 1, provider: "TEST_OCR", model: "test-model", modelVersion: "1",
+        confidenceThreshold: 0.8, confidencePolicyVersion: "medical-ocr-v1",
+        pages: [{ pageNumber: 1, ocrText: "Glicose", confidence: 0.9,
+          items: [{ sequence: 1, rawText: "Glicose", confidence: 0.9 }] }],
+        idempotencyKey: "medical-handoff-conflict-extract-a",
+      })), /HANDOFF_OPEN_FOR_ANOTHER_CASE/);
+      const medicalHandoffRollbackEvidence = await target.query(`SELECT medical.status, page.status AS page_status,
+        (SELECT count(*)::integer FROM medical_order_items item WHERE item.medical_order_id=medical.id) AS items,
+        service_case.status AS case_status FROM medical_orders medical
+        JOIN medical_order_pages page ON page.medical_order_id=medical.id
+        JOIN service_cases service_case ON service_case.id=medical.service_case_id WHERE medical.id=$1`,
+      [conflictingReceived.id]);
+      assert.deepEqual(medicalHandoffRollbackEvidence.rows[0], { status: "PROCESSING", page_status: "PENDING",
+        items: 0, case_status: "COLLECTING" });
+      const medicalEvidence = await target.query(`
+        SELECT medical.status, medical.overall_confidence, item.status AS item_status,
+          item.reviewed_by_user_id, service_case.status AS case_status,
+          conversation.automation_status,
+          (SELECT count(*)::integer FROM human_handoffs handoff
+            WHERE handoff.conversation_id=medical.conversation_id AND handoff.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+          (SELECT count(*)::integer FROM quotes quote WHERE quote.service_case_id=medical.service_case_id) AS quotes
+        FROM medical_orders medical
+        JOIN medical_order_items item ON item.tenant_id=medical.tenant_id AND item.medical_order_id=medical.id
+        JOIN service_cases service_case ON service_case.tenant_id=medical.tenant_id AND service_case.id=medical.service_case_id
+        JOIN conversations conversation ON conversation.tenant_id=medical.tenant_id AND conversation.id=medical.conversation_id
+        WHERE medical.id=$1
+      `, [receivedOrder.id]);
+      assert.deepEqual(medicalEvidence.rows[0], {
+        status: "REVIEWED", overall_confidence: "0.5500", item_status: "CONFIRMED",
+        reviewed_by_user_id: actorAId, case_status: "WAITING_HUMAN",
+        automation_status: "HUMAN_QUEUED", open_handoffs: 1, quotes: 0,
+      });
+      await assert.rejects(
+        target.query("UPDATE medical_order_items SET raw_text='ALTERED' WHERE id=$1", [extractedItem.rows[0].id]),
+        /MEDICAL_ORDER_ITEM_SOURCE_IMMUTABLE/,
+      );
+
+      await target.query(`
+        INSERT INTO conversations (id,tenant_id,channel_connection_id,contact_id,contact_identity_id,unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001','42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001',(SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id,tenant_id,conversation_id,unit_id,kind)
+        VALUES ('65000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000007',(SELECT id FROM units WHERE code='POOL-A'),'MEDICAL_ORDER');
+        INSERT INTO messages (id,tenant_id,conversation_id,direction,actor,external_message_id,body)
+        VALUES ('66000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000007','INBOUND','CUSTOMER','medical-unreadable-a','Pedido ilegível');
+        INSERT INTO message_attachments (id,tenant_id,message_id,media_type,storage_key,mime_type,sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000007','IMAGE','tenant-a/unreadable.jpg','image/jpeg',repeat('d',64));
+      `);
+      const unreadableReceived = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-unreadable-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000007",
+        messageId: "66000000-0000-4000-8000-000000000007",
+        attachmentId: "6c000000-0000-4000-8000-000000000007", documentSha256: "d".repeat(64),
+        pageCount: 1, idempotencyKey: "medical-unreadable-receive-a",
+      }));
+      const actorWithoutUnit = "60000000-0000-4000-8000-000000000009";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','no-unit@example.test','No Unit')`,
+      [actorWithoutUnit]);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
+        correlationId: "medical-unreadable-forbidden-a",
+      }, (client) => markMedicalOrderUnreadable(client, unreadableReceived.id,
+        unreadableReceived.version, 1, "FORGED_UNREADABLE")), /MEDICAL_ORDER_UNREADABLE_CONFLICT/);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-processing-evidence-forgery-a",
+      }, (client) => client.query("UPDATE medical_orders SET processing_provider='FORGED' WHERE id=$1",
+        [unreadableReceived.id])), /MEDICAL_ORDER_EXTRACTION_IMMUTABLE/);
+      const unreadable = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-unreadable-mark-a",
+      }, (client) => markMedicalOrderUnreadable(client, unreadableReceived.id, unreadableReceived.version, 1,
+        "DOCUMENT_IMAGE_UNREADABLE"));
+      assert.equal(unreadable.status, "UNREADABLE");
+      const unreadableEvidence = await target.query(`SELECT medical.status, medical.failure_code,
+        service_case.status AS case_status, conversation.automation_status,
+        (SELECT count(*)::integer FROM human_handoffs h WHERE h.conversation_id=medical.conversation_id
+          AND h.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+        (SELECT count(*)::integer FROM medical_order_review_events e WHERE e.medical_order_id=medical.id
+          AND e.action='MARKED_UNREADABLE') AS events
+        FROM medical_orders medical JOIN service_cases service_case ON service_case.id=medical.service_case_id
+        JOIN conversations conversation ON conversation.id=medical.conversation_id WHERE medical.id=$1`,
+      [unreadableReceived.id]);
+      assert.deepEqual(unreadableEvidence.rows[0], { status: "UNREADABLE",
+        failure_code: "DOCUMENT_IMAGE_UNREADABLE", case_status: "WAITING_HUMAN",
+        automation_status: "HUMAN_QUEUED", open_handoffs: 1, events: 1 });
 
       await target.query(`
         UPDATE outbox_events SET available_at = now() + interval '1 day'
