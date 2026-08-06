@@ -53,6 +53,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   OIDC/banco, nega conta sem unidade ativa e expõe vínculos/grants sem dados internos do provedor.
 - OpenAPI gera o cliente TypeScript canônico com verificação de drift; o shell React consome somente
   esse cliente e não envia tenant, ator ou unidade como fonte de autorização.
+- Fase 3B lifecycle persistente iniciado: migration `0012` separa conta, convite e identidade OIDC,
+  normaliza email por tenant, armazena somente digest do token e aplica TTL, estados e RLS; a tabela
+  de comandos modela a idempotência, ainda não exposta por rota.
+- Prova local da fundação 3B: migration limpa e upgrade legado passam; email case-insensitive duplicado,
+  digest inválido, segundo convite pendente e timestamps incoerentes são rejeitados pelo PostgreSQL;
+  bloqueio/reativação/revogação são versionados, auditados e serializados por tenant, e revogação OIDC
+  ocorre atomicamente. Escrita direta em usuários, vínculos e tabelas de convite foi retirada da API.
 - A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
 
@@ -199,8 +206,8 @@ Critérios de aceite:
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
 2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Compor e validar o provedor OIDC real; depois implementar convites, ativação, bloqueio e revogação
-   no mesmo módulo de identidade existente.
+3. Implementar sobre a migration `0012` os casos de uso transacionais de convite, aceite OIDC,
+   bloqueio, reativação e revogação, com último administrador, auditoria e outbox atômicos.
 4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 

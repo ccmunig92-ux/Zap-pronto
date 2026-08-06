@@ -54,6 +54,7 @@ try {
       "0009_phase2_hardening.sql",
       "0010_identity_rbac.sql",
       "0011_permission_policy.sql",
+      "0012_user_lifecycle.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -123,7 +124,7 @@ try {
       "medical_order_items", "medical_order_pages", "medical_order_review_events", "medical_orders",
       "message_attachments", "messages", "oidc_providers", "outbox_events", "price_list_versions", "price_lists", "prices",
       "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
-      "user_oidc_identities",
+      "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
     protectedTables.sort();
     const allProtectedTables = [...catalogTables, ...protectedTables].sort();
@@ -190,7 +191,7 @@ try {
     }
 
     const apiWritable = new Set([
-      "units", "users", "user_units", "channel_connections", "channel_connection_units",
+      "units", "channel_connections", "channel_connection_units",
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
       "quotes", "medical_orders", "medical_order_pages", "medical_order_items",
@@ -199,6 +200,7 @@ try {
       "messages", "audit_events", "workflow_transitions", "quote_items",
       "medical_order_review_events",
     ]);
+    const apiHidden = new Set(["user_invitations", "user_invitation_units", "user_lifecycle_commands"]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -216,7 +218,7 @@ try {
         `, [role, `public.${table}`]);
         const expected = role === "zap_pronto_api"
           ? {
-              can_select: true,
+              can_select: !apiHidden.has(table),
               can_insert: apiWritable.has(table) || apiInsertOnly.has(table),
               can_update: apiWritable.has(table),
               can_delete: false,
@@ -386,7 +388,47 @@ try {
          '60000000-0000-4000-8000-000000000003', '61000000-0000-4000-8000-000000000001', 'shared-subject'),
         ('72000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002',
          '70000000-0000-4000-8000-000000000004', '71000000-0000-4000-8000-000000000002', 'shared-subject');
+      INSERT INTO user_invitations
+        (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+      VALUES
+        ('63000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
+         '61000000-0000-4000-8000-000000000001','invite-a@test.local','Invite A',decode(repeat('aa',32),'hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003'),
+        ('73000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000002',
+         '71000000-0000-4000-8000-000000000002','invite-b@test.local','Invite B',decode(repeat('bb',32),'hex'),now()+interval '1 day','70000000-0000-4000-8000-000000000004');
+      INSERT INTO user_invitation_units (tenant_id,invitation_id,unit_id,role)
+      SELECT invitation.tenant_id,invitation.id,unit.id,'ATTENDANT'
+      FROM user_invitations invitation JOIN units unit ON unit.tenant_id=invitation.tenant_id;
+      INSERT INTO user_lifecycle_commands
+        (tenant_id,idempotency_key,operation,request_fingerprint,result)
+      VALUES
+        ('40000000-0000-4000-8000-000000000001','invite-command-a','INVITE',decode(repeat('ca',32),'hex'),'{}'),
+        ('50000000-0000-4000-8000-000000000002','invite-command-b','INVITE',decode(repeat('cb',32),'hex'),'{}');
     `);
+
+    await assert.rejects(
+      target.query(`INSERT INTO users (tenant_id,email,display_name)
+        VALUES ('40000000-0000-4000-8000-000000000001','ACTOR-A@TEST.LOCAL','Duplicate')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23505",
+    );
+    await assert.rejects(
+      target.query(`INSERT INTO user_invitations
+        (tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+        VALUES ('40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+        'other@test.local','Other',decode('aa','hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23514",
+    );
+    await assert.rejects(
+      target.query(`INSERT INTO user_invitations
+        (tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+        VALUES ('40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+        'invite-a@test.local','Replay',decode(repeat('cc',32),'hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23505",
+    );
+    await assert.rejects(
+      target.query(`UPDATE users SET status='BLOCKED',blocked_at=NULL
+        WHERE id='60000000-0000-4000-8000-000000000003'`),
+      (error) => error instanceof Error && "code" in error && error.code === "23514",
+    );
 
     await assert.rejects(
       target.query(`
@@ -507,6 +549,107 @@ try {
         await httpApp.close();
       }
 
+      const lifecycleTargetId = "64000000-0000-4000-8000-000000000001";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','lifecycle-target@test.local','Lifecycle Target')`,
+      [lifecycleTargetId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT' FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`, [lifecycleTargetId]);
+      await target.query(`INSERT INTO user_oidc_identities
+        (tenant_id,user_id,oidc_provider_id,subject)
+        VALUES ('40000000-0000-4000-8000-000000000001',$1,
+        '61000000-0000-4000-8000-000000000001','lifecycle-target')`, [lifecycleTargetId]);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-non-admin",
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,1,'BLOCKED','Unauthorized')",
+      [lifecycleTargetId])), (error) => error instanceof Error && "code" in error && error.code === "42501");
+      await target.query(`UPDATE user_units SET role='TENANT_ADMIN'
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+      const changeStatus = (status, version, reason) => withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: `lifecycle-${status.toLowerCase()}`,
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,$2,$3,$4)",
+      [lifecycleTargetId, version, status, reason]));
+      assert.deepEqual((await changeStatus("BLOCKED", 1, "Security review")).rows,
+        [{ user_id: lifecycleTargetId, status: "BLOCKED", version: 2 }]);
+      await assert.rejects(changeStatus("ACTIVE", 1, "Stale command"),
+        (error) => error instanceof Error && "code" in error && error.code === "40001");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-cross-tenant",
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,1,'BLOCKED','Cross tenant')",
+      [actorBId])), (error) => error instanceof Error && "code" in error && error.code === "P0002");
+      assert.deepEqual((await changeStatus("ACTIVE", 2, "Review completed")).rows,
+        [{ user_id: lifecycleTargetId, status: "ACTIVE", version: 3 }]);
+      assert.deepEqual((await changeStatus("REVOKED", 3, "Access permanently revoked")).rows,
+        [{ user_id: lifecycleTargetId, status: "REVOKED", version: 4 }]);
+      await assert.rejects(changeStatus("ACTIVE", 4, "Invalid reversal"),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-self-block",
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,1,'BLOCKED','Self block')", [actorAId])),
+      (error) => error instanceof Error && "code" in error && error.code === "42501");
+      const lifecycleEvidence = await target.query(`SELECT
+        (SELECT status FROM user_oidc_identities WHERE user_id=$1) AS identity_status,
+        (SELECT count(*)::integer FROM audit_events WHERE entity_id=$1::text AND action='USER_STATUS_CHANGED') AS audit_count,
+        (SELECT count(*)::integer FROM outbox_events WHERE aggregate_id=$1 AND event_type='user.status_changed') AS outbox_count`,
+      [lifecycleTargetId]);
+      assert.deepEqual(lifecycleEvidence.rows[0], {
+        identity_status: "REVOKED", audit_count: 3, outbox_count: 3,
+      });
+      const lifecyclePrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS app_execute,
+        has_table_privilege('zap_pronto_api','users','INSERT') AS api_insert_user,
+        has_table_privilege('zap_pronto_api','users','UPDATE') AS api_update_user,
+        has_table_privilege('zap_pronto_api','user_units','UPDATE') AS api_update_membership`);
+      assert.deepEqual(lifecyclePrivileges.rows[0], {
+        api_execute: true, worker_execute: false, app_execute: false,
+        api_insert_user: false, api_update_user: false, api_update_membership: false,
+      });
+      const competingAdminId = "65000000-0000-4000-8000-000000000001";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','competing-admin@test.local','Competing Admin')`,
+      [competingAdminId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'TENANT_ADMIN' FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`, [competingAdminId]);
+      const concurrentRemoval = (pool, actorId, targetId, correlationId) => withTenantTransaction(pool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId, correlationId,
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,1,'BLOCKED','Concurrency test')",
+      [targetId]));
+      const concurrentAdminResults = await Promise.allSettled([
+        concurrentRemoval(runtimePool, actorAId, competingAdminId, "admin-race-a"),
+        concurrentRemoval(competingRuntimePool, competingAdminId, actorAId, "admin-race-b"),
+      ]);
+      assert.equal(concurrentAdminResults.filter((result) => result.status === "fulfilled").length, 1);
+      const activeAdminCount = await target.query(`SELECT count(DISTINCT account.id)::integer AS count
+        FROM users account JOIN user_units membership
+          ON membership.tenant_id=account.tenant_id AND membership.user_id=account.id
+        JOIN units unit ON unit.tenant_id=membership.tenant_id AND unit.id=membership.unit_id AND unit.active=true
+        WHERE account.tenant_id='40000000-0000-4000-8000-000000000001' AND account.status='ACTIVE'
+          AND membership.role='TENANT_ADMIN'`);
+      assert.equal(activeAdminCount.rows[0].count, 1);
+      await target.query(`UPDATE users SET status='ACTIVE',blocked_at=NULL,revoked_at=NULL
+        WHERE id IN ($1,$2)`, [actorAId, competingAdminId]);
+      await target.query(`DELETE FROM audit_events WHERE action='USER_STATUS_CHANGED' AND entity_id IN ($1::text,$2::text)`,
+      [actorAId, competingAdminId]);
+      await target.query(`DELETE FROM outbox_events WHERE event_type='user.status_changed' AND aggregate_id IN ($1,$2)`,
+      [actorAId, competingAdminId]);
+      await target.query("DELETE FROM user_units WHERE user_id=$1", [competingAdminId]);
+      await target.query("DELETE FROM users WHERE id=$1", [competingAdminId]);
+      await target.query(`UPDATE user_units SET role='ATTENDANT'
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+      await target.query("DELETE FROM audit_events WHERE entity_id=$1::text", [lifecycleTargetId]);
+      await target.query("DELETE FROM outbox_events WHERE aggregate_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM user_oidc_identities WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM user_units WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM users WHERE id=$1", [lifecycleTargetId]);
+
       await assert.rejects(
         target.query(`INSERT INTO oidc_providers
           (tenant_id,code,issuer,audience,organization_claim,organization_value,config_reference)
@@ -539,6 +682,7 @@ try {
 
       // Elevação exclusiva do banco descartável para exercitar todas as policies.
       await target.query("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO zap_pronto_api");
+      await target.query("GRANT SELECT ON user_invitations,user_invitation_units,user_lifecycle_commands TO zap_pronto_api");
       await target.query("REVOKE UPDATE, DELETE ON audit_events FROM zap_pronto_api");
 
       for (const table of protectedTables) {
@@ -578,7 +722,7 @@ try {
         assert.equal(result.rowCount, 0, `${table}:CROSS_TENANT_UPDATE_VISIBLE`);
       }
 
-      for (const table of protectedTables) {
+      for (const table of protectedTables.filter((name) => name !== "users")) {
         const tenantColumn = table === "tenants" ? "id" : "tenant_id";
         const insertOverrides = table === "quotes"
           ? { status: "DRAFT", version: 1, subtotal_minor: 0, discount_minor: 0, total_minor: 0 }
@@ -609,6 +753,17 @@ try {
           `${table}:CROSS_TENANT_INSERT_NOT_BLOCKED_BY_RLS`,
         );
       }
+      await assert.rejects(
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "matrix-insert-users",
+        }, async (client) => client.query(`INSERT INTO users (id,tenant_id,email,display_name)
+          VALUES ('7f000000-0000-4000-8000-000000000099','50000000-0000-4000-8000-000000000002',
+          'cross-tenant@test.local','Cross Tenant')`)),
+        (error) => error instanceof Error && "code" in error && error.code === "42501"
+          && "routine" in error && error.routine === "ExecWithCheckOptions",
+        "users:CROSS_TENANT_INSERT_NOT_BLOCKED_BY_RLS",
+      );
 
       for (const table of protectedTables.filter((name) => name !== "audit_events")) {
         const tenantPredicate = table === "tenants"
