@@ -51,6 +51,7 @@ try {
       "0007_quotes.sql",
       "0008_medical_orders.sql",
       "0009_phase2_hardening.sql",
+      "0010_identity_rbac.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -113,13 +114,17 @@ try {
     `, [runtimeRole, workerRuntimeRole]);
     assert.deepEqual(crossMembership.rows[0], { api_is_worker: false, worker_is_api: false });
 
+    const catalogTables = ["app_permissions", "app_role_permissions", "app_roles"];
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
       "contact_identities", "contacts", "conversations", "human_handoffs",
       "medical_order_items", "medical_order_pages", "medical_order_review_events", "medical_orders",
-      "message_attachments", "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
+      "message_attachments", "messages", "oidc_providers", "outbox_events", "price_list_versions", "price_lists", "prices",
       "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
+      "user_oidc_identities",
     ];
+    protectedTables.sort();
+    const allProtectedTables = [...catalogTables, ...protectedTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
              count(p.policyname)::integer AS policy_count
@@ -130,7 +135,7 @@ try {
       GROUP BY c.relname, c.relrowsecurity, c.relforcerowsecurity
       ORDER BY c.relname
     `);
-    assert.deepEqual(rlsCatalog.rows.map((row) => row.relname), protectedTables);
+    assert.deepEqual(rlsCatalog.rows.map((row) => row.relname), allProtectedTables);
     for (const table of rlsCatalog.rows) {
       assert.equal(table.relrowsecurity, true, `${table.relname}:RLS_DISABLED`);
       assert.equal(table.relforcerowsecurity, true, `${table.relname}:FORCE_RLS_DISABLED`);
@@ -198,7 +203,7 @@ try {
       "human_handoffs", "outbox_events",
     ]);
 
-    for (const table of protectedTables) {
+    for (const table of allProtectedTables) {
       for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
         const privileges = await target.query(`
           SELECT
@@ -364,6 +369,23 @@ try {
         ('50000000-0000-4000-8000-000000000002', 'USER', 'actor-b', 'TEST', 'tenant', 'b');
     `);
 
+    await target.query(`
+      INSERT INTO oidc_providers
+        (id, tenant_id, code, issuer, audience, organization_claim, organization_value, config_reference)
+      VALUES
+        ('61000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001',
+         'primary', 'https://identity.test', 'zap-pronto', 'org_id', 'tenant-a', 'secret://oidc/tenant-a'),
+        ('71000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002',
+         'primary', 'https://identity.test', 'zap-pronto', 'org_id', 'tenant-b', 'secret://oidc/tenant-b');
+      INSERT INTO user_oidc_identities
+        (id, tenant_id, user_id, oidc_provider_id, subject)
+      VALUES
+        ('62000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001',
+         '60000000-0000-4000-8000-000000000003', '61000000-0000-4000-8000-000000000001', 'shared-subject'),
+        ('72000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002',
+         '70000000-0000-4000-8000-000000000004', '71000000-0000-4000-8000-000000000002', 'shared-subject');
+    `);
+
     await assert.rejects(
       target.query(`
         UPDATE conversations SET status = 'CLOSED', closed_at = now(), automation_status = 'HUMAN_ACTIVE'
@@ -386,6 +408,77 @@ try {
     try {
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
+      const oidcClient = await runtimePool.connect();
+      try {
+        await oidcClient.query("BEGIN");
+        await oidcClient.query("SET LOCAL ROLE zap_pronto_api");
+        const principal = await oidcClient.query(
+          "SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)",
+          ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "tenant-a"],
+        );
+        assert.deepEqual(principal.rows, [{
+          tenant_id: "40000000-0000-4000-8000-000000000001",
+          user_id: actorAId,
+          oidc_provider_id: "61000000-0000-4000-8000-000000000001",
+          identity_id: "62000000-0000-4000-8000-000000000001",
+        }]);
+        await oidcClient.query("COMMIT");
+        for (const invalidIdentity of [
+          ["https://identity.test", "wrong-audience", "shared-subject", "org_id", "tenant-a"],
+          ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "missing-tenant"],
+          ["https://identity.test", "zap-pronto", "shared-subject", null, null],
+        ]) {
+          await oidcClient.query("BEGIN");
+          await oidcClient.query("SET LOCAL ROLE zap_pronto_api");
+          await assert.rejects(
+            oidcClient.query("SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)", invalidIdentity),
+            (error) => error instanceof Error && "code" in error && error.code === "28000"
+              && /AUTH_UNAUTHORIZED/.test(error.message),
+          );
+          await oidcClient.query("ROLLBACK");
+        }
+      } finally {
+        await oidcClient.query("ROLLBACK").catch(() => undefined);
+        oidcClient.release();
+      }
+
+      await target.query("UPDATE oidc_providers SET status='DISABLED' WHERE id='61000000-0000-4000-8000-000000000001'");
+      const disabledProviderClient = await runtimePool.connect();
+      try {
+        await disabledProviderClient.query("BEGIN");
+        await disabledProviderClient.query("SET LOCAL ROLE zap_pronto_api");
+        await assert.rejects(
+          disabledProviderClient.query(
+            "SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)",
+            ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "tenant-a"],
+          ),
+          (error) => error instanceof Error && "code" in error && error.code === "28000"
+            && /AUTH_UNAUTHORIZED/.test(error.message),
+        );
+      } finally {
+        await disabledProviderClient.query("ROLLBACK").catch(() => undefined);
+        disabledProviderClient.release();
+      }
+      await target.query("UPDATE oidc_providers SET status='ACTIVE' WHERE id='61000000-0000-4000-8000-000000000001'");
+
+      await assert.rejects(
+        target.query(`INSERT INTO oidc_providers
+          (tenant_id,code,issuer,audience,organization_claim,organization_value,config_reference)
+          VALUES ('50000000-0000-4000-8000-000000000002','duplicate-resolution',
+          'https://identity.test','zap-pronto','org_id','tenant-a','secret://duplicate')`),
+        (error) => error instanceof Error && "code" in error && error.code === "23505",
+      );
+
+      const oidcPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api', 'resolve_oidc_principal(text,text,text,text,text)', 'EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker', 'resolve_oidc_principal(text,text,text,text,text)', 'EXECUTE') AS worker_execute,
+        has_table_privilege('zap_pronto_api', 'oidc_providers', 'INSERT') AS api_insert_provider,
+        has_table_privilege('zap_pronto_worker', 'user_oidc_identities', 'SELECT') AS worker_read_identity
+      `);
+      assert.deepEqual(oidcPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, api_insert_provider: false, worker_read_identity: false,
+      });
+
       const tenantA = await withTenantTransaction(
         runtimePool,
         {
