@@ -52,6 +52,7 @@ try {
       "0008_medical_orders.sql",
       "0009_phase2_hardening.sql",
       "0010_identity_rbac.sql",
+      "0011_permission_policy.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -1520,6 +1521,57 @@ try {
         SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT'
         FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
       [actorWithoutUnit]);
+      const tenantAdminId = "60000000-0000-4000-8000-00000000000b";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','tenant-admin-a@test.local','Tenant Admin A')`,
+      [tenantAdminId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'TENANT_ADMIN'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+      [tenantAdminId]);
+      const crossTenantUnitId = (await target.query(
+        "SELECT id FROM units WHERE tenant_id='50000000-0000-4000-8000-000000000002' AND code='POOL-B'",
+      )).rows[0].id;
+      const permissionMatrix = async (actorId) => withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId,
+        correlationId: `permission-matrix-${actorId}`,
+      }, async (client) => (await client.query(`SELECT
+        current_actor_has_permission('handoff.claim',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A')) AS pool_a_claim,
+        current_actor_has_permission('handoff.claim',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A2')) AS pool_a2_claim,
+        current_actor_has_permission('tenant.users.manage', NULL) AS tenant_users_manage,
+        current_actor_has_permission('permission.unknown',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A')) AS unknown_permission,
+        current_actor_has_permission('handoff.claim', $1) AS cross_tenant_unit`,
+      [crossTenantUnitId])).rows[0]);
+      assert.deepEqual(await permissionMatrix(actorAId), {
+        pool_a_claim: true, pool_a2_claim: false, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      assert.deepEqual(await permissionMatrix(actorWithoutUnit), {
+        pool_a_claim: false, pool_a2_claim: true, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      assert.deepEqual(await permissionMatrix(tenantAdminId), {
+        pool_a_claim: true, pool_a2_claim: true, tenant_users_manage: true,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      await target.query(`UPDATE units SET active=false
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      assert.deepEqual(await permissionMatrix(tenantAdminId), {
+        pool_a_claim: false, pool_a2_claim: false, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      await target.query(`UPDATE units SET active=true
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      const permissionFunctionPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS legacy_execute`);
+      assert.deepEqual(permissionFunctionPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, legacy_execute: false,
+      });
       const crossUnitCommercialVisibility = await withTenantTransaction(runtimePool, {
         tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
         correlationId: "cross-unit-commercial-deny-a",

@@ -6,6 +6,15 @@ export interface VerifiedRequestContext {
   readonly correlationId: string;
 }
 
+export interface VerifiedOidcPrincipal {
+  readonly issuer: string;
+  readonly audience: string;
+  readonly subject: string;
+  readonly organizationClaim?: string;
+  readonly organizationValue?: string;
+  readonly correlationId: string;
+}
+
 export interface TenantQueryClient {
   query(text: string, values?: unknown[]): Promise<unknown>;
 }
@@ -26,29 +35,51 @@ function assertContext(context: VerifiedRequestContext): void {
   }
 }
 
-/**
- * Executa um caso de uso no escopo RLS. O contexto deve vir do middleware de
- * autenticação, nunca de campos enviados pelo cliente.
- */
-export async function withTenantTransaction<T>(
-  pool: TenantTransactionPool,
+function assertOidcPrincipal(principal: VerifiedOidcPrincipal): void {
+  if (!principal.issuer || !principal.audience || !principal.subject) {
+    throw new Error("INVALID_OIDC_PRINCIPAL");
+  }
+  if ((principal.organizationClaim === undefined) !== (principal.organizationValue === undefined)) {
+    throw new Error("INVALID_OIDC_ORGANIZATION");
+  }
+  if (principal.correlationId.length < 8 || principal.correlationId.length > 128) {
+    throw new Error("INVALID_CORRELATION_ID");
+  }
+}
+
+interface QueryRows<T> {
+  readonly rows: T[];
+}
+
+function hasRows<T>(result: unknown): result is QueryRows<T> {
+  return typeof result === "object" && result !== null && Array.isArray((result as QueryRows<T>).rows);
+}
+
+async function installContext(
+  client: TenantQueryClient,
   context: VerifiedRequestContext,
+): Promise<void> {
+  await client.query(
+    `SELECT
+       set_config('app.tenant_id', $1, true),
+       set_config('app.actor_id', $2, true),
+       set_config('app.correlation_id', $3, true)`,
+    [context.tenantId, context.actorId, context.correlationId],
+  );
+  await client.query("SELECT assert_app_context_authorized()");
+}
+
+async function executeTransaction<T>(
+  pool: TenantTransactionPool,
+  prepare: (client: TenantQueryClient) => Promise<void>,
   operation: (client: TenantQueryClient) => Promise<T>,
 ): Promise<T> {
-  assertContext(context);
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL ROLE zap_pronto_api");
-    await client.query(
-      `SELECT
-         set_config('app.tenant_id', $1, true),
-         set_config('app.actor_id', $2, true),
-         set_config('app.correlation_id', $3, true)`,
-      [context.tenantId, context.actorId, context.correlationId],
-    );
-    await client.query("SELECT assert_app_context_authorized()");
+    await prepare(client);
     const result = await operation(client);
     await client.query("COMMIT");
     client.release();
@@ -64,4 +95,64 @@ export async function withTenantTransaction<T>(
     else client.release();
     throw error;
   }
+}
+
+/**
+ * Executa um caso de uso no escopo RLS. O contexto deve vir do middleware de
+ * autenticação, nunca de campos enviados pelo cliente.
+ */
+export async function withTenantTransaction<T>(
+  pool: TenantTransactionPool,
+  context: VerifiedRequestContext,
+  operation: (client: TenantQueryClient) => Promise<T>,
+): Promise<T> {
+  assertContext(context);
+  return executeTransaction(pool, (client) => installContext(client, context), operation);
+}
+
+/**
+ * Resolve a identidade OIDC e executa o caso de uso no mesmo escopo
+ * transacional/RLS. Tenant e ator são derivados exclusivamente do banco.
+ */
+export async function withAuthenticatedTenantTransaction<T>(
+  pool: TenantTransactionPool,
+  principal: VerifiedOidcPrincipal,
+  operation: (client: TenantQueryClient) => Promise<T>,
+): Promise<T> {
+  assertOidcPrincipal(principal);
+
+  return executeTransaction(
+    pool,
+    async (client) => {
+      const resolved = await client.query(
+        `SELECT tenant_id, user_id
+           FROM resolve_oidc_principal($1, $2, $3, $4, $5)`,
+        [
+          principal.issuer,
+          principal.audience,
+          principal.subject,
+          principal.organizationClaim ?? null,
+          principal.organizationValue ?? null,
+        ],
+      );
+
+      if (!hasRows<{ tenant_id: unknown; user_id: unknown }>(resolved) || resolved.rows.length !== 1) {
+        throw new Error("AUTH_UNAUTHORIZED");
+      }
+
+      const row = resolved.rows[0];
+      if (!row || typeof row.tenant_id !== "string" || typeof row.user_id !== "string") {
+        throw new Error("AUTH_UNAUTHORIZED");
+      }
+
+      const context = {
+        tenantId: row.tenant_id,
+        actorId: row.user_id,
+        correlationId: principal.correlationId,
+      };
+      assertContext(context);
+      await installContext(client, context);
+    },
+    operation,
+  );
 }
