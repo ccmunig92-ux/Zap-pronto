@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import pg from "pg";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
 import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
+import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -46,6 +47,7 @@ try {
       "0004_component_roles.sql",
       "0005_workflow_foundation.sql",
       "0006_outbox_worker.sql",
+      "0007_quotes.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -111,8 +113,8 @@ try {
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
       "contact_identities", "contacts", "conversations", "human_handoffs", "message_attachments",
-      "messages", "outbox_events", "price_list_versions", "price_lists", "prices", "service_cases",
-      "tenants", "units", "user_units", "users", "workflow_transitions",
+      "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
+      "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
     ];
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -180,8 +182,11 @@ try {
       "units", "users", "user_units", "channel_connections", "channel_connection_units",
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
+      "quotes",
     ]);
-    const apiInsertOnly = new Set(["messages", "audit_events", "workflow_transitions"]);
+    const apiInsertOnly = new Set([
+      "messages", "audit_events", "workflow_transitions", "quote_items",
+    ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -236,6 +241,15 @@ try {
       FROM pg_roles role WHERE role.rolname = 'zap_pronto_outbox_executor'
     `);
     assert.deepEqual(executorRole.rows[0], {
+      rolcanlogin: false, rolsuper: false, rolbypassrls: false, parent_count: 0, member_count: 0,
+    });
+    const quoteExecutorRole = await admin.query(`
+      SELECT role.rolcanlogin, role.rolsuper, role.rolbypassrls,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = role.oid) AS parent_count,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = role.oid) AS member_count
+      FROM pg_roles role WHERE role.rolname = 'zap_pronto_quote_event_executor'
+    `);
+    assert.deepEqual(quoteExecutorRole.rows[0], {
       rolcanlogin: false, rolsuper: false, rolbypassrls: false, parent_count: 0, member_count: 0,
     });
 
@@ -294,11 +308,28 @@ try {
         ('48000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'List A'),
         ('58000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'List B');
       INSERT INTO price_list_versions (id, tenant_id, price_list_id, version, status, effective_at) VALUES
-        ('49000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', 1, 'ACTIVE', now()),
-        ('59000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 1, 'ACTIVE', now());
+        ('49000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', 1, 'DRAFT', now()),
+        ('59000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 1, 'DRAFT', now());
       INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor) VALUES
         ('40000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', '47000000-0000-4000-8000-000000000001', 1000),
         ('50000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', '57000000-0000-4000-8000-000000000002', 2000);
+      UPDATE price_list_versions SET status='PUBLISHED', published_at=now() WHERE status='DRAFT';
+      INSERT INTO quotes
+        (id, tenant_id, service_case_id, conversation_id, unit_id, price_list_id, price_list_version_id,
+         status, valid_until, prepared_by_user_id, idempotency_key, request_fingerprint) VALUES
+        ('4a000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), '48000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', 'DRAFT', now() + interval '1 day', '60000000-0000-4000-8000-000000000003', 'quote-seed-a', repeat('a',64)),
+        ('5a000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), '58000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', 'DRAFT', now() + interval '1 day', '70000000-0000-4000-8000-000000000004', 'quote-seed-b', repeat('b',64));
+      INSERT INTO quote_items
+        (tenant_id, quote_id, line_number, catalog_item_id, price_list_version_id,
+         catalog_code_snapshot, description_snapshot, quantity, unit_price_minor, line_total_minor, price_effective_at) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4a000000-0000-4000-8000-000000000001', 1, '47000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', 'ITEM-A', 'Item A', 1, 1000, 1000, now()),
+        ('50000000-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-000000000002', 1, '57000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', 'ITEM-B', 'Item B', 1, 2000, 2000, now());
+      UPDATE quotes SET status='READY', subtotal_minor=1000, total_minor=1000, version=version+1 WHERE id='4a000000-0000-4000-8000-000000000001';
+      UPDATE quotes SET status='READY', subtotal_minor=2000, total_minor=2000, version=version+1 WHERE id='5a000000-0000-4000-8000-000000000002';
+      INSERT INTO quote_events
+        (tenant_id, quote_id, from_status, to_status, reason, actor_id, correlation_id, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4a000000-0000-4000-8000-000000000001', 'DRAFT', 'READY', 'TEST_SEED', '60000000-0000-4000-8000-000000000003', 'quote-seed-a', 'quote-event-a'),
+        ('50000000-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-000000000002', 'DRAFT', 'READY', 'TEST_SEED', '70000000-0000-4000-8000-000000000004', 'quote-seed-b', 'quote-event-b');
       INSERT INTO outbox_events (tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key) VALUES
         ('40000000-0000-4000-8000-000000000001', 'conversation', '44000000-0000-4000-8000-000000000001', 'test.a', '{}', 'outbox-a'),
         ('50000000-0000-4000-8000-000000000002', 'conversation', '54000000-0000-4000-8000-000000000002', 'test.b', '{}', 'outbox-b');
@@ -388,6 +419,9 @@ try {
 
       for (const table of protectedTables) {
         const tenantColumn = table === "tenants" ? "id" : "tenant_id";
+        const insertOverrides = table === "quotes"
+          ? { status: "DRAFT", version: 1, subtotal_minor: 0, discount_minor: 0, total_minor: 0 }
+          : {};
         await assert.rejects(
           withTenantTransaction(
             runtimePool,
@@ -400,11 +434,11 @@ try {
               `INSERT INTO "${table}"
                SELECT (jsonb_populate_record(
                  NULL::"${table}",
-                 to_jsonb(source) || jsonb_build_object('${tenantColumn}', $1::text)
+                 to_jsonb(source) || $2::jsonb || jsonb_build_object('${tenantColumn}', $1::text)
                )).*
                FROM "${table}" source
                LIMIT 1`,
-              ["50000000-0000-4000-8000-000000000002"],
+              ["50000000-0000-4000-8000-000000000002", JSON.stringify(insertOverrides)],
             ),
           ),
           (error) => error instanceof Error && "code" in error && error.code === "42501"
@@ -643,6 +677,329 @@ try {
         transitions: 4,
         outbox_events: 1,
       });
+
+      const readyQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "50000000-0000-4000-8000-000000000002",
+          actorId: actorBId,
+          correlationId: "quote-create-b",
+        },
+        (client) => createReadyQuote(client, {
+          serviceCaseId: "55000000-0000-4000-8000-000000000002",
+          priceListVersionId: "59000000-0000-4000-8000-000000000002",
+          items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 3 }],
+          discountMinor: 500n,
+          validUntil: new Date(Date.now() + 86_400_000),
+          idempotencyKey: "quote-runtime-b",
+        }),
+      );
+      assert.deepEqual(
+        { status: readyQuote.status, version: readyQuote.version, subtotal: readyQuote.subtotalMinor, total: readyQuote.totalMinor },
+        { status: "READY", version: 2, subtotal: 6000n, total: 5500n },
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "quote-forged-ready-b",
+          },
+          (client) => client.query(`
+            INSERT INTO quotes
+              (tenant_id, service_case_id, conversation_id, unit_id, price_list_id,
+               price_list_version_id, status, valid_until, prepared_by_user_id,
+               idempotency_key, request_fingerprint)
+            SELECT current_app_tenant_id(), '55000000-0000-4000-8000-000000000002',
+              '54000000-0000-4000-8000-000000000002', unit.id,
+              '58000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002',
+              'READY', now() + interval '1 day', current_app_actor_id(), 'forged-ready', repeat('f',64)
+            FROM units unit WHERE unit.code='POOL-B'
+          `),
+        ),
+        /INVALID_QUOTE_INSERT/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "quote-version-bypass-b",
+          },
+          async (client) => {
+            await client.query(`
+              INSERT INTO quotes
+                (id, tenant_id, service_case_id, conversation_id, unit_id, price_list_id,
+                 price_list_version_id, revision, status, valid_until, prepared_by_user_id,
+                 idempotency_key, request_fingerprint)
+              SELECT '5d000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+                '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002',
+                unit.id, '58000000-0000-4000-8000-000000000002',
+                '59000000-0000-4000-8000-000000000002', 99, 'DRAFT', now() + interval '1 day',
+                current_app_actor_id(), 'quote-version-bypass', repeat('d',64)
+              FROM units unit WHERE unit.code='POOL-B'
+            `);
+            await client.query(`
+              UPDATE quotes SET status='READY', valid_until=valid_until + interval '1 day'
+              WHERE id='5d000000-0000-4000-8000-000000000002'
+            `);
+          },
+        ),
+        /QUOTE_IDENTITY_IMMUTABLE|QUOTE_VERSION_INCREMENT_REQUIRED/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "price-empty-publish-b",
+          },
+          async (client) => {
+            await client.query(`
+              INSERT INTO price_list_versions
+                (id, tenant_id, price_list_id, version, status, effective_at)
+              VALUES ('5c000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+                '58000000-0000-4000-8000-000000000002', 99, 'DRAFT', now())
+            `);
+            await client.query(`
+              UPDATE price_list_versions SET status='PUBLISHED', published_at=now()
+              WHERE id='5c000000-0000-4000-8000-000000000002'
+            `);
+          },
+        ),
+        /PRICE_VERSION_EMPTY/,
+      );
+
+      const sendContext = {
+        tenantId: "50000000-0000-4000-8000-000000000002",
+        actorId: actorBId,
+      };
+      const concurrentSends = await Promise.allSettled([
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-send-b-1" },
+          (client) => sendQuote(client, { quoteId: readyQuote.id, expectedVersion: readyQuote.version }),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...sendContext, correlationId: "quote-send-b-2" },
+          (client) => sendQuote(client, { quoteId: readyQuote.id, expectedVersion: readyQuote.version }),
+        ),
+      ]);
+      assert.equal(concurrentSends.filter((result) => result.status === "fulfilled").length, 2);
+      assert.deepEqual(concurrentSends.map((result) => result.value.version), [3, 3]);
+      const sentQuote = concurrentSends.find((result) => result.status === "fulfilled").value;
+      assert.equal(sentQuote.version, 3);
+      const acceptedQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-accept-b" },
+        (client) => acceptQuote(client, { quoteId: readyQuote.id, expectedVersion: sentQuote.version }),
+      );
+      assert.equal(acceptedQuote.status, "ACCEPTED");
+      assert.equal(acceptedQuote.version, 4);
+
+      const quoteEvidence = await target.query(`
+        SELECT quote.status, quote.subtotal_minor, quote.discount_minor, quote.total_minor,
+          item.catalog_code_snapshot, item.description_snapshot, item.quantity, item.unit_price_minor,
+          conversation.automation_status,
+          (SELECT count(*)::integer FROM quote_events event WHERE event.quote_id = quote.id) AS events,
+          (SELECT count(*)::integer FROM outbox_events outbox
+            WHERE outbox.aggregate_type = 'quote' AND outbox.aggregate_id = quote.id) AS outbox_events
+        FROM quotes quote
+        JOIN quote_items item ON item.tenant_id = quote.tenant_id AND item.quote_id = quote.id
+        JOIN conversations conversation ON conversation.tenant_id = quote.tenant_id AND conversation.id = quote.conversation_id
+        WHERE quote.id = $1
+      `, [readyQuote.id]);
+      assert.deepEqual(quoteEvidence.rows[0], {
+        status: "ACCEPTED", subtotal_minor: "6000", discount_minor: "500", total_minor: "5500",
+        catalog_code_snapshot: "ITEM-B", description_snapshot: "Item B", quantity: 3,
+        unit_price_minor: "2000", automation_status: "HUMAN_QUEUED", events: 4, outbox_events: 2,
+      });
+      await assert.rejects(
+        target.query("UPDATE prices SET amount_minor = 9999 WHERE tenant_id = '50000000-0000-4000-8000-000000000002'"),
+        (error) => error instanceof Error && "code" in error && error.code === "23514"
+          && /PUBLISHED_PRICES_IMMUTABLE/.test(error.message),
+      );
+      await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "price-version-publish-b" },
+        async (client) => {
+          await client.query(`
+            INSERT INTO price_list_versions
+              (id, tenant_id, price_list_id, version, status, effective_at)
+            VALUES ('5b000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+              '58000000-0000-4000-8000-000000000002', 2, 'DRAFT', now() + interval '1 day')
+          `);
+          await client.query(`
+            INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor)
+            VALUES (current_app_tenant_id(), '5b000000-0000-4000-8000-000000000002',
+              '57000000-0000-4000-8000-000000000002', 2500)
+          `);
+          await publishPriceListVersion(client, "5b000000-0000-4000-8000-000000000002");
+        },
+      );
+      const priceSnapshotEvidence = await target.query(`
+        SELECT
+          (SELECT status FROM price_list_versions WHERE id='59000000-0000-4000-8000-000000000002') AS old_status,
+          (SELECT status FROM price_list_versions WHERE id='5b000000-0000-4000-8000-000000000002') AS new_status,
+          (SELECT unit_price_minor FROM quote_items WHERE quote_id=$1) AS snapshot_price,
+          (SELECT amount_minor FROM prices WHERE price_list_version_id='5b000000-0000-4000-8000-000000000002') AS new_price
+      `, [readyQuote.id]);
+      assert.deepEqual(priceSnapshotEvidence.rows[0], {
+        old_status: "RETIRED", new_status: "PUBLISHED", snapshot_price: "2000", new_price: "2500",
+      });
+
+      const reviewQuoteInput = {
+        serviceCaseId: "55000000-0000-4000-8000-000000000002",
+        priceListVersionId: "5b000000-0000-4000-8000-000000000002",
+        items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 1 }],
+        discountMinor: 0n,
+        validUntil: new Date(Date.now() + 172_800_000),
+        idempotencyKey: "quote-review-b",
+        requiresHumanReview: true,
+      };
+      const reviewQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-create-b" },
+        (client) => createReadyQuote(client, reviewQuoteInput),
+      );
+      assert.equal(reviewQuote.status, "REVIEW_REQUIRED");
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-review-replay-mismatch" },
+          (client) => createReadyQuote(client, {
+            ...reviewQuoteInput,
+            items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 2 }],
+          }),
+        ),
+        /IDEMPOTENCY_KEY_REUSED/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-snapshot-forgery" },
+          (client) => client.query(`
+            INSERT INTO quote_items
+              (tenant_id, quote_id, line_number, catalog_item_id, price_list_version_id,
+               catalog_code_snapshot, description_snapshot, quantity, unit_price_minor,
+               line_total_minor, price_effective_at)
+            SELECT current_app_tenant_id(), $1, 2, price.catalog_item_id, price.price_list_version_id,
+              'FORGED', 'FORGED', 1, price.amount_minor, price.amount_minor, version.effective_at
+            FROM prices price JOIN price_list_versions version
+              ON version.tenant_id=price.tenant_id AND version.id=price.price_list_version_id
+            WHERE price.catalog_item_id='57000000-0000-4000-8000-000000000002'
+          `, [reviewQuote.id]),
+        ),
+        /QUOTE_ITEM_SNAPSHOT_MISMATCH/,
+      );
+      const approvedQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-approve-b" },
+        (client) => approveQuoteReview(client, { quoteId: reviewQuote.id, expectedVersion: reviewQuote.version }),
+      );
+      assert.equal(approvedQuote.status, "READY");
+      await assert.rejects(
+        target.query("UPDATE quotes SET subtotal_minor=9999,total_minor=9999 WHERE id=$1", [reviewQuote.id]),
+        /READY_QUOTE_COMMERCIAL_DATA_IMMUTABLE/,
+      );
+      const cancelledQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-cancel-b" },
+        (client) => cancelQuote(client, { quoteId: reviewQuote.id, expectedVersion: approvedQuote.version }),
+      );
+      assert.equal(cancelledQuote.status, "CANCELLED");
+
+      const expiringQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expiring-create-a",
+        },
+        (client) => createReadyQuote(client, {
+          serviceCaseId: "45000000-0000-4000-8000-000000000001",
+          priceListVersionId: "49000000-0000-4000-8000-000000000001",
+          items: [{ catalogItemId: "47000000-0000-4000-8000-000000000001", quantity: 1 }],
+          discountMinor: 0n,
+          validUntil: new Date(Date.now() + 500),
+          idempotencyKey: "quote-expiring-a",
+        }),
+      );
+      const sentExpiringQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expiring-send-a",
+        },
+        (client) => sendQuote(client, { quoteId: expiringQuote.id, expectedVersion: expiringQuote.version }),
+      );
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 650));
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "40000000-0000-4000-8000-000000000001",
+            actorId: actorAId,
+            correlationId: "quote-expired-accept-a",
+          },
+          (client) => acceptQuote(client, {
+            quoteId: expiringQuote.id,
+            expectedVersion: sentExpiringQuote.version,
+          }),
+        ),
+        /QUOTE_TRANSITION_CONFLICT/,
+      );
+      const expiredQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expire-a",
+        },
+        (client) => expireQuote(client, {
+          quoteId: expiringQuote.id,
+          expectedVersion: sentExpiringQuote.version,
+        }),
+      );
+      assert.equal(expiredQuote.status, "EXPIRED");
+
+      await target.query(`
+        INSERT INTO price_list_versions
+          (id, tenant_id, price_list_id, version, status, effective_at) VALUES
+          ('5e000000-0000-4000-8000-000000000003', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 3, 'DRAFT', now() + interval '2 days'),
+          ('5f000000-0000-4000-8000-000000000004', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 4, 'DRAFT', now() + interval '3 days');
+        INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor) VALUES
+          ('50000000-0000-4000-8000-000000000002', '5e000000-0000-4000-8000-000000000003', '57000000-0000-4000-8000-000000000002', 2600),
+          ('50000000-0000-4000-8000-000000000002', '5f000000-0000-4000-8000-000000000004', '57000000-0000-4000-8000-000000000002', 2700);
+      `);
+      const concurrentPublications = await Promise.all([
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "price-publish-concurrent-3" },
+          (client) => publishPriceListVersion(client, "5e000000-0000-4000-8000-000000000003"),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...sendContext, correlationId: "price-publish-concurrent-4" },
+          (client) => publishPriceListVersion(client, "5f000000-0000-4000-8000-000000000004"),
+        ),
+      ]);
+      assert.equal(concurrentPublications.length, 2);
+      const publicationEvidence = await target.query(`
+        SELECT status, count(*)::integer AS count
+        FROM price_list_versions
+        WHERE price_list_id='58000000-0000-4000-8000-000000000002'
+        GROUP BY status ORDER BY status
+      `);
+      assert.deepEqual(publicationEvidence.rows, [
+        { status: "PUBLISHED", count: 1 },
+        { status: "RETIRED", count: 3 },
+      ]);
 
       await target.query(`
         UPDATE outbox_events SET available_at = now() + interval '1 day'

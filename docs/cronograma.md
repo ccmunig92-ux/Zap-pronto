@@ -28,8 +28,14 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Prova local da Fase 2B: dois workers recebem eventos distintos; lease expirado troca o token;
   ACK obsoleto falha; retry e dead-letter preservam o isolamento por tenant.
 - A entrega assíncrona é `at-least-once`; consumidores devem deduplicar por ID/idempotency key.
-- Pendências do gate da Fase 2: orçamento reproduzível, pedido médico/OCR revisável,
-  upgrade de fixtures legadas e suíte integral de rollback/idempotência concorrente.
+- Fase 2C concluída localmente: versões de preço DRAFT/PUBLISHED/RETIRED, publicação serializada,
+  orçamento com snapshot imutável, cálculo em centavos, revisão humana, envio, aceite,
+  recusa, expiração e cancelamento sem qualquer efeito de agendamento.
+- Prova local da Fase 2C: versão publicada não é alterável; nova versão preserva o snapshot anterior;
+  totais adulterados e snapshots falsos falham; envio concorrente gera uma mutação e replay idempotente;
+  aceite vencido falha; eventos e outbox são atômicos às transições.
+- Pendências do gate da Fase 2: pedido médico/OCR revisável, upgrade de fixtures legadas
+  e ampliação final da suíte de rollback/idempotência concorrente.
 - Fases 3–9: não iniciadas.
 
 ## Premissas
@@ -172,8 +178,8 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Implementar orçamento com snapshot imutável da versão de preço e cálculo em centavos.
-2. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
+1. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
+2. Integrar baixa confiança/ilegibilidade ao handoff atômico já existente.
 3. Ampliar provas de rollback, idempotência concorrente e upgrade de dados legados.
 4. Reauditar o domínio completo da Fase 2 com agentes especialistas.
 5. Manter o PR da Fase 2 como draft até todos os critérios do gate ficarem verdes.
