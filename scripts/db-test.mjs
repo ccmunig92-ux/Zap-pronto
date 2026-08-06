@@ -45,6 +45,7 @@ try {
       "0003_actor_context_authorization.sql",
       "0004_component_roles.sql",
       "0005_workflow_foundation.sql",
+      "0006_outbox_worker.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -180,7 +181,7 @@ try {
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
     ]);
-    const apiInsertOnly = new Set(["messages", "outbox_events", "audit_events", "workflow_transitions"]);
+    const apiInsertOnly = new Set(["messages", "audit_events", "workflow_transitions"]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -207,13 +208,36 @@ try {
             ? {
                 can_select: workerReadable.has(table),
                 can_insert: table === "audit_events",
-                can_update: table === "outbox_events",
+                can_update: false,
                 can_delete: false,
               }
             : { can_select: false, can_insert: false, can_update: false, can_delete: false };
         assert.deepEqual(privileges.rows[0], expected, `${role}:${table}:PRIVILEGE_MATRIX_MISMATCH`);
       }
     }
+
+    const outboxColumnPrivileges = await target.query(`
+      SELECT
+        has_column_privilege('zap_pronto_api', 'outbox_events', 'tenant_id', 'INSERT') AS api_can_enqueue_tenant,
+        has_column_privilege('zap_pronto_api', 'outbox_events', 'status', 'INSERT') AS api_can_forge_status,
+        has_function_privilege('zap_pronto_worker', 'claim_outbox_events(integer,integer)', 'EXECUTE') AS worker_can_claim,
+        has_function_privilege('zap_pronto_api', 'claim_outbox_events(integer,integer)', 'EXECUTE') AS api_can_claim
+    `);
+    assert.deepEqual(outboxColumnPrivileges.rows[0], {
+      api_can_enqueue_tenant: true,
+      api_can_forge_status: false,
+      worker_can_claim: true,
+      api_can_claim: false,
+    });
+    const executorRole = await admin.query(`
+      SELECT role.rolcanlogin, role.rolsuper, role.rolbypassrls,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = role.oid) AS parent_count,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = role.oid) AS member_count
+      FROM pg_roles role WHERE role.rolname = 'zap_pronto_outbox_executor'
+    `);
+    assert.deepEqual(executorRole.rows[0], {
+      rolcanlogin: false, rolsuper: false, rolbypassrls: false, parent_count: 0, member_count: 0,
+    });
 
     for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
       const migrationsPrivilege = await target.query(
@@ -305,6 +329,7 @@ try {
     workerUrl.username = workerRuntimeRole;
     workerUrl.password = workerRuntimePassword;
     const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
+    const competingWorkerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     try {
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
@@ -619,6 +644,23 @@ try {
         outbox_events: 1,
       });
 
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, max_attempts) VALUES
+          ('81000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.ack', '{}', 'worker-ack', 3),
+          ('82000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.retry', '{}', 'worker-retry', 3),
+          ('83000000-0000-4000-8000-000000000003', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.dead', '{}', 'worker-dead', 1);
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key,
+           status, attempts, max_attempts, lease_token, leased_at, lease_expires_at) VALUES
+          ('86000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.sweep', '{}', 'worker-sweep',
+           'PROCESSING', 1, 1, '96000000-0000-4000-8000-000000000006', now() - interval '2 minutes', now() - interval '1 minute'),
+          ('87000000-0000-4000-8000-000000000007', '50000000-0000-4000-8000-000000000002', 'test', '54000000-0000-4000-8000-000000000002', 'worker.tenant-b', '{}', 'worker-tenant-b',
+           'PROCESSING', 1, 3, '97000000-0000-4000-8000-000000000007', now(), now() + interval '5 minutes');
+      `);
+
       const worker = await workerPool.connect();
       try {
         await worker.query("BEGIN");
@@ -628,16 +670,214 @@ try {
           ["40000000-0000-4000-8000-000000000001", actorAId],
         );
         await worker.query("SELECT assert_app_context_authorized()");
-        const claimed = await worker.query(
-          "UPDATE outbox_events SET attempts = attempts + 1 WHERE idempotency_key = 'outbox-a' RETURNING attempts",
+        const claimed = await worker.query("SELECT * FROM claim_outbox_events(3, 60) ORDER BY id");
+        assert.equal(claimed.rowCount, 3);
+        assert.deepEqual(claimed.rows.map((row) => row.attempts), [1, 1, 1]);
+        assert.equal(new Set(claimed.rows.map((row) => row.lease_token)).size, 3);
+        const [ackEvent, retryEvent, deadEvent] = claimed.rows;
+        const wrongTenantAck = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          ["87000000-0000-4000-8000-000000000007", "97000000-0000-4000-8000-000000000007"],
         );
-        assert.equal(claimed.rows[0].attempts, 1);
+        assert.equal(wrongTenantAck.rows[0].acknowledged, false);
+        const wrongTenantFail = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'CROSS_TENANT', 30) AS status",
+          ["87000000-0000-4000-8000-000000000007", "97000000-0000-4000-8000-000000000007"],
+        );
+        assert.equal(wrongTenantFail.rows[0].status, null);
+        const acknowledged = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [ackEvent.id, ackEvent.lease_token],
+        );
+        assert.equal(acknowledged.rows[0].acknowledged, true);
+        const duplicateAck = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [ackEvent.id, ackEvent.lease_token],
+        );
+        assert.equal(duplicateAck.rows[0].acknowledged, false);
+        const retryStatus = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'TEMPORARY_FAILURE', 30) AS status",
+          [retryEvent.id, retryEvent.lease_token],
+        );
+        assert.equal(retryStatus.rows[0].status, "PENDING");
+        const deadStatus = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'PERMANENT_FAILURE', 30) AS status",
+          [deadEvent.id, deadEvent.lease_token],
+        );
+        assert.equal(deadStatus.rows[0].status, "DEAD");
         await worker.query("COMMIT");
       } finally {
         worker.release();
       }
 
-      for (const forbiddenSql of ["SELECT * FROM prices", "INSERT INTO messages (tenant_id) VALUES ('40000000-0000-4000-8000-000000000001')"]) {
+      const outboxEvidence = await target.query(`
+        SELECT idempotency_key, status, attempts, lease_token, published_at IS NOT NULL AS published,
+          dead_lettered_at IS NOT NULL AS dead_lettered, available_at > now() AS backoff_scheduled
+        FROM outbox_events WHERE idempotency_key IN ('worker-ack', 'worker-retry', 'worker-dead')
+        ORDER BY idempotency_key
+      `);
+      assert.deepEqual(outboxEvidence.rows, [
+        { idempotency_key: "worker-ack", status: "PUBLISHED", attempts: 1, lease_token: null, published: true, dead_lettered: false, backoff_scheduled: false },
+        { idempotency_key: "worker-dead", status: "DEAD", attempts: 1, lease_token: null, published: false, dead_lettered: true, backoff_scheduled: false },
+        { idempotency_key: "worker-retry", status: "PENDING", attempts: 1, lease_token: null, published: false, dead_lettered: false, backoff_scheduled: true },
+      ]);
+      const deadAudit = await target.query(
+        "SELECT count(*)::integer AS count FROM audit_events WHERE action = 'OUTBOX_DEAD_LETTERED' AND entity_id = '83000000-0000-4000-8000-000000000003'",
+      );
+      assert.equal(deadAudit.rows[0].count, 1);
+      const isolationAndSweep = await target.query(`
+        SELECT idempotency_key, status, lease_token,
+          (SELECT count(*)::integer FROM audit_events audit
+            WHERE audit.action = 'OUTBOX_DEAD_LETTERED' AND audit.entity_id = event.id::text) AS audits
+        FROM outbox_events event
+        WHERE idempotency_key IN ('worker-sweep', 'worker-tenant-b')
+        ORDER BY idempotency_key
+      `);
+      assert.deepEqual(isolationAndSweep.rows, [
+        { idempotency_key: "worker-sweep", status: "DEAD", lease_token: null, audits: 1 },
+        { idempotency_key: "worker-tenant-b", status: "PROCESSING", lease_token: "97000000-0000-4000-8000-000000000007", audits: 0 },
+      ]);
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() - interval '1 second'
+        WHERE idempotency_key = 'worker-retry'
+      `);
+      const reclaimWorker = await workerPool.connect();
+      let firstLease;
+      try {
+        await reclaimWorker.query("BEGIN");
+        await reclaimWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await reclaimWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        const firstReclaim = await reclaimWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(firstReclaim.rows[0].attempts, 2);
+        firstLease = firstReclaim.rows[0].lease_token;
+        await reclaimWorker.query("COMMIT");
+      } finally {
+        reclaimWorker.release();
+      }
+      await target.query(`
+        UPDATE outbox_events SET lease_expires_at = now() - interval '1 second'
+        WHERE idempotency_key = 'worker-retry'
+      `);
+      const expiredLeaseWorker = await workerPool.connect();
+      try {
+        await expiredLeaseWorker.query("BEGIN");
+        await expiredLeaseWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await expiredLeaseWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        const reclaimed = await expiredLeaseWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(reclaimed.rows[0].attempts, 3);
+        assert.notEqual(reclaimed.rows[0].lease_token, firstLease);
+        const staleAck = await expiredLeaseWorker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [reclaimed.rows[0].id, firstLease],
+        );
+        assert.equal(staleAck.rows[0].acknowledged, false);
+        const currentAck = await expiredLeaseWorker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [reclaimed.rows[0].id, reclaimed.rows[0].lease_token],
+        );
+        assert.equal(currentAck.rows[0].acknowledged, true);
+        await expiredLeaseWorker.query("COMMIT");
+      } finally {
+        expiredLeaseWorker.release();
+      }
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key) VALUES
+          ('84000000-0000-4000-8000-000000000004', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.concurrent.a', '{}', 'worker-concurrent-a'),
+          ('85000000-0000-4000-8000-000000000005', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.concurrent.b', '{}', 'worker-concurrent-b');
+      `);
+      const claimOne = async (pool) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_worker");
+          await client.query(
+            `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+            ["40000000-0000-4000-8000-000000000001", actorAId],
+          );
+          const result = await client.query("SELECT * FROM claim_outbox_events(1, 60)");
+          await client.query("COMMIT");
+          return result.rows[0];
+        } finally {
+          client.release();
+        }
+      };
+      const concurrentOutboxClaims = await Promise.all([
+        claimOne(workerPool),
+        claimOne(competingWorkerPool),
+      ]);
+      assert.equal(new Set(concurrentOutboxClaims.map((event) => event.id)).size, 2);
+      assert.equal(new Set(concurrentOutboxClaims.map((event) => event.lease_token)).size, 2);
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key)
+        VALUES
+          ('88000000-0000-4000-8000-000000000008', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.locked', '{}', 'worker-locked');
+      `);
+      const lockingWorker = await workerPool.connect();
+      const skippingWorker = await competingWorkerPool.connect();
+      try {
+        for (const client of [lockingWorker, skippingWorker]) {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_worker");
+          await client.query(
+            `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+            ["40000000-0000-4000-8000-000000000001", actorAId],
+          );
+        }
+        const lockedClaim = await lockingWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(lockedClaim.rowCount, 1);
+        const skippedClaim = await skippingWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(skippedClaim.rowCount, 0);
+        await lockingWorker.query("ROLLBACK");
+        await skippingWorker.query("COMMIT");
+      } finally {
+        await lockingWorker.query("ROLLBACK").catch(() => undefined);
+        await skippingWorker.query("ROLLBACK").catch(() => undefined);
+        lockingWorker.release();
+        skippingWorker.release();
+      }
+      const rollbackEvidence = await target.query(`
+        SELECT status, attempts, lease_token FROM outbox_events
+        WHERE idempotency_key = 'worker-locked'
+      `);
+      assert.deepEqual(rollbackEvidence.rows[0], { status: "PENDING", attempts: 0, lease_token: null });
+
+      const nullInputWorker = await workerPool.connect();
+      try {
+        await nullInputWorker.query("BEGIN");
+        await nullInputWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await nullInputWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        await assert.rejects(
+          nullInputWorker.query("SELECT * FROM claim_outbox_events(NULL, 60)"),
+          (error) => error instanceof Error && "code" in error && error.code === "22023",
+        );
+      } finally {
+        await nullInputWorker.query("ROLLBACK").catch(() => undefined);
+        nullInputWorker.release();
+      }
+
+      for (const forbiddenSql of [
+        "SELECT * FROM prices",
+        "INSERT INTO messages (tenant_id) VALUES ('40000000-0000-4000-8000-000000000001')",
+        "UPDATE outbox_events SET attempts = attempts + 1 WHERE idempotency_key = 'outbox-a'",
+      ]) {
         const workerCheck = await workerPool.connect();
         try {
           await workerCheck.query("BEGIN");
@@ -658,6 +898,7 @@ try {
       await runtimePool.end();
       await competingRuntimePool.end();
       await workerPool.end();
+      await competingWorkerPool.end();
     }
     process.stdout.write("database integration tests passed\n");
   } finally {

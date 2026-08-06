@@ -23,8 +23,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   lifecycle tipado, histórico tenant-aware e outbox com lease/dead-letter modelados;
   solicitação de handoff atômica e claim otimista implementados.
 - Prova local da Fase 2A: migration do zero, RLS e dois claims concorrentes com exatamente um vencedor.
-- Pendências do gate da Fase 2: transições completas, worker de outbox, orçamento reproduzível,
-  pedido médico/OCR revisável e suíte integral de concorrência/rollback.
+- Fase 2B concluída localmente: outbox com claim `SKIP LOCKED`, lease/reclaim, ACK por token,
+  retry com backoff, dead-letter auditado e privilégios estreitos de API/worker.
+- Prova local da Fase 2B: dois workers recebem eventos distintos; lease expirado troca o token;
+  ACK obsoleto falha; retry e dead-letter preservam o isolamento por tenant.
+- A entrega assíncrona é `at-least-once`; consumidores devem deduplicar por ID/idempotency key.
+- Pendências do gate da Fase 2: orçamento reproduzível, pedido médico/OCR revisável,
+  upgrade de fixtures legadas e suíte integral de rollback/idempotência concorrente.
 - Fases 3–9: não iniciadas.
 
 ## Premissas
@@ -167,10 +172,10 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Concluir worker transacional de outbox: claim, lease, retry, backoff, ACK e dead-letter.
-2. Implementar orçamento com snapshot imutável da versão de preço e cálculo em centavos.
-3. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
-4. Ampliar provas de rollback, idempotência concorrente e upgrade de dados legados.
-5. Publicar a Fase 2 em PR próprio; manter Fases 3–9 bloqueadas até o gate verde.
+1. Implementar orçamento com snapshot imutável da versão de preço e cálculo em centavos.
+2. Implementar pedido médico, páginas, itens extraídos e revisão humana obrigatória.
+3. Ampliar provas de rollback, idempotência concorrente e upgrade de dados legados.
+4. Reauditar o domínio completo da Fase 2 com agentes especialistas.
+5. Manter o PR da Fase 2 como draft até todos os critérios do gate ficarem verdes.
 
 Não iniciar API, interface, Hermes ou Meta antes do gate completo da Fase 2.
