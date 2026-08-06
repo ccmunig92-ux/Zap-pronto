@@ -60,7 +60,17 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   digest inválido, segundo convite pendente e timestamps incoerentes são rejeitados pelo PostgreSQL;
   bloqueio/reativação/revogação são versionados, auditados e serializados por tenant, e revogação OIDC
   ocorre atomicamente. Escrita direta em usuários, vínculos e tabelas de convite foi retirada da API.
-- A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
+- Primeiro corte vertical administrativo 3B concluído localmente: `GET /v1/users/invitations/options` e
+  `POST /v1/users/invitations` percorrem React, cliente OpenAPI, API protegida, domínio e PostgreSQL sem
+  DTO, mock ou acesso ao banco paralelos. Provider e unidades são opções ativas resolvidas pelo servidor.
+- Convites usam token CSPRNG de 32 bytes; somente o SHA-256 é persistido. O token bruto aparece apenas
+  no primeiro `201`, nunca em replay, auditoria, outbox ou comando. Se a primeira resposta se perder, a
+  operação segura exigirá revogação e reemissão; essa rota ainda é pendente.
+- Prova local do convite: RBAC negativo, unidade cross-tenant, JSON/NULL inválido, replay sem duplicação,
+  conflito de idempotência, expiração auditada e privilégios SQL estreitos passaram em PostgreSQL real;
+  API, cliente, OpenAPI e dez testes web também passaram.
+- A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
+  até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
 
 ## Premissas
@@ -206,8 +216,8 @@ Critérios de aceite:
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
 2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Implementar sobre a migration `0012` os casos de uso transacionais de convite, aceite OIDC,
-   bloqueio, reativação e revogação, com último administrador, auditoria e outbox atômicos.
+3. Implementar o aceite/provisionamento OIDC e expor bloqueio, reativação, revogação e reemissão por HTTP,
+   reutilizando o lifecycle transacional das migrations `0012` e `0013`.
 4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 

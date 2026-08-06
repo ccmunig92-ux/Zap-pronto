@@ -43,3 +43,28 @@ test("generated client rejects malformed error payloads", async () => {
       headers: { "content-type": "application/json" } }) });
   await assert.rejects(client.getCurrentUser(), InvalidApiResponse);
 });
+
+test("invitation client loads canonical options and sends one idempotent POST", async () => {
+  const requests: Request[] = [];
+  const client = createApiClient({ baseUrl: "https://api.example.test", getAccessToken: async () => "token",
+    fetch: async (request) => {
+      requests.push(request);
+      if (request.method === "GET") return new Response(JSON.stringify({ providers: [{ code: "primary" }],
+        units: [{ id: "33333333-3333-4333-8333-333333333333", code: "CENTRO", name: "Centro" }],
+        roles: ["ATTENDANT"] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ invitation: { id: "44444444-4444-4444-8444-444444444444",
+        email: "user@example.test", displayName: "User", status: "PENDING",
+        expiresAt: "2026-08-20T12:00:00.000Z", providerCode: "primary" }, assignments: [{
+          unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO", unitName: "Centro", role: "ATTENDANT",
+        }], replayed: false, invitationToken: "a".repeat(43) }),
+      { status: 201, headers: { "content-type": "application/json" } });
+    } });
+  await client.getUserInvitationOptions();
+  await client.createUserInvitation({ email: "user@example.test", displayName: "User", providerCode: "primary",
+    expiresAt: "2026-08-20T12:00:00.000Z", assignments: [{
+      unitId: "33333333-3333-4333-8333-333333333333", role: "ATTENDANT",
+    }] }, "invitation-command-1");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.url, "https://api.example.test/v1/users/invitations/options");
+  assert.equal(requests[1]?.headers.get("idempotency-key"), "invitation-command-1");
+});

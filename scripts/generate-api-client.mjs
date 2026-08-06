@@ -11,6 +11,10 @@ await app.close();
 if (document.paths?.["/v1/me"]?.get?.operationId !== "getCurrentUser") {
   throw new Error("OPENAPI_GET_CURRENT_USER_MISSING");
 }
+if (document.paths?.["/v1/users/invitations/options"]?.get?.operationId !== "getUserInvitationOptions"
+  || document.paths?.["/v1/users/invitations"]?.post?.operationId !== "createUserInvitation") {
+  throw new Error("OPENAPI_USER_INVITATIONS_MISSING");
+}
 const source = `// Generated from the canonical OpenAPI document. Do not edit manually.\n${astToString(await openapiTS(document))}`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8").catch(() => "");

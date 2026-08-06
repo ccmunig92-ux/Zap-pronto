@@ -4,7 +4,17 @@ main { max-width: 72rem; margin: 0 auto; padding: 3rem 1.5rem; }
 header { display: flex; justify-content: space-between; gap: 2rem; align-items: start; }
 header span, small { color: #657089; }
 h1 { margin: .35rem 0 2rem; }
-section { background: white; border: 1px solid #dfe4ec; border-radius: .75rem; padding: 1.5rem; }
+section { background: white; border: 1px solid #dfe4ec; border-radius: .75rem; padding: 1.5rem; margin-bottom: 1rem; }
 ul { display: grid; gap: .75rem; padding: 0; list-style: none; }
 li { display: flex; justify-content: space-between; border-bottom: 1px solid #edf0f4; padding: .75rem 0; }
 li span { color: #657089; font-size: .875rem; }
+form { display: grid; gap: 1rem; }
+label { display: grid; gap: .35rem; }
+input, select, button { font: inherit; padding: .65rem .75rem; }
+fieldset { display: grid; gap: .75rem; border: 1px solid #dfe4ec; }
+.assignment { display: grid; grid-template-columns: 1fr 1fr auto; gap: .75rem; align-items: end; }
+.delivery-dialog { position: fixed; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  width: min(34rem, calc(100% - 3rem)); padding: 1.5rem; background: white; border: 1px solid #aeb8c8;
+  border-radius: .75rem; box-shadow: 0 1rem 4rem rgb(23 32 51 / 25%); }
+.delivery-dialog output { display: block; overflow-wrap: anywhere; padding: .75rem; margin: 1rem 0;
+  background: #f0f3f8; font-family: ui-monospace, monospace; }

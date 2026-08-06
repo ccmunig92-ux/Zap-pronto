@@ -59,3 +59,56 @@ export const CurrentUserSchema = Type.Object({
   grants: Type.Array(GrantSchema),
 }, { $id: "CurrentUser", additionalProperties: false });
 export type CurrentUser = Static<typeof CurrentUserSchema>;
+
+export const InvitationRoleSchema = Type.Union([
+  Type.Literal("UNIT_MANAGER"), Type.Literal("SUPERVISOR"), Type.Literal("ATTENDANT"), Type.Literal("AUDITOR"),
+]);
+export type InvitationRole = Static<typeof InvitationRoleSchema>;
+
+export const CreateUserInvitationRequestSchema = Type.Object({
+  email: Type.String({ minLength: 3, maxLength: 320 }),
+  displayName: Type.String({ minLength: 1, maxLength: 160 }),
+  providerCode: Type.String({ pattern: "^[a-z][a-z0-9_-]{1,62}$" }),
+  expiresAt: Type.String({ format: "date-time" }),
+  assignments: Type.Array(Type.Object({
+    unitId: Type.String({ format: "uuid" }),
+    role: InvitationRoleSchema,
+  }, { additionalProperties: false }), { minItems: 1, maxItems: 50 }),
+}, { $id: "CreateUserInvitationRequest", additionalProperties: false });
+export type CreateUserInvitationRequest = Static<typeof CreateUserInvitationRequestSchema>;
+
+const UserInvitationSchema = Type.Object({
+  invitation: Type.Object({
+    id: Type.String({ format: "uuid" }),
+    email: Type.String(),
+    displayName: Type.String(),
+    status: Type.Union([Type.Literal("PENDING"), Type.Literal("ACCEPTED"), Type.Literal("REVOKED"), Type.Literal("EXPIRED")]),
+    expiresAt: Type.String({ format: "date-time" }),
+    providerCode: Type.String(),
+  }, { additionalProperties: false }),
+  assignments: Type.Array(Type.Object({
+    unitId: Type.String({ format: "uuid" }),
+    unitCode: Type.String(),
+    unitName: Type.String(),
+    role: InvitationRoleSchema,
+  }, { additionalProperties: false })),
+}, { additionalProperties: false });
+
+export const CreateUserInvitationResponseSchema = Type.Union([
+  Type.Composite([UserInvitationSchema, Type.Object({
+    replayed: Type.Literal(false),
+    invitationToken: Type.String({ minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" }),
+  }, { additionalProperties: false })], { additionalProperties: false }),
+  Type.Composite([UserInvitationSchema, Type.Object({ replayed: Type.Literal(true) },
+    { additionalProperties: false })], { additionalProperties: false }),
+], { $id: "CreateUserInvitationResponse" });
+export type CreateUserInvitationResponse = Static<typeof CreateUserInvitationResponseSchema>;
+
+export const UserInvitationOptionsSchema = Type.Object({
+  providers: Type.Array(Type.Object({ code: Type.String() }, { additionalProperties: false })),
+  units: Type.Array(Type.Object({
+    id: Type.String({ format: "uuid" }), code: Type.String(), name: Type.String(),
+  }, { additionalProperties: false })),
+  roles: Type.Array(InvitationRoleSchema),
+}, { $id: "UserInvitationOptions", additionalProperties: false });
+export type UserInvitationOptions = Static<typeof UserInvitationOptionsSchema>;

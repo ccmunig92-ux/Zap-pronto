@@ -118,6 +118,7 @@ try {
   assert.match(firstRun, /applied 0010_identity_rbac\.sql/);
   assert.match(firstRun, /applied 0011_permission_policy\.sql/);
   assert.match(firstRun, /applied 0012_user_lifecycle\.sql/);
+  assert.match(firstRun, /applied 0013_admin_invitations\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();

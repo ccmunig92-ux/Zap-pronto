@@ -55,6 +55,7 @@ try {
       "0010_identity_rbac.sql",
       "0011_permission_policy.sql",
       "0012_user_lifecycle.sql",
+      "0013_admin_invitations.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -565,8 +566,79 @@ try {
         correlationId: "lifecycle-non-admin",
       }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,1,'BLOCKED','Unauthorized')",
       [lifecycleTargetId])), (error) => error instanceof Error && "code" in error && error.code === "42501");
+      const invitationUnit = await target.query(`SELECT id FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      const invitationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const invitationAssignments = JSON.stringify([{ unitId: invitationUnit.rows[0].id, role: "ATTENDANT" }]);
+      const createInvitation = (overrides = {}) => {
+        const values = {
+          key: "admin-invite-security-a", fingerprint: Buffer.alloc(32, 0xd1),
+          id: "66000000-0000-4000-8000-000000000001", provider: "primary",
+          email: "security-invite@test.local", name: "Security Invite", expiresAt: invitationExpiresAt,
+          digest: Buffer.alloc(32, 0xe1), assignments: invitationAssignments, ...overrides,
+        };
+        return withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "admin-invite-security",
+        }, async (client) => client.query(
+          "SELECT * FROM admin_create_user_invitation($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [values.key, values.fingerprint, values.id, values.provider, values.email, values.name,
+            values.expiresAt, values.digest, values.assignments],
+        ));
+      };
+      await assert.rejects(createInvitation({ key: "admin-invite-unauthorized" }),
+        (error) => error instanceof Error && "code" in error && error.code === "42501");
       await target.query(`UPDATE user_units SET role='TENANT_ADMIN'
         WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+      await assert.rejects(createInvitation({ key: "admin-invite-null-assignments", assignments: null }),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await assert.rejects(createInvitation({ key: "admin-invite-null-role", assignments: JSON.stringify([
+        { unitId: invitationUnit.rows[0].id, role: null },
+      ]) }), (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await target.query(`INSERT INTO user_invitations
+        (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_at,created_by_user_id)
+        VALUES ('67000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
+          '61000000-0000-4000-8000-000000000001','security-invite@test.local','Expired Invite',
+          decode(repeat('f1',32),'hex'),now()-interval '1 day',now()-interval '2 days',$1)`, [actorAId]);
+      const invitationCreated = await createInvitation();
+      assert.deepEqual(invitationCreated.rows.map((row) => ({ id: row.id, replayed: row.replayed })),
+        [{ id: "66000000-0000-4000-8000-000000000001", replayed: false }]);
+      const invitationReplay = await createInvitation({
+        id: "68000000-0000-4000-8000-000000000001", digest: Buffer.alloc(32, 0xe2),
+      });
+      assert.deepEqual(invitationReplay.rows.map((row) => ({ id: row.id, replayed: row.replayed })),
+        [{ id: "66000000-0000-4000-8000-000000000001", replayed: true }]);
+      await assert.rejects(createInvitation({ fingerprint: Buffer.alloc(32, 0xd2) }),
+        (error) => error instanceof Error && "code" in error && error.code === "23505");
+      const tenantBUnit = await target.query(`SELECT id FROM units
+        WHERE tenant_id='50000000-0000-4000-8000-000000000002' AND code='POOL-B'`);
+      await assert.rejects(createInvitation({ key: "admin-invite-cross-unit", fingerprint: Buffer.alloc(32, 0xd3),
+        id: "69000000-0000-4000-8000-000000000001", email: "cross-unit-invite@test.local",
+        digest: Buffer.alloc(32, 0xe3), assignments: JSON.stringify([
+          { unitId: tenantBUnit.rows[0].id, role: "ATTENDANT" },
+        ]) }), (error) => error instanceof Error && "code" in error && error.code === "P0002");
+      const invitationEvidence = await target.query(`SELECT
+        (SELECT status::text FROM user_invitations WHERE id='67000000-0000-4000-8000-000000000001') AS old_status,
+        (SELECT count(*)::integer FROM user_invitations WHERE id='66000000-0000-4000-8000-000000000001') AS invitations,
+        (SELECT count(*)::integer FROM user_lifecycle_commands WHERE idempotency_key='admin-invite-security-a') AS commands,
+        (SELECT count(*)::integer FROM audit_events WHERE entity_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')) AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE aggregate_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')) AS outbox,
+        (SELECT result ? 'token' OR result ? 'tokenDigest' FROM user_lifecycle_commands
+          WHERE idempotency_key='admin-invite-security-a') AS command_leaks_token`);
+      assert.deepEqual(invitationEvidence.rows[0], {
+        old_status: "EXPIRED", invitations: 1, commands: 1, audits: 2, outbox: 2,
+        command_leaks_token: false,
+      });
+      await target.query(`DELETE FROM audit_events WHERE entity_id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')`);
+      await target.query(`DELETE FROM outbox_events WHERE aggregate_id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')`);
+      await target.query("DELETE FROM user_lifecycle_commands WHERE idempotency_key='admin-invite-security-a'");
+      await target.query(`DELETE FROM user_invitations WHERE id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')`);
+
       const changeStatus = (status, version, reason) => withTenantTransaction(runtimePool, {
         tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
         correlationId: `lifecycle-${status.toLowerCase()}`,
@@ -604,11 +676,15 @@ try {
         has_function_privilege('zap_pronto_api','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS api_execute,
         has_function_privilege('zap_pronto_worker','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS worker_execute,
         has_function_privilege('zap_pronto_app','admin_change_user_status(uuid,integer,text,text)','EXECUTE') AS app_execute,
+        has_function_privilege('zap_pronto_api','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS api_invite_execute,
+        has_function_privilege('zap_pronto_worker','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS worker_invite_execute,
+        has_function_privilege('zap_pronto_app','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS app_invite_execute,
         has_table_privilege('zap_pronto_api','users','INSERT') AS api_insert_user,
         has_table_privilege('zap_pronto_api','users','UPDATE') AS api_update_user,
         has_table_privilege('zap_pronto_api','user_units','UPDATE') AS api_update_membership`);
       assert.deepEqual(lifecyclePrivileges.rows[0], {
         api_execute: true, worker_execute: false, app_execute: false,
+        api_invite_execute: true, worker_invite_execute: false, app_invite_execute: false,
         api_insert_user: false, api_update_user: false, api_update_membership: false,
       });
       const competingAdminId = "65000000-0000-4000-8000-000000000001";
