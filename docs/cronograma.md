@@ -45,6 +45,8 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
 - Fase 3A iniciada em branch empilhada própria: workspace full-stack único, contratos TypeBox,
   composition root Fastify, OpenAPI gerado e shell React sem acesso direto ao banco.
+- Fase 3A identidade/RBAC iniciada: catálogo persistido alinhado a `user_units`, provedores OIDC e
+  identidades resolvidas por issuer, audience, organização e subject, com RLS e função estreita.
 - A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
 - Fases 3–9: não iniciadas.
 
