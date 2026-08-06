@@ -15,13 +15,17 @@ Cada transação da aplicação deve executar:
 
 ```sql
 BEGIN;
-SET LOCAL ROLE zap_pronto_app;
-SET LOCAL app.tenant_id = '<tenant-uuid>';
+SET LOCAL ROLE zap_pronto_api;
+SELECT
+  set_config('app.tenant_id', '<tenant-uuid>', true),
+  set_config('app.actor_id', '<actor-uuid>', true),
+  set_config('app.correlation_id', '<correlation-id>', true);
+SELECT assert_app_context_authorized();
 -- operações do caso de uso
 COMMIT;
 ```
 
-Nunca use o papel `postgres` na aplicação. Ele é superusuário e ignora RLS.
+Nunca use o papel `postgres` na aplicação. Ele é superusuário e ignora RLS. A API assume `zap_pronto_api`; processadores assíncronos usam uma credencial separada com membership exclusiva em `zap_pronto_worker`.
 
 ## Executor de migrations
 
