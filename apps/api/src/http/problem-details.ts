@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { AuthenticationError, IdentityProviderUnavailableError } from "../auth/errors.js";
 import { AuthorizationDeniedError } from "../authorization/authorize.js";
+import { AccountNotAssignedError } from "@zap-pronto/core/database/current-user";
 
 export function registerProblemDetailsHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AuthenticationError || error instanceof IdentityProviderUnavailableError
-      || error instanceof AuthorizationDeniedError) {
+      || error instanceof AuthorizationDeniedError || error instanceof AccountNotAssignedError) {
       void reply.status(error.statusCode).type("application/problem+json").send({
         type: `urn:zap-pronto:error:${error.code.toLowerCase().replaceAll("_", "-")}`,
         title: error.statusCode === 401 ? "Unauthorized"

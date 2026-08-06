@@ -9,26 +9,31 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:all": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web build",
+    "build:all": "pnpm --filter @zap-pronto/contracts build && pnpm build && pnpm --filter @zap-pronto/api --filter @zap-pronto/api-client build && pnpm --filter @zap-pronto/web build",
     "db:migrate": "node scripts/db-migrate.mjs",
-    "db:test": "pnpm build && node scripts/db-test.mjs",
+    "db:test": "pnpm build:all && node scripts/db-test.mjs",
     "db:test:upgrade": "node scripts/db-upgrade-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test dist",
-    "test:all": "pnpm build:all && pnpm test && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web test",
-    "typecheck:all": "pnpm typecheck && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/web typecheck"
+    "test:all": "pnpm build:all && pnpm test && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/api-client --filter @zap-pronto/web test",
+    "typecheck:all": "pnpm typecheck && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/api-client --filter @zap-pronto/web typecheck",
+    "api:generate": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs",
+    "api:check": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
     "@types/pg": "^8.20.4",
+    "openapi-typescript": "^7.10.1",
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@zap-pronto/contracts": "workspace:*",
     "pg": "^8.22.0"
   },
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
     "./database/tenant-transaction": { "types": "./src/database/tenant-transaction.ts", "default": "./dist/database/tenant-transaction.js" }
+    ,"./database/current-user": { "types": "./src/database/current-user.ts", "default": "./dist/database/current-user.js" }
   },
   "types": "./src/index.ts"
 }

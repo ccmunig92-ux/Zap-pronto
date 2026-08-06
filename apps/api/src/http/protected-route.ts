@@ -21,18 +21,21 @@ type ProtectedScope =
 
 export interface ProtectedRouteInput {
   readonly pool: TenantTransactionPool;
-  readonly permission: Permission;
+  readonly authorization:
+    | { readonly kind: "bootstrap" }
+    | { readonly kind: "permission"; readonly permission: Permission; readonly scope: ProtectedScope };
   readonly schema?: FastifySchema;
-  readonly scope: ProtectedScope;
   readonly handler: (client: TenantQueryClient, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 }
 
 export function protectedRoute(input: ProtectedRouteInput): {
-  config: { permission: Permission };
+  config: { permission?: Permission; authenticated: true; bootstrap?: true };
   schema: FastifySchema;
   handler: RouteHandlerMethod;
 } {
-  const config = { permission: input.permission };
+  const config = input.authorization.kind === "permission"
+    ? { permission: input.authorization.permission, authenticated: true as const }
+    : { authenticated: true as const, bootstrap: true as const };
   protectedRouteConfigurations.add(config);
   return {
     config,
@@ -52,13 +55,16 @@ export function protectedRoute(input: ProtectedRouteInput): {
           } : {}),
           correlationId: request.id,
         }, async (client) => {
-          const unitId = input.scope.kind === "unit"
-            ? await input.scope.resolveUnitId(client, request)
+          if (input.authorization.kind === "bootstrap") {
+            return input.handler(client, request, reply);
+          }
+          const unitId = input.authorization.scope.kind === "unit"
+            ? await input.authorization.scope.resolveUnitId(client, request)
             : undefined;
-          if (input.scope.kind === "unit" && !uuidPattern.test(unitId ?? "")) {
+          if (input.authorization.scope.kind === "unit" && !uuidPattern.test(unitId ?? "")) {
             throw new AuthorizationDeniedError();
           }
-          await requirePermission(client, input.permission, unitId);
+          await requirePermission(client, input.authorization.permission, unitId);
           return input.handler(client, request, reply);
         });
       } catch (error) {

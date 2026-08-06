@@ -49,6 +49,10 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   identidades resolvidas por issuer, audience, organização e subject, com RLS e função estreita.
 - Boundary HTTP fail-closed em validação: toda rota `/v1` exige declaração explícita e rotas protegidas
   executam resolução OIDC, contexto RLS e autorização RBAC na mesma transação do caso de uso.
+- Primeiro corte vertical da Fase 3 implementado localmente: `GET /v1/me` deriva usuário e tenant do
+  OIDC/banco, nega conta sem unidade ativa e expõe vínculos/grants sem dados internos do provedor.
+- OpenAPI gera o cliente TypeScript canônico com verificação de drift; o shell React consome somente
+  esse cliente e não envia tenant, ator ou unidade como fonte de autorização.
 - A UI funcional permanece bloqueada até identidade, matriz RBAC e testes IDOR estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
 
@@ -194,9 +198,10 @@ Critérios de aceite:
 
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
-2. Fechar o gate HTTP da Fase 3A com matriz por rota, RBAC transacional e testes IDOR por unidade.
-3. Implementar convites, ativação, bloqueio e revogação no mesmo módulo de identidade existente.
-4. Expor o primeiro fluxo vertical da inbox somente depois dos gates anteriores, reutilizando contratos,
+2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
+3. Compor e validar o provedor OIDC real; depois implementar convites, ativação, bloqueio e revogação
+   no mesmo módulo de identidade existente.
+4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

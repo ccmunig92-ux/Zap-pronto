@@ -1,3 +1,10 @@
 :root { font-family: Inter, system-ui, sans-serif; color: #172033; background: #f6f8fb; }
 body { margin: 0; }
 main { max-width: 72rem; margin: 0 auto; padding: 3rem 1.5rem; }
+header { display: flex; justify-content: space-between; gap: 2rem; align-items: start; }
+header span, small { color: #657089; }
+h1 { margin: .35rem 0 2rem; }
+section { background: white; border: 1px solid #dfe4ec; border-radius: .75rem; padding: 1.5rem; }
+ul { display: grid; gap: .75rem; padding: 0; list-style: none; }
+li { display: flex; justify-content: space-between; border-bottom: 1px solid #edf0f4; padding: .75rem 0; }
+li span { color: #657089; font-size: .875rem; }

@@ -1,8 +1,6 @@
-export const permissions = [
-  "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.claim",
-  "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
-] as const;
-export type Permission = typeof permissions[number];
+import { permissionValues, type Permission } from "@zap-pronto/contracts";
+export const permissions = permissionValues;
+export type { Permission };
 
 export const rolePermissions = {
   TENANT_ADMIN: permissions,

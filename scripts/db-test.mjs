@@ -7,6 +7,7 @@ import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
 import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
 import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
 import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
+import { buildApp } from "../apps/api/dist/app.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -461,6 +462,50 @@ try {
         disabledProviderClient.release();
       }
       await target.query("UPDATE oidc_providers SET status='ACTIVE' WHERE id='61000000-0000-4000-8000-000000000001'");
+
+      const httpApp = await buildApp({
+        pool: runtimePool,
+        identityVerifier: { async verifyBearer() {
+          return { issuer: "https://identity.test", audience: "zap-pronto", subject: "shared-subject",
+            organization: { claim: "org_id", value: "tenant-a" } };
+        } },
+      });
+      try {
+        const currentUserResponse = await httpApp.inject({
+          method: "GET",
+          url: `/v1/me?tenantId=50000000-0000-4000-8000-000000000002&userId=${actorBId}`,
+          headers: { authorization: "Bearer database-backed-token" },
+        });
+        assert.equal(currentUserResponse.statusCode, 200);
+        assert.equal(currentUserResponse.headers["cache-control"], "no-store");
+        const currentUser = currentUserResponse.json();
+        assert.equal(currentUser.user.id, actorAId);
+        assert.equal(currentUser.user.email, "actor-a@test.local");
+        assert.equal(currentUser.tenant.id, "40000000-0000-4000-8000-000000000001");
+        assert.deepEqual(currentUser.memberships.map((membership) => membership.unitCode), ["POOL-A"]);
+        assert.ok(currentUser.grants.every((grant) =>
+          grant.scope === "UNIT" && grant.unitId === currentUser.memberships[0].unitId));
+        assert.doesNotMatch(JSON.stringify(currentUser), /shared-subject|identity\.test|61000000|62000000/);
+        await target.query(`UPDATE user_units SET role='TENANT_ADMIN'
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+        const tenantAdminResponse = await httpApp.inject({ method: "GET", url: "/v1/me",
+          headers: { authorization: "Bearer database-backed-token" } });
+        assert.equal(tenantAdminResponse.statusCode, 200);
+        assert.ok(tenantAdminResponse.json().grants.every((grant) =>
+          grant.scope === "TENANT" && !("unitId" in grant)));
+        await target.query(`UPDATE user_units SET role='ATTENDANT'
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+        await target.query(`UPDATE units SET active=false
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+        const inactiveUnitResponse = await httpApp.inject({ method: "GET", url: "/v1/me",
+          headers: { authorization: "Bearer database-backed-token" } });
+        assert.equal(inactiveUnitResponse.statusCode, 403);
+        assert.equal(inactiveUnitResponse.json().type, "urn:zap-pronto:error:account-not-assigned");
+        await target.query(`UPDATE units SET active=true
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      } finally {
+        await httpApp.close();
+      }
 
       await assert.rejects(
         target.query(`INSERT INTO oidc_providers
