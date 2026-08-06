@@ -2,9 +2,10 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 05/08/2026
+## Status de execução — 06/08/2026
 
-- Fase atual: **Fase 0 — baseline executável**.
+- Fase 0: concluída, publicada e validada no CI remoto.
+- Fase atual: **Fase 1 — isolamento e integridade**.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -12,7 +13,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Controle de migrations por checksum e advisory lock: aprovado localmente.
 - CI com PostgreSQL 18, typecheck e testes: configurado; execução remota pendente do primeiro push.
 - Primeiro commit canônico local: criado e validado.
-- Pendente para encerrar a fase: push e execução verde do CI remoto.
+- Contexto transacional parametrizado e testes de pool: em implementação.
 - Fases 1–9: não iniciadas.
 
 ## Premissas
