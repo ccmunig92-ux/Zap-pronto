@@ -8,6 +8,7 @@ import { registerProblemDetailsHandler } from "./http/problem-details.js";
 import type { TenantTransactionPool } from "@zap-pronto/core/database/tenant-transaction";
 import { registerCurrentUserRoute } from "./routes/current-user.js";
 import { registerUserInvitationRoutes } from "./routes/user-invitations.js";
+import { registerUserAdministrationRoutes } from "./routes/user-administration.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
@@ -48,5 +49,6 @@ export async function buildApp(options: BuildAppOptions = {}) {
   }, async () => ({ status: "ok" as const }));
   registerCurrentUserRoute(app, options.pool ?? unavailablePool);
   registerUserInvitationRoutes(app, options.pool ?? unavailablePool);
+  registerUserAdministrationRoutes(app, options.pool ?? unavailablePool);
   return app;
 }

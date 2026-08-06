@@ -4,6 +4,7 @@ import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import { apiClient } from "./api.js";
 import { isAuthConfigured, signIn } from "./auth.js";
 import { InvitationPanel, type InvitationClient } from "./InvitationPanel.js";
+import { AdministrationPanel, type AdministrationClient } from "./AdministrationPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -12,8 +13,9 @@ type SessionState =
   | { status: "error"; message: string; correlationId?: string };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
-export function App({ client = apiClient, invitationClient = apiClient }: {
+export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
+  readonly administrationClient?: AdministrationClient;
 }) {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [loginError, setLoginError] = useState<string>();
@@ -47,6 +49,6 @@ export function App({ client = apiClient, invitationClient = apiClient }: {
     <section><h2>Unidades vinculadas</h2><ul>{currentUser.memberships.map((membership) =>
       <li key={membership.unitId}><strong>{membership.unitName}</strong> <span>{membership.role}</span></li>)}</ul></section>
     {currentUser.grants.some((grant) => grant.permission === "tenant.users.manage" && grant.scope === "TENANT")
-      && <InvitationPanel client={invitationClient}/>}
+      && <><InvitationPanel client={invitationClient}/><AdministrationPanel client={administrationClient}/></>}
   </main>;
 }

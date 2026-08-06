@@ -32,7 +32,7 @@ export const permissionValues = [
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
 
-const MembershipSchema = Type.Object({
+export const UserMembershipSchema = Type.Object({
   unitId: Type.String({ format: "uuid" }),
   unitCode: Type.String(),
   unitName: Type.String(),
@@ -55,7 +55,7 @@ export const CurrentUserSchema = Type.Object({
     id: Type.String({ format: "uuid" }),
     name: Type.String(),
   }, { additionalProperties: false }),
-  memberships: Type.Array(MembershipSchema),
+  memberships: Type.Array(UserMembershipSchema),
   grants: Type.Array(GrantSchema),
 }, { $id: "CurrentUser", additionalProperties: false });
 export type CurrentUser = Static<typeof CurrentUserSchema>;
@@ -112,3 +112,77 @@ export const UserInvitationOptionsSchema = Type.Object({
   roles: Type.Array(InvitationRoleSchema),
 }, { $id: "UserInvitationOptions", additionalProperties: false });
 export type UserInvitationOptions = Static<typeof UserInvitationOptionsSchema>;
+
+export const UserLifecycleActionSchema = Type.Union([
+  Type.Literal("BLOCK"), Type.Literal("ACTIVATE"), Type.Literal("REVOKE"),
+]);
+export const InvitationLifecycleActionSchema = Type.Union([
+  Type.Literal("REVOKE"), Type.Literal("REISSUE"),
+]);
+
+export const AdministrativeUserSchema = Type.Object({
+  id: Type.String({ format: "uuid" }), email: Type.String(), displayName: Type.String(),
+  status: Type.Union([Type.Literal("ACTIVE"), Type.Literal("BLOCKED"), Type.Literal("REVOKED")]),
+  version: Type.Integer({ minimum: 1 }), memberships: Type.Array(UserMembershipSchema),
+  allowedActions: Type.Array(UserLifecycleActionSchema, { uniqueItems: true }),
+}, { additionalProperties: false });
+export type AdministrativeUser = Static<typeof AdministrativeUserSchema>;
+
+export const AdministrativeInvitationSchema = Type.Object({
+  id: Type.String({ format: "uuid" }), email: Type.String(), displayName: Type.String(),
+  status: Type.Union([Type.Literal("PENDING"), Type.Literal("ACCEPTED"), Type.Literal("REVOKED"), Type.Literal("EXPIRED")]),
+  expiresAt: Type.String({ format: "date-time" }), providerCode: Type.String(),
+  assignments: Type.Array(Type.Object({ unitId: Type.String({ format: "uuid" }), unitCode: Type.String(),
+    unitName: Type.String(), role: InvitationRoleSchema }, { additionalProperties: false })),
+  allowedActions: Type.Array(InvitationLifecycleActionSchema, { uniqueItems: true }),
+}, { additionalProperties: false });
+export type AdministrativeInvitation = Static<typeof AdministrativeInvitationSchema>;
+
+export const AdministrativeUsersPageSchema = Type.Object({
+  items: Type.Array(AdministrativeUserSchema), nextCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+}, { $id: "AdministrativeUsersPage", additionalProperties: false });
+export type AdministrativeUsersPage = Static<typeof AdministrativeUsersPageSchema>;
+
+export const AdministrativeInvitationsPageSchema = Type.Object({
+  items: Type.Array(AdministrativeInvitationSchema), nextCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+}, { $id: "AdministrativeInvitationsPage", additionalProperties: false });
+export type AdministrativeInvitationsPage = Static<typeof AdministrativeInvitationsPageSchema>;
+
+export const ChangeUserStatusRequestSchema = Type.Object({
+  action: UserLifecycleActionSchema, expectedVersion: Type.Integer({ minimum: 1 }),
+  reason: Type.String({ minLength: 3, maxLength: 500 }),
+}, { $id: "ChangeUserStatusRequest", additionalProperties: false });
+export type ChangeUserStatusRequest = Static<typeof ChangeUserStatusRequestSchema>;
+
+export const RevokeInvitationRequestSchema = Type.Object({ reason: Type.String({ minLength: 3, maxLength: 500 }) },
+  { $id: "RevokeInvitationRequest", additionalProperties: false });
+export type RevokeInvitationRequest = Static<typeof RevokeInvitationRequestSchema>;
+
+export const ReissueInvitationRequestSchema = Type.Object({
+  expiresAt: Type.String({ format: "date-time" }), reason: Type.String({ minLength: 3, maxLength: 500 }),
+}, { $id: "ReissueInvitationRequest", additionalProperties: false });
+export type ReissueInvitationRequest = Static<typeof ReissueInvitationRequestSchema>;
+
+export const ChangeUserStatusResponseSchema = Type.Object({
+  user: Type.Object({ id: Type.String({ format: "uuid" }),
+    status: Type.Union([Type.Literal("ACTIVE"), Type.Literal("BLOCKED"), Type.Literal("REVOKED")]),
+    version: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
+  replayed: Type.Boolean(),
+}, { $id: "ChangeUserStatusResponse", additionalProperties: false });
+export type ChangeUserStatusResponse = Static<typeof ChangeUserStatusResponseSchema>;
+
+const InvitationMutationBaseSchema = Type.Object({ invitation: AdministrativeInvitationSchema },
+  { additionalProperties: false });
+export const RevokeInvitationResponseSchema = Type.Composite([InvitationMutationBaseSchema,
+  Type.Object({ replayed: Type.Boolean() }, { additionalProperties: false })],
+{ $id: "RevokeInvitationResponse", additionalProperties: false });
+export type RevokeInvitationResponse = Static<typeof RevokeInvitationResponseSchema>;
+
+export const ReissueInvitationResponseSchema = Type.Union([
+  Type.Composite([InvitationMutationBaseSchema, Type.Object({ replayed: Type.Literal(false),
+    invitationToken: Type.String({ minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" }) },
+  { additionalProperties: false })], { additionalProperties: false }),
+  Type.Composite([InvitationMutationBaseSchema, Type.Object({ replayed: Type.Literal(true) },
+    { additionalProperties: false })], { additionalProperties: false }),
+], { $id: "ReissueInvitationResponse" });
+export type ReissueInvitationResponse = Static<typeof ReissueInvitationResponseSchema>;

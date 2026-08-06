@@ -1,9 +1,14 @@
 import createClient from "openapi-fetch";
 import { FormatRegistry } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import { CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema,
+import { AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusResponseSchema,
+  CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema, ReissueInvitationResponseSchema,
+  RevokeInvitationResponseSchema,
   UserInvitationOptionsSchema, type CreateUserInvitationRequest, type CreateUserInvitationResponse,
-  type CurrentUser, type ProblemDetails, type UserInvitationOptions } from "@zap-pronto/contracts";
+  type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
+  type ChangeUserStatusResponse, type CurrentUser, type ProblemDetails, type ReissueInvitationRequest,
+  type ReissueInvitationResponse, type RevokeInvitationRequest, type RevokeInvitationResponse,
+  type UserInvitationOptions } from "@zap-pronto/contracts";
 import type { paths } from "./generated.js";
 
 if (!FormatRegistry.Has("uuid")) FormatRegistry.Set("uuid", (value) =>
@@ -66,5 +71,41 @@ export function createApiClient(options: ApiClientOptions) {
     if (!response.ok) mapFailure(error);
     if (!Value.Check(CreateUserInvitationResponseSchema, data)) throw new InvalidApiResponse();
     return data;
+  }, async listAdministrativeUsers(input: { limit?: number; cursor?: string } = {}): Promise<AdministrativeUsersPage> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.GET("/v1/users", { params: { query: input },
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(AdministrativeUsersPageSchema, data)) throw new InvalidApiResponse(); return data;
+  }, async listAdministrativeInvitations(input: { limit?: number; cursor?: string } = {}): Promise<AdministrativeInvitationsPage> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.GET("/v1/users/invitations", { params: { query: input },
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(AdministrativeInvitationsPageSchema, data)) throw new InvalidApiResponse(); return data;
+  }, async changeAdministrativeUserStatus(userId: string, input: ChangeUserStatusRequest,
+    idempotencyKey: string): Promise<ChangeUserStatusResponse> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.POST("/v1/users/{userId}/status", { params: {
+      path: { userId }, header: { "idempotency-key": idempotencyKey } }, body: input,
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(ChangeUserStatusResponseSchema, data)) throw new InvalidApiResponse(); return data;
+  }, async revokeUserInvitation(invitationId: string, input: RevokeInvitationRequest,
+    idempotencyKey: string): Promise<RevokeInvitationResponse> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.POST("/v1/users/invitations/{invitationId}/revoke", { params: {
+      path: { invitationId }, header: { "idempotency-key": idempotencyKey } }, body: input,
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(RevokeInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
+  }, async reissueUserInvitation(invitationId: string, input: ReissueInvitationRequest,
+    idempotencyKey: string): Promise<ReissueInvitationResponse> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.POST("/v1/users/invitations/{invitationId}/reissue", { params: {
+      path: { invitationId }, header: { "idempotency-key": idempotencyKey } }, body: input,
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(ReissueInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
   } };
 }

@@ -68,3 +68,31 @@ test("invitation client loads canonical options and sends one idempotent POST", 
   assert.equal(requests[0]?.url, "https://api.example.test/v1/users/invitations/options");
   assert.equal(requests[1]?.headers.get("idempotency-key"), "invitation-command-1");
 });
+
+test("administration client uses generated lifecycle paths and explicit idempotency", async () => {
+  const requests: Request[] = [];
+  const invitation = { id: "44444444-4444-4444-8444-444444444444", email: "user@example.test",
+    displayName: "User", status: "REVOKED", expiresAt: "2026-08-20T12:00:00.000Z", providerCode: "primary",
+    assignments: [], allowedActions: ["REISSUE"] };
+  const client = createApiClient({ baseUrl: "https://api.example.test", getAccessToken: async () => "token",
+    fetch: async (request) => { requests.push(request); const url = new URL(request.url);
+      if (request.method === "GET" && url.pathname === "/v1/users") return Response.json({ items: [] });
+      if (request.method === "GET") return Response.json({ items: [invitation] });
+      if (url.pathname.endsWith("/status")) return Response.json({ user: {
+        id: "55555555-5555-4555-8555-555555555555", status: "BLOCKED", version: 2 }, replayed: false });
+      if (url.pathname.endsWith("/reissue")) return Response.json({ invitation: { ...invitation,
+        id: "66666666-6666-4666-8666-666666666666", status: "PENDING", allowedActions: ["REVOKE", "REISSUE"] },
+        replayed: false, invitationToken: "a".repeat(43) }, { status: 201 });
+      return Response.json({ invitation, replayed: false });
+    } });
+  await client.listAdministrativeUsers({ limit: 10 }); await client.listAdministrativeInvitations();
+  await client.changeAdministrativeUserStatus("55555555-5555-4555-8555-555555555555",
+    { action: "BLOCK", expectedVersion: 1, reason: "Security review" }, "status-command-1");
+  await client.revokeUserInvitation(invitation.id, { reason: "Reissue" }, "revoke-command-1");
+  await client.reissueUserInvitation(invitation.id, { reason: "New expiry",
+    expiresAt: "2026-08-21T12:00:00.000Z" }, "reissue-command-1");
+  assert.equal(requests.length, 5);
+  assert.equal(new URL(requests[0]!.url).searchParams.get("limit"), "10");
+  assert.deepEqual(requests.slice(2).map((request) => request.headers.get("idempotency-key")),
+    ["status-command-1", "revoke-command-1", "reissue-command-1"]);
+});
