@@ -1,0 +1,21 @@
+{
+  "name": "zap-pronto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:test": "node scripts/db-test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && node --test dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
+}
