@@ -97,6 +97,20 @@ test("administrative invitation creation returns a one-time token and replay omi
       status: "PENDING", expires_at: "2026-08-20T12:00:00.000Z", oidc_provider_code: "primary",
       assignments: [{ unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO",
         unitName: "Centro", role: "ATTENDANT" }], replayed }] };
+    if (sql.includes("WITH admin_count")) return { rows: [{ id: "55555555-5555-4555-8555-555555555555",
+      email: "staff@example.test", display_name: "Staff", status: "ACTIVE", version: 2,
+      memberships: [], is_self: false, is_last_admin: false }] };
+    if (sql.includes("WITH anchor AS") && sql.includes("user_invitations")) return { rows: [] };
+    if (sql.includes("admin_change_user_status")) return { rowCount: 1, rows: [{
+      user_id: "55555555-5555-4555-8555-555555555555", status: "BLOCKED", version: 3, replayed: false }] };
+    if (sql.includes("admin_revoke_user_invitation")) return { rowCount: 1, rows: [{
+      id: "44444444-4444-4444-8444-444444444444", email: "user@example.test", display_name: "User",
+      status: "REVOKED", expires_at: "2026-08-20T12:00:00.000Z", oidc_provider_code: "primary",
+      assignments: [], replayed: false }] };
+    if (sql.includes("admin_reissue_user_invitation")) return { rowCount: 1, rows: [{
+      id: "66666666-6666-4666-8666-666666666666", email: "user@example.test", display_name: "User",
+      status: "PENDING", expires_at: "2026-08-21T12:00:00.000Z", oidc_provider_code: "primary",
+      assignments: [], replayed: false }] };
     return { rows: [] };
   }, release() {} };
   const app = await buildApp({ pool: { async connect() { return connection; } }, identityVerifier: {
@@ -122,6 +136,26 @@ test("administrative invitation creation returns a one-time token and replay omi
     authorization: "Bearer accepted", "idempotency-key": "invitation-command-1" }, payload });
   assert.equal(replay.statusCode, 200);
   assert.equal("invitationToken" in replay.json(), false);
+  const users = await app.inject({ method: "GET", url: "/v1/users?limit=25",
+    headers: { authorization: "Bearer accepted" } });
+  assert.equal(users.statusCode, 200); assert.deepEqual(users.json().items[0].allowedActions, ["BLOCK", "REVOKE"]);
+  const invalidCursor = await app.inject({ method: "GET", url: "/v1/users?cursor=invalid",
+    headers: { authorization: "Bearer accepted" } });
+  assert.equal(invalidCursor.statusCode, 400);
+  const statusChange = await app.inject({ method: "POST",
+    url: "/v1/users/55555555-5555-4555-8555-555555555555/status", headers: {
+      authorization: "Bearer accepted", "idempotency-key": "status-command-1" },
+    payload: { action: "BLOCK", expectedVersion: 2, reason: "Security review" } });
+  assert.equal(statusChange.statusCode, 200); assert.equal(statusChange.json().user.version, 3);
+  const revoked = await app.inject({ method: "POST",
+    url: "/v1/users/invitations/44444444-4444-4444-8444-444444444444/revoke", headers: {
+      authorization: "Bearer accepted", "idempotency-key": "revoke-command-1" }, payload: { reason: "Reissue" } });
+  assert.equal(revoked.statusCode, 200); assert.equal(revoked.json().invitation.status, "REVOKED");
+  const reissued = await app.inject({ method: "POST",
+    url: "/v1/users/invitations/44444444-4444-4444-8444-444444444444/reissue", headers: {
+      authorization: "Bearer accepted", "idempotency-key": "reissue-command-1" },
+    payload: { reason: "New expiry", expiresAt: "2026-08-21T12:00:00.000Z" } });
+  assert.equal(reissued.statusCode, 201); assert.equal(reissued.json().invitationToken.length, 43);
   await app.close();
 });
 

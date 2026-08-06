@@ -34,7 +34,8 @@
     ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
     "./database/tenant-transaction": { "types": "./src/database/tenant-transaction.ts", "default": "./dist/database/tenant-transaction.js" }
     ,"./database/current-user": { "types": "./src/database/current-user.ts", "default": "./dist/database/current-user.js" }
-    ,"./domain/user-invitations": { "types": "./src/domain/user-invitations.ts", "default": "./dist/domain/user-invitations.js" }
+      ,"./domain/user-invitations": { "types": "./src/domain/user-invitations.ts", "default": "./dist/domain/user-invitations.js" }
+      ,"./domain/user-administration": { "types": "./src/domain/user-administration.ts", "default": "./dist/domain/user-administration.js" }
   },
   "types": "./src/index.ts"
 }

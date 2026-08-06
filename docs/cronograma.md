@@ -69,6 +69,15 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Prova local do convite: RBAC negativo, unidade cross-tenant, JSON/NULL inválido, replay sem duplicação,
   conflito de idempotência, expiração auditada e privilégios SQL estreitos passaram em PostgreSQL real;
   API, cliente, OpenAPI e dez testes web também passaram.
+- Lifecycle administrativo 3B concluído localmente no fluxo único: listagens paginadas de usuários e
+  convites, bloqueio, reativação e revogação de conta, além de revogação e reemissão atômicas de convite.
+  Todas as mutações exigem Idempotency-Key, versão otimista quando aplicável, motivo, auditoria e outbox.
+- Reemissão invalida o convite anterior e entrega novo token bruto somente no primeiro `201`; replay não
+  recupera token. Self-removal, último administrador, unidade/tenant alheios e concorrência são bloqueados.
+- A listagem de convites permanece atrás de função SQL estreita e autorizada; a API não recebeu SELECT
+  direto nas tabelas protegidas. Paginação usa cursor validado e limite máximo de 100.
+- Prova local do lifecycle administrativo: migrations 0001–0014 e upgrade legado aprovados no PostgreSQL
+  real; core com 22 testes, API 14, cliente 7 e frontend 14 aprovados; OpenAPI sem drift.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
@@ -216,8 +225,8 @@ Critérios de aceite:
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
 2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Implementar o aceite/provisionamento OIDC e expor bloqueio, reativação, revogação e reemissão por HTTP,
-   reutilizando o lifecycle transacional das migrations `0012` e `0013`.
+3. Implementar o aceite/provisionamento OIDC do convite, reutilizando o lifecycle transacional das
+   migrations `0012`–`0014`, sem permitir criação de sessão antes da ativação atômica.
 4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 

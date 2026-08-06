@@ -25,4 +25,19 @@ export const apiClient = {
   createUserInvitation(...parameters: Parameters<typeof transportClient.createUserInvitation>) {
     return transportClient.createUserInvitation(...parameters);
   },
+  listAdministrativeUsers(...parameters: Parameters<typeof transportClient.listAdministrativeUsers>) {
+    return transportClient.listAdministrativeUsers(...parameters);
+  },
+  listAdministrativeInvitations(...parameters: Parameters<typeof transportClient.listAdministrativeInvitations>) {
+    return transportClient.listAdministrativeInvitations(...parameters);
+  },
+  changeAdministrativeUserStatus(...parameters: Parameters<typeof transportClient.changeAdministrativeUserStatus>) {
+    return transportClient.changeAdministrativeUserStatus(...parameters);
+  },
+  revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
+    return transportClient.revokeUserInvitation(...parameters);
+  },
+  reissueUserInvitation(...parameters: Parameters<typeof transportClient.reissueUserInvitation>) {
+    return transportClient.reissueUserInvitation(...parameters);
+  },
 };
