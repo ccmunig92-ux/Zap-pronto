@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test dist",
+    "test": "pnpm --filter @zap-pronto/core --filter @zap-pronto/contracts build && pnpm build && node --test dist",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -14,6 +14,11 @@
     "@sinclair/typebox": "^0.34.41",
     "@zap-pronto/contracts": "workspace:*",
     "@zap-pronto/core": "workspace:*",
-    "fastify": "^5.5.0"
+    "fastify": "^5.5.0",
+    "jose": "^6.1.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.4"
   }
 }

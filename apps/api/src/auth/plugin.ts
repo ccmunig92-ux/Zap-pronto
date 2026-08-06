@@ -16,6 +16,8 @@ declare module "fastify" {
   interface FastifyContextConfig {
     public?: boolean;
     permission?: Permission;
+    authenticated?: boolean;
+    bootstrap?: boolean;
   }
 }
 
@@ -53,8 +55,11 @@ export function registerAuthenticationBoundary(
       throw new Error(`ROUTE_PUBLIC_NOT_ALLOWLISTED:${route.method}:${route.url}`);
     }
     if (isVersioned && !publicRoute &&
-      (route.config?.permission === undefined || !isProtectedRouteConfig(route.config))) {
+      (!route.config || !isProtectedRouteConfig(route.config))) {
       throw new Error(`ROUTE_AUTHORIZATION_POLICY_REQUIRED:${route.method}:${route.url}`);
+    }
+    if (route.config?.bootstrap === true && route.url !== "/v1/me") {
+      throw new Error(`ROUTE_BOOTSTRAP_POLICY_FORBIDDEN:${route.method}:${route.url}`);
     }
   });
   app.addHook("onRequest", async (request) => {

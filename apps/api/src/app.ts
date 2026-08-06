@@ -5,12 +5,19 @@ import { randomUUID } from "node:crypto";
 import type { IdentityVerifier } from "./auth/contracts.js";
 import { registerAuthenticationBoundary } from "./auth/plugin.js";
 import { registerProblemDetailsHandler } from "./http/problem-details.js";
+import type { TenantTransactionPool } from "@zap-pronto/core/database/tenant-transaction";
+import { registerCurrentUserRoute } from "./routes/current-user.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 export interface BuildAppOptions {
   readonly identityVerifier?: IdentityVerifier;
+  readonly pool?: TenantTransactionPool;
 }
+
+const unavailablePool: TenantTransactionPool = {
+  async connect() { throw new Error("DATABASE_POOL_UNAVAILABLE"); },
+};
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
@@ -38,5 +45,6 @@ export async function buildApp(options: BuildAppOptions = {}) {
     config: { public: true },
     schema: { operationId: "getHealthLive", security: [], response: { 200: HealthSchema } },
   }, async () => ({ status: "ok" as const }));
+  registerCurrentUserRoute(app, options.pool ?? unavailablePool);
   return app;
 }

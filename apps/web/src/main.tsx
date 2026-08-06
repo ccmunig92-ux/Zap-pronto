@@ -1,9 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import { App } from "./App.js";
+import { initializeAuth } from "./auth.js";
 
-function App() {
-  return <main><h1>Zap Pronto</h1><p>Console operacional em preparação segura.</p></main>;
-}
-
+await initializeAuth();
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
