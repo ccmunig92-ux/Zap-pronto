@@ -19,4 +19,10 @@ export const apiClient = {
     });
     return pendingCurrentUser;
   },
+  getUserInvitationOptions() {
+    return transportClient.getUserInvitationOptions();
+  },
+  createUserInvitation(...parameters: Parameters<typeof transportClient.createUserInvitation>) {
+    return transportClient.createUserInvitation(...parameters);
+  },
 };

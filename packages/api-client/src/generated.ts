@@ -32,6 +32,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/invitations/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getUserInvitationOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createUserInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -147,6 +179,330 @@ export interface operations {
             };
             /** @description Default Response */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    getUserInvitationOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        providers: {
+                            code: string;
+                        }[];
+                        units: {
+                            /** Format: uuid */
+                            id: string;
+                            code: string;
+                            name: string;
+                        }[];
+                        roles: ("UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR")[];
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    createUserInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    displayName: string;
+                    providerCode: string;
+                    /** Format: date-time */
+                    expiresAt: string;
+                    assignments: {
+                        /** Format: uuid */
+                        unitId: string;
+                        role: "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invitation: {
+                            /** Format: uuid */
+                            id: string;
+                            email: string;
+                            displayName: string;
+                            status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+                            /** Format: date-time */
+                            expiresAt: string;
+                            providerCode: string;
+                        };
+                        assignments: {
+                            /** Format: uuid */
+                            unitId: string;
+                            unitCode: string;
+                            unitName: string;
+                            role: "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                        }[];
+                        /** @enum {boolean} */
+                        replayed: false;
+                        invitationToken: string;
+                    } | {
+                        invitation: {
+                            /** Format: uuid */
+                            id: string;
+                            email: string;
+                            displayName: string;
+                            status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+                            /** Format: date-time */
+                            expiresAt: string;
+                            providerCode: string;
+                        };
+                        assignments: {
+                            /** Format: uuid */
+                            unitId: string;
+                            unitCode: string;
+                            unitName: string;
+                            role: "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                        }[];
+                        /** @enum {boolean} */
+                        replayed: true;
+                    };
+                };
+            };
+            /** @description Default Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invitation: {
+                            /** Format: uuid */
+                            id: string;
+                            email: string;
+                            displayName: string;
+                            status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+                            /** Format: date-time */
+                            expiresAt: string;
+                            providerCode: string;
+                        };
+                        assignments: {
+                            /** Format: uuid */
+                            unitId: string;
+                            unitCode: string;
+                            unitName: string;
+                            role: "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                        }[];
+                        /** @enum {boolean} */
+                        replayed: false;
+                        invitationToken: string;
+                    } | {
+                        invitation: {
+                            /** Format: uuid */
+                            id: string;
+                            email: string;
+                            displayName: string;
+                            status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+                            /** Format: date-time */
+                            expiresAt: string;
+                            providerCode: string;
+                        };
+                        assignments: {
+                            /** Format: uuid */
+                            unitId: string;
+                            unitCode: string;
+                            unitName: string;
+                            role: "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                        }[];
+                        /** @enum {boolean} */
+                        replayed: true;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
