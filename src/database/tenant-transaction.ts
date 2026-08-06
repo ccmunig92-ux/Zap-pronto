@@ -11,7 +11,7 @@ export interface TenantQueryClient {
 }
 
 export interface TenantTransactionConnection extends TenantQueryClient {
-  release(): void;
+  release(error?: Error | boolean): void;
 }
 
 export interface TenantTransactionPool {
@@ -48,13 +48,20 @@ export async function withTenantTransaction<T>(
          set_config('app.correlation_id', $3, true)`,
       [context.tenantId, context.actorId, context.correlationId],
     );
+    await client.query("SELECT assert_app_context_authorized()");
     const result = await operation(client);
     await client.query("COMMIT");
+    client.release();
     return result;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    let rollbackError: Error | undefined;
+    try {
+      await client.query("ROLLBACK");
+    } catch (failure) {
+      rollbackError = failure instanceof Error ? failure : new Error("ROLLBACK_FAILED");
+    }
+    if (rollbackError) client.release(rollbackError);
+    else client.release();
     throw error;
-  } finally {
-    client.release();
   }
 }

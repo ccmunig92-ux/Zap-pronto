@@ -11,16 +11,18 @@ const context = {
   correlationId: "request-12345678",
 };
 
-function fakePool(log: string[]): TenantTransactionPool {
+function fakePool(log: string[], failOnQuery?: string): TenantTransactionPool {
   return {
     async connect() {
       return {
         async query(query: string) {
-          log.push(query.replace(/\s+/g, " ").trim());
+          const normalized = query.replace(/\s+/g, " ").trim();
+          log.push(normalized);
+          if (normalized === failOnQuery) throw new Error(`${normalized}_FAILED`);
           return {};
         },
-        release() {
-          log.push("RELEASE");
+        release(error?: Error | boolean) {
+          log.push(error ? "RELEASE_DESTROYED" : "RELEASE");
         },
       };
     },
@@ -40,6 +42,7 @@ describe("withTenantTransaction", () => {
       "BEGIN",
       "SET LOCAL ROLE zap_pronto_app",
       "SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true), set_config('app.correlation_id', $3, true)",
+      "SELECT assert_app_context_authorized()",
       "OPERATION",
       "COMMIT",
       "RELEASE",
@@ -74,5 +77,18 @@ describe("withTenantTransaction", () => {
       /INVALID_TENANT_ID/,
     );
     assert.equal(connected, false);
+  });
+
+  test("destrói a conexão quando o rollback falha", async () => {
+    const log: string[] = [];
+
+    await assert.rejects(
+      withTenantTransaction(fakePool(log, "ROLLBACK"), context, async () => {
+        throw new Error("OPERATION_FAILED");
+      }),
+      /OPERATION_FAILED/,
+    );
+
+    assert.deepEqual(log.slice(-2), ["ROLLBACK", "RELEASE_DESTROYED"]);
   });
 });

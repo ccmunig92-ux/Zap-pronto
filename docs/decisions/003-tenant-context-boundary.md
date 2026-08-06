@@ -11,9 +11,10 @@ Cada caso de uso executa uma única transação:
 1. `BEGIN`;
 2. `SET LOCAL ROLE zap_pronto_app`;
 3. definição parametrizada de tenant, ator e correlation ID;
-4. operações do caso de uso;
-5. `COMMIT` ou `ROLLBACK`;
-6. devolução da conexão ao pool.
+4. validação de que o ator está ativo no tenant;
+5. operações do caso de uso;
+6. `COMMIT` ou `ROLLBACK`;
+7. devolução da conexão ao pool.
 
 `SET LOCAL` impede que o contexto sobreviva ao fim da transação e contamine outra requisição no pool.
 

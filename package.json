@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:migrate": "node scripts/db-migrate.mjs",
-    "db:test": "node scripts/db-test.mjs",
+    "db:test": "pnpm build && node scripts/db-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test dist"
   },
