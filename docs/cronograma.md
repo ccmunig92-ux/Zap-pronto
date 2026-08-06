@@ -13,10 +13,12 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Controle de migrations por checksum e advisory lock: aprovado localmente.
 - CI com PostgreSQL 18, typecheck e testes: configurado; execução remota pendente do primeiro push.
 - Primeiro commit canônico local: criado e validado.
-- Contexto transacional parametrizado e testes de pool: em implementação.
+- Contexto transacional parametrizado e testes de pool: concluídos.
 - Membership ator/tenant validado no banco: implementado localmente.
 - Matriz RLS das 19 tabelas: SELECT/INSERT/UPDATE/DELETE cruzados testados localmente.
-- Pendente para encerrar a Fase 1: reauditoria, CI do PR e revisão dos privilégios por componente.
+- Membership ator/tenant e matriz CRUD RLS: concluídos.
+- Papéis separados de API e worker: concluídos e reauditos.
+- Pendente para integrar a Fase 1: CI remoto verde e revisão/merge do PR.
 - Fases 1–9: não iniciadas.
 
 ## Premissas

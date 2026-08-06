@@ -40,7 +40,7 @@ describe("withTenantTransaction", () => {
     assert.equal(result, "ok");
     assert.deepEqual(log, [
       "BEGIN",
-      "SET LOCAL ROLE zap_pronto_app",
+      "SET LOCAL ROLE zap_pronto_api",
       "SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true), set_config('app.correlation_id', $3, true)",
       "SELECT assert_app_context_authorized()",
       "OPERATION",

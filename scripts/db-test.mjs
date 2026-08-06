@@ -17,6 +17,9 @@ await admin.connect();
 const runtimeRole = `zap_pronto_runtime_test_${randomBytes(4).toString("hex")}`;
 const runtimePassword = randomBytes(24).toString("base64url");
 const quotedRuntimeRole = `"${runtimeRole}"`;
+const workerRuntimeRole = `zap_pronto_worker_test_${randomBytes(4).toString("hex")}`;
+const workerRuntimePassword = randomBytes(24).toString("base64url");
+const quotedWorkerRuntimeRole = `"${workerRuntimeRole}"`;
 
 const targetUrl = new URL(adminConnection);
 targetUrl.pathname = `/${databaseName}`;
@@ -28,10 +31,18 @@ try {
   const target = new pg.Client({ connectionString: targetUrl.toString() });
   await target.connect();
   try {
+    await target.query(`
+      CREATE TABLE schema_migrations (
+        filename text PRIMARY KEY,
+        checksum_sha256 char(64) NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
     for (const filename of [
       "0001_core.sql",
       "0002_tenant_context_hardening.sql",
       "0003_actor_context_authorization.sql",
+      "0004_component_roles.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -49,12 +60,32 @@ try {
     assert.equal(role.rows[0].rolsuper, false);
     assert.equal(role.rows[0].rolbypassrls, false);
 
+    const cleanMemberships = await admin.query(`
+      SELECT component.rolname,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = component.oid) AS parent_count,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = component.oid) AS member_count
+      FROM pg_roles component
+      WHERE component.rolname IN ('zap_pronto_app', 'zap_pronto_api', 'zap_pronto_worker')
+      ORDER BY component.rolname
+    `);
+    assert.deepEqual(cleanMemberships.rows, [
+      { rolname: "zap_pronto_api", parent_count: 0, member_count: 0 },
+      { rolname: "zap_pronto_app", parent_count: 0, member_count: 0 },
+      { rolname: "zap_pronto_worker", parent_count: 0, member_count: 0 },
+    ]);
+
     const escapedPassword = runtimePassword.replaceAll("'", "''");
     await admin.query(
       `CREATE ROLE ${quotedRuntimeRole} LOGIN PASSWORD '${escapedPassword}' ` +
         "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT",
     );
-    await admin.query(`GRANT zap_pronto_app TO ${quotedRuntimeRole}`);
+    await admin.query(`GRANT zap_pronto_api TO ${quotedRuntimeRole}`);
+    const escapedWorkerPassword = workerRuntimePassword.replaceAll("'", "''");
+    await admin.query(
+      `CREATE ROLE ${quotedWorkerRuntimeRole} LOGIN PASSWORD '${escapedWorkerPassword}' ` +
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT",
+    );
+    await admin.query(`GRANT zap_pronto_worker TO ${quotedWorkerRuntimeRole}`);
 
     const runtimeProperties = await admin.query(
       "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = $1",
@@ -67,6 +98,12 @@ try {
       rolreplication: false,
       rolbypassrls: false,
     });
+    const crossMembership = await admin.query(`
+      SELECT
+        pg_has_role($1, 'zap_pronto_worker', 'MEMBER') AS api_is_worker,
+        pg_has_role($2, 'zap_pronto_api', 'MEMBER') AS worker_is_api
+    `, [runtimeRole, workerRuntimeRole]);
+    assert.deepEqual(crossMembership.rows[0], { api_is_worker: false, worker_is_api: false });
 
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
@@ -99,6 +136,90 @@ try {
       WHERE n.nspname = 'public' AND r.rolname = $1
     `, [runtimeRole]);
     assert.equal(runtimeOwnedTables.rowCount, 0);
+
+    const roleSecurity = await admin.query(`
+      SELECT role.rolname, role.rolcanlogin, role.rolsuper, role.rolcreatedb,
+             role.rolcreaterole, role.rolreplication, role.rolbypassrls,
+             (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = role.oid) AS parent_count,
+             (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = role.oid) AS member_count
+      FROM pg_roles role
+      WHERE role.rolname IN ('zap_pronto_app', 'zap_pronto_api', 'zap_pronto_worker')
+      ORDER BY role.rolname
+    `);
+    assert.equal(roleSecurity.rowCount, 3);
+    for (const role of roleSecurity.rows) {
+      assert.deepEqual(
+        {
+          rolcanlogin: role.rolcanlogin,
+          rolsuper: role.rolsuper,
+          rolcreatedb: role.rolcreatedb,
+          rolcreaterole: role.rolcreaterole,
+          rolreplication: role.rolreplication,
+          rolbypassrls: role.rolbypassrls,
+          parent_count: role.parent_count,
+          member_count: role.member_count,
+        },
+        {
+          rolcanlogin: false,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolbypassrls: false,
+          parent_count: 0,
+          member_count: role.rolname === "zap_pronto_app" ? 0 : 1,
+        },
+        `${role.rolname}:UNSAFE_ROLE_CONFIGURATION`,
+      );
+    }
+
+    const apiWritable = new Set([
+      "units", "users", "user_units", "channel_connections", "channel_connection_units",
+      "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
+      "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
+    ]);
+    const apiInsertOnly = new Set(["messages", "outbox_events", "audit_events"]);
+    const workerReadable = new Set([
+      "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
+      "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
+      "human_handoffs", "outbox_events",
+    ]);
+
+    for (const table of protectedTables) {
+      for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
+        const privileges = await target.query(`
+          SELECT
+            has_table_privilege($1, $2, 'SELECT') AS can_select,
+            has_table_privilege($1, $2, 'INSERT') AS can_insert,
+            has_table_privilege($1, $2, 'UPDATE') AS can_update,
+            has_table_privilege($1, $2, 'DELETE') AS can_delete
+        `, [role, `public.${table}`]);
+        const expected = role === "zap_pronto_api"
+          ? {
+              can_select: true,
+              can_insert: apiWritable.has(table) || apiInsertOnly.has(table),
+              can_update: apiWritable.has(table),
+              can_delete: false,
+            }
+          : role === "zap_pronto_worker"
+            ? {
+                can_select: workerReadable.has(table),
+                can_insert: table === "audit_events",
+                can_update: table === "outbox_events",
+                can_delete: false,
+              }
+            : { can_select: false, can_insert: false, can_update: false, can_delete: false };
+        assert.deepEqual(privileges.rows[0], expected, `${role}:${table}:PRIVILEGE_MATRIX_MISMATCH`);
+      }
+    }
+
+    for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
+      const migrationsPrivilege = await target.query(
+        "SELECT has_table_privilege($1, 'public.schema_migrations', 'SELECT') AS allowed",
+        [role],
+      );
+      assert.equal(migrationsPrivilege.rows[0].allowed, false, `${role}:SCHEMA_MIGRATIONS_EXPOSED`);
+    }
 
     await target.query(`
       INSERT INTO tenants (id, name) VALUES
@@ -164,6 +285,10 @@ try {
     runtimeUrl.username = runtimeRole;
     runtimeUrl.password = runtimePassword;
     const runtimePool = new pg.Pool({ connectionString: runtimeUrl.toString(), max: 1 });
+    const workerUrl = new URL(targetUrl);
+    workerUrl.username = workerRuntimeRole;
+    workerUrl.password = workerRuntimePassword;
+    const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     try {
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
@@ -179,10 +304,14 @@ try {
       assert.deepEqual(tenantA.rows.map((row) => row.code), ["POOL-A"]);
       const backendPid = tenantA.rows[0].backend_pid;
 
+      // Elevação exclusiva do banco descartável para exercitar todas as policies.
+      await target.query("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO zap_pronto_api");
+      await target.query("REVOKE UPDATE, DELETE ON audit_events FROM zap_pronto_api");
+
       for (const table of protectedTables) {
         const insertPrivilege = await target.query(
           "SELECT has_table_privilege($1, $2, 'INSERT') AS allowed",
-          ["zap_pronto_app", `public.${table}`],
+          ["zap_pronto_api", `public.${table}`],
         );
         assert.equal(insertPrivilege.rows[0].allowed, true, `${table}:RUNTIME_INSERT_PRIVILEGE_MISSING`);
       }
@@ -261,8 +390,8 @@ try {
 
       const auditPrivileges = await target.query(`
         SELECT
-          has_table_privilege('zap_pronto_app', 'public.audit_events', 'UPDATE') AS can_update,
-          has_table_privilege('zap_pronto_app', 'public.audit_events', 'DELETE') AS can_delete
+          has_table_privilege('zap_pronto_api', 'public.audit_events', 'UPDATE') AS can_update,
+          has_table_privilege('zap_pronto_api', 'public.audit_events', 'DELETE') AS can_delete
       `);
       assert.deepEqual(auditPrivileges.rows[0], { can_update: false, can_delete: false });
 
@@ -302,7 +431,7 @@ try {
           const client = await runtimePool.connect();
           try {
             await client.query("BEGIN");
-            await client.query("SET LOCAL ROLE zap_pronto_app");
+            await client.query("SET LOCAL ROLE zap_pronto_api");
             const pid = await client.query("SELECT pg_backend_pid() AS backend_pid");
             assert.equal(pid.rows[0].backend_pid, backendPid);
             await client.query("SELECT count(*) FROM units");
@@ -345,7 +474,7 @@ try {
           const client = await runtimePool.connect();
           try {
             await client.query("BEGIN");
-            await client.query("SET LOCAL ROLE zap_pronto_app");
+            await client.query("SET LOCAL ROLE zap_pronto_api");
             const pid = await client.query("SELECT pg_backend_pid() AS backend_pid");
             assert.equal(pid.rows[0].backend_pid, backendPid);
             await client.query("SELECT count(*) FROM units");
@@ -367,8 +496,45 @@ try {
         async (client) => client.query("SELECT code FROM units ORDER BY code"),
       );
       assert.deepEqual(afterRollback.rows.map((row) => row.code), ["POOL-B"]);
+
+      const worker = await workerPool.connect();
+      try {
+        await worker.query("BEGIN");
+        await worker.query("SET LOCAL ROLE zap_pronto_worker");
+        await worker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        await worker.query("SELECT assert_app_context_authorized()");
+        const claimed = await worker.query(
+          "UPDATE outbox_events SET attempts = attempts + 1 WHERE idempotency_key = 'outbox-a' RETURNING attempts",
+        );
+        assert.equal(claimed.rows[0].attempts, 1);
+        await worker.query("COMMIT");
+      } finally {
+        worker.release();
+      }
+
+      for (const forbiddenSql of ["SELECT * FROM prices", "INSERT INTO messages (tenant_id) VALUES ('40000000-0000-4000-8000-000000000001')"]) {
+        const workerCheck = await workerPool.connect();
+        try {
+          await workerCheck.query("BEGIN");
+          await workerCheck.query("SET LOCAL ROLE zap_pronto_worker");
+          await workerCheck.query(
+            `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+            ["40000000-0000-4000-8000-000000000001", actorAId],
+          );
+          await workerCheck.query("SELECT assert_app_context_authorized()");
+          await assert.rejects(workerCheck.query(forbiddenSql), (error) =>
+            error instanceof Error && "code" in error && error.code === "42501");
+        } finally {
+          await workerCheck.query("ROLLBACK").catch(() => undefined);
+          workerCheck.release();
+        }
+      }
     } finally {
       await runtimePool.end();
+      await workerPool.end();
     }
     process.stdout.write("database integration tests passed\n");
   } finally {
@@ -379,5 +545,6 @@ try {
     await admin.query(`DROP DATABASE IF EXISTS ${quotedDatabase} WITH (FORCE)`);
   }
   await admin.query(`DROP ROLE IF EXISTS ${quotedRuntimeRole}`).catch(() => undefined);
+  await admin.query(`DROP ROLE IF EXISTS ${quotedWorkerRuntimeRole}`).catch(() => undefined);
   await admin.end();
 }

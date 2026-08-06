@@ -40,7 +40,7 @@ export async function withTenantTransaction<T>(
 
   try {
     await client.query("BEGIN");
-    await client.query("SET LOCAL ROLE zap_pronto_app");
+    await client.query("SET LOCAL ROLE zap_pronto_api");
     await client.query(
       `SELECT
          set_config('app.tenant_id', $1, true),
