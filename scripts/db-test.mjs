@@ -59,6 +59,7 @@ try {
       "0013_admin_invitations.sql",
       "0014_invitation_user_lifecycle.sql",
       "0015_oidc_invitation_acceptance.sql",
+      "0016_invitation_acceptance_rate_limit.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -131,7 +132,8 @@ try {
       "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
     protectedTables.sort();
-    const allProtectedTables = [...catalogTables, ...protectedTables].sort();
+    const globalHiddenTables = ["invitation_acceptance_rate_limits"];
+    const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
              count(p.policyname)::integer AS policy_count
@@ -204,7 +206,10 @@ try {
       "messages", "audit_events", "workflow_transitions", "quote_items",
       "medical_order_review_events",
     ]);
-    const apiHidden = new Set(["user_invitations", "user_invitation_units", "user_lifecycle_commands"]);
+    const apiHidden = new Set([
+      "user_invitations", "user_invitation_units", "user_lifecycle_commands",
+      "invitation_acceptance_rate_limits",
+    ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -454,6 +459,97 @@ try {
     const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     const competingWorkerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     try {
+      const consumeInvitationAcceptanceRateLimit = async (pool, principalKeyHash) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_api");
+          const result = await client.query(
+            "SELECT * FROM consume_invitation_acceptance_rate_limit($1)",
+            [principalKeyHash],
+          );
+          await client.query("COMMIT");
+          return result.rows[0];
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
+        }
+      };
+
+      const limiterPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS app_execute,
+        has_table_privilege('zap_pronto_api','invitation_acceptance_rate_limits','SELECT') AS api_select,
+        has_table_privilege('zap_pronto_api','invitation_acceptance_rate_limits','INSERT') AS api_insert,
+        has_table_privilege('zap_pronto_worker','invitation_acceptance_rate_limits','SELECT') AS worker_select`);
+      assert.deepEqual(limiterPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, app_execute: false,
+        api_select: false, api_insert: false, worker_select: false,
+      });
+
+      await assert.rejects(
+        consumeInvitationAcceptanceRateLimit(runtimePool, Buffer.alloc(31, 0x16)),
+        (error) => error instanceof Error && "code" in error && error.code === "22023"
+          && /INVALID_RATE_LIMIT_PRINCIPAL_KEY_HASH/.test(error.message),
+      );
+
+      const concurrentLimiterKey = Buffer.alloc(32, 0x16);
+      const concurrentLimiterResults = await Promise.all(
+        Array.from({ length: 12 }, (_, index) => consumeInvitationAcceptanceRateLimit(
+          index % 2 === 0 ? runtimePool : competingRuntimePool,
+          concurrentLimiterKey,
+        )),
+      );
+      assert.equal(concurrentLimiterResults.filter((result) => result.allowed).length, 10);
+      assert.equal(concurrentLimiterResults.filter((result) => !result.allowed).length, 2);
+      assert.equal(Math.min(...concurrentLimiterResults.map((result) => result.remaining)), 0);
+      for (const denied of concurrentLimiterResults.filter((result) => !result.allowed)) {
+        assert.ok(denied.retry_after_seconds >= 1 && denied.retry_after_seconds <= 900);
+        assert.ok(denied.reset_at instanceof Date && denied.reset_at.getTime() > Date.now());
+      }
+      const concurrentLimiterEvidence = await target.query(
+        "SELECT attempts FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [concurrentLimiterKey],
+      );
+      assert.equal(concurrentLimiterEvidence.rows[0].attempts, 12);
+
+      const persistedLimiterKey = Buffer.alloc(32, 0x17);
+      const firstPersistedConsumption = await consumeInvitationAcceptanceRateLimit(runtimePool, persistedLimiterKey);
+      assert.deepEqual(
+        { allowed: firstPersistedConsumption.allowed, remaining: firstPersistedConsumption.remaining,
+          retry_after_seconds: firstPersistedConsumption.retry_after_seconds },
+        { allowed: true, remaining: 9, retry_after_seconds: 0 },
+      );
+      const failedApplicationTransaction = await runtimePool.connect();
+      try {
+        await failedApplicationTransaction.query("BEGIN");
+        await failedApplicationTransaction.query("SET LOCAL ROLE zap_pronto_api");
+        await failedApplicationTransaction.query("SELECT 1");
+        await failedApplicationTransaction.query("ROLLBACK");
+      } finally {
+        await failedApplicationTransaction.query("ROLLBACK").catch(() => undefined);
+        failedApplicationTransaction.release();
+      }
+      const persistedLimiterEvidence = await target.query(
+        "SELECT attempts FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [persistedLimiterKey],
+      );
+      assert.equal(persistedLimiterEvidence.rows[0].attempts, 1);
+
+      const staleLimiterKey = Buffer.alloc(32, 0x18);
+      await target.query(`INSERT INTO invitation_acceptance_rate_limits
+        (principal_key_hash,window_started_at,attempts,updated_at)
+        VALUES ($1,clock_timestamp()-interval '2 days',1,clock_timestamp()-interval '2 days')`, [staleLimiterKey]);
+      await consumeInvitationAcceptanceRateLimit(runtimePool, Buffer.alloc(32, 0x19));
+      const staleLimiterEvidence = await target.query(
+        "SELECT count(*)::integer AS count FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [staleLimiterKey],
+      );
+      assert.equal(staleLimiterEvidence.rows[0].count, 0);
+
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
       const oidcClient = await runtimePool.connect();

@@ -6,6 +6,12 @@ export interface AcceptanceClient {
   acceptUserInvitation(invitationToken: string, idempotencyKey: string): Promise<AcceptUserInvitationResponse>;
 }
 
+function retryDelay(seconds: number): string {
+  if (seconds < 60) return `${seconds} ${seconds === 1 ? "segundo" : "segundos"}`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
+}
+
 export function AcceptInvitationPanel({ client, onAccepted }: {
   readonly client: AcceptanceClient; readonly onAccepted: (currentUser: CurrentUser) => void;
 }) {
@@ -29,7 +35,14 @@ export function AcceptInvitationPanel({ client, onAccepted }: {
       if (cause instanceof AuthenticationRequired) {
         setError({ message: "Entre com sua conta OIDC antes de aceitar o convite." });
       } else if (cause instanceof ApiProblem) {
-        setError({ message: cause.problem.title, correlationId: cause.problem.correlationId });
+        if (cause.problem.status === 429) {
+          setError({ message: cause.retryAfterSeconds
+            ? `Muitas tentativas. Tente novamente manualmente em ${retryDelay(cause.retryAfterSeconds)}.`
+            : "Muitas tentativas. Aguarde antes de tentar novamente manualmente.",
+          correlationId: cause.problem.correlationId });
+        } else {
+          setError({ message: cause.problem.title, correlationId: cause.problem.correlationId });
+        }
       } else {
         setError({ message: "Não foi possível aceitar o convite." });
       }

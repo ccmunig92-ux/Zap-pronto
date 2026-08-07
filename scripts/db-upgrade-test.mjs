@@ -121,6 +121,7 @@ try {
   assert.match(firstRun, /applied 0013_admin_invitations\.sql/);
   assert.match(firstRun, /applied 0014_invitation_user_lifecycle\.sql/);
   assert.match(firstRun, /applied 0015_oidc_invitation_acceptance\.sql/);
+  assert.match(firstRun, /applied 0016_invitation_acceptance_rate_limit\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthenticationRequired } from "@zap-pronto/api-client";
+import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type { CurrentUser } from "@zap-pronto/contracts";
 import { AcceptInvitationPanel, type AcceptanceClient } from "./AcceptInvitationPanel.js";
 
@@ -51,5 +51,22 @@ describe("OIDC invitation acceptance", () => {
     fireEvent.submit(form!);
     expect(await screen.findByText("Informe um token de convite válido.")).toBeTruthy();
     expect(accept).not.toHaveBeenCalled();
+  });
+
+  it.each([[37, "37 segundos"], [120, "2 minutos"]] as const)(
+    "shows retry-after %s on 429 without retrying automatically", async (retryAfter, delay) => {
+    const accept = vi.fn<AcceptanceClient["acceptUserInvitation"]>(async () => {
+      throw new ApiProblem({ type: "urn:test:rate-limit", title: "Too Many Requests", status: 429,
+        correlationId: "correlation-429" }, retryAfter);
+    });
+    render(<AcceptInvitationPanel client={{ acceptUserInvitation: accept }} onAccepted={() => undefined}/>);
+    const input = screen.getByLabelText("Token do convite") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: token } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar convite" }));
+    expect(await screen.findByText(`Muitas tentativas. Tente novamente manualmente em ${delay}.`)).toBeTruthy();
+    expect(screen.getByText("Correlação: correlation-429")).toBeTruthy();
+    expect(input.value).toBe(token);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(accept).toHaveBeenCalledTimes(1);
   });
 });

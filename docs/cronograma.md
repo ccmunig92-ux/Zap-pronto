@@ -85,8 +85,11 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   concorrência produz um vencedor e replay só é permitido para o mesmo comando e principal verificado.
 - Prova local do aceite: migrations 0001–0015 e upgrade aprovados; core 25, API 15, cliente 8 e frontend
   17 testes aprovados. Issuer/audience/org/email divergentes, convite vencido e cross-tenant falham fechados.
-- **Veto de exposição pública:** ainda não existe rate limiter distribuído no repositório. A rota de aceite
-  só pode ser liberada após rate limit no gateway/Redis (ou equivalente) com teste multi-instância.
+- Rate limit distribuído do aceite concluído na migration `0016`: PostgreSQL consome e confirma uma
+  tentativa antes da transação de aceite, com chave SHA-256 da identidade verificada, janela fixa de
+  15 minutos e máximo de 10 tentativas. A 11ª retorna 429 e `Retry-After`, sem retry automático na UI.
+- Prova do limiter: duas conexões concorrentes produziram dez permissões e duas recusas; o consumo
+  permanece após rollback posterior, tabela não tem grants diretos e cleanup é limitado com `SKIP LOCKED`.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
@@ -234,8 +237,8 @@ Critérios de aceite:
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
 2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Implementar rate limiting distribuído para autenticação/aceite e concluir a matriz HTTP/PostgreSQL
-   de IDOR e revogação antes de retirar o PR do estado draft.
+3. Concluir a matriz HTTP/PostgreSQL de IDOR e revogação e executar jornada E2E autenticada antes de
+   retirar o PR do estado draft.
 4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 

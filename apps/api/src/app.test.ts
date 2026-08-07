@@ -36,10 +36,14 @@ function authorizationPool(options: { resolved?: boolean; allowed?: boolean } = 
   return { pool: { async connect() { return connection; } }, queries };
 }
 
-function currentUserPool(options: { assigned?: boolean } = {}): TenantTransactionPool {
+function currentUserPool(options: { assigned?: boolean; rateAllowed?: boolean } = {}): TenantTransactionPool {
   return { async connect() {
     return {
       async query(sql) {
+        if (sql.includes("consume_invitation_acceptance_rate_limit")) return { rowCount: 1, rows: [{
+          allowed: options.rateAllowed !== false, remaining: options.rateAllowed === false ? 0 : 4,
+          retry_after_seconds: 37, reset_at: new Date(Date.now() + 37_000),
+        }] };
         if (sql.includes("accept_user_invitation_oidc")) return { rowCount: 1, rows: [{ replayed: false }] };
         if (sql.includes("resolve_oidc_principal")) return { rows: [{
           tenant_id: "11111111-1111-4111-8111-111111111111",
@@ -195,6 +199,20 @@ test("invitation acceptance uses verified OIDC email and never accepts tenant or
   assert.equal(response.headers["cache-control"], "no-store");
   assert.equal(response.json().currentUser.tenant.id, "11111111-1111-4111-8111-111111111111");
   assert.equal(response.json().replayed, false);
+  await app.close();
+});
+
+test("invitation acceptance rate limit commits first and returns 429 with Retry-After", async () => {
+  const app = await buildApp({ pool: currentUserPool({ rateAllowed: false }), identityVerifier: { async verifyBearer() {
+    return { issuer: "https://issuer.example", audience: "zap-pronto", subject: "limited-subject",
+      verifiedEmail: "agent@example.test" };
+  } } });
+  const response = await app.inject({ method: "POST", url: "/v1/auth/invitations/accept",
+    headers: { authorization: "Bearer accepted", "idempotency-key": "accept-command-2" },
+    payload: { invitationToken: "b".repeat(43) } });
+  assert.equal(response.statusCode, 429);
+  assert.equal(response.headers["retry-after"], "37");
+  assert.equal(response.json().type, "urn:zap-pronto:error:rate-limit-exceeded");
   await app.close();
 });
 
