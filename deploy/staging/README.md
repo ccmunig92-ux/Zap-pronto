@@ -25,7 +25,22 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 
 Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels ou no repositório.
 
+## Imagens publicadas
+
+O workflow manual `Publish staging images` só executa na branch padrão e no environment
+`oidc-homologation`. Ele exige as variáveis públicas `OIDC_ISSUER`, `OIDC_WEB_CLIENT_ID`,
+`OIDC_WEB_REDIRECT_URI` e `OIDC_WEB_POST_LOGOUT_REDIRECT_URI`, publica API e web no GHCR com SBOM,
+gera attestations de proveniência, bloqueia vulnerabilidades críticas conhecidas e registra no resumo as referências imutáveis `repo@sha256`.
+Copie somente essas referências para o `.env` externo de staging; tags por SHA não substituem o digest.
+O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` no environment;
+essa variável só deve ser criada depois de configurar reviewer obrigatório e política restrita à `main`.
+
 ## Critérios de aceite
+
+Antes de iniciar o stack, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.
+O comando não imprime nem lê o conteúdo dos secrets; exige imagens por digest, arquivos fora do repositório
+com a matriz `70:70/0400` para PostgreSQL e `1000:1000/0400` para API, endpoints OIDC HTTPS coerentes e os
+limites mínimos do manifesto. A validação operacional de owner/mode exige um host POSIX.
 
 1. `docker compose --env-file deploy/staging/.env -f deploy/staging/compose.yaml config --quiet` passa.
 2. Apenas `web` possui `ports`, com `host_ip` igual a `127.0.0.1`; `postgres` e `api` não possuem portas.
