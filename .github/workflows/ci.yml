@@ -40,7 +40,11 @@ jobs:
       - run: pnpm typecheck:all
       - run: pnpm test:all
       - run: pnpm build:all
-      - run: node --test deploy/web/default-conf.test.mjs scripts/db-provision-runtime.test.mjs
+      - run: node --test deploy/web/default-conf.test.mjs scripts/db-provision-runtime.test.mjs scripts/staging-preflight.test.mjs
+      - name: Validate operational shell scripts
+        run: >-
+          sh -n scripts/staging-smoke.sh scripts/staging-backup.sh scripts/staging-backup-restore.sh
+          scripts/staging-backup-smoke.sh deploy/staging/verify-web.sh deploy/staging/rollback-web.sh
       - name: Validate integrated staging manifest
         run: docker compose --env-file deploy/staging/.env.example -f deploy/staging/compose.yaml config --quiet
       - name: Build API staging image
@@ -55,6 +59,8 @@ jobs:
           .
       - name: Exercise the integrated staging stack
         run: sh scripts/staging-smoke.sh
+      - name: Prove backup and restore from an empty volume
+        run: sh scripts/staging-backup-smoke.sh
       - run: pnpm db:test
         env:
           DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
