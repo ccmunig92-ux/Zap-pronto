@@ -11,8 +11,10 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
-- Os três arquivos de secrets existem fora do checkout, possuem acesso restrito ao operador do Docker e são
-  informados por caminhos absolutos.
+- Os três arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
+  Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
+  imagem PostgreSQL Alpine e as duas URLs ao UID/GID 1000 da imagem API, todos com modo `0400`; modo `0600`
+  pertencente ao operador torna o secret ilegível para os containers não privilegiados.
 - `database_migration_url` usa o owner do banco e nunca é reutilizado pela API.
 - O usuário da migration URL precisa de `CREATEROLE` no primeiro boot para criar os roles de componente e
   o login runtime; na imagem oficial ele é o `POSTGRES_USER` inicial. Essa credencial não chega à API.

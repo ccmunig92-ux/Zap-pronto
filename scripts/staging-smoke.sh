@@ -29,7 +29,9 @@ printf '%s' 'postgresql://zap_pronto_owner:owner-smoke-password@postgres:5432/za
   > "$secret_dir/database-migration-url"
 printf '%s' 'postgresql://zap_pronto_runtime:runtime-smoke-password@postgres:5432/zap_pronto' \
   > "$secret_dir/database-runtime-url"
-chmod 600 "$secret_dir"/*
+# Synthetic CI-only values must be readable by the non-root container UIDs.
+# Real staging files use the stricter ownership documented in deploy/staging/README.md.
+chmod 644 "$secret_dir"/*
 
 export ZAP_API_IMAGE=${ZAP_API_IMAGE:-zap-pronto-api:ci}
 export ZAP_WEB_IMAGE=${ZAP_WEB_IMAGE:-zap-pronto-web:ci}
