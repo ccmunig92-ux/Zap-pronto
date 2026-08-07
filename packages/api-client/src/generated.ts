@@ -236,7 +236,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
+                    "application/problem+json": {
                         type: string;
                         title: string;
                         status: number;

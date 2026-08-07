@@ -12,7 +12,11 @@ Em runtime, informe:
 O container escuta HTTP na porta `8080` como usuário não privilegiado. O proxy externo de staging é
 responsável por TLS e deve preservar `X-Forwarded-Proto`. `/v1/*` é encaminhado para a API no mesmo
 origin público. O healthcheck do container consulta `/health/web`; ele não substitui o healthcheck da API.
+O listener também encaminha somente `/health/live` para a API. `/health/ready` permanece interno à rede
+Docker e responde `404` no frontend público.
 
 Arquivos com hash em `/assets/` usam cache imutável por um ano. Navegação SPA e `index.html` usam
 `no-cache, no-store`; respostas da API não são armazenadas pelo Nginx.
-
+O access log registra apenas o path normalizado, nunca query string ou `Referer`, para não persistir
+`code` e `state` do callback OIDC. O upstream usa o resolver DNS interno do Docker com TTL curto, de modo
+que a recriação da API não exige reiniciar o web.

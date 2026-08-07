@@ -1,5 +1,11 @@
 name: zap-pronto-staging
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
 services:
   postgres:
     image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must reference an immutable PostgreSQL 18.3 image}
@@ -23,6 +29,7 @@ services:
     shm_size: 256mb
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -51,6 +58,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -79,6 +87,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -118,6 +127,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -148,13 +158,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
-      - /var/cache/nginx:size=32m,mode=0755
-      - /etc/nginx/conf.d:size=8m,mode=0755
-      - /var/run:size=8m,mode=0755
+      - /var/cache/nginx:size=32m,mode=0755,uid=101,gid=101
+      - /etc/nginx/conf.d:size=8m,mode=0755,uid=101,gid=101
+      - /var/run:size=8m,mode=0755,uid=101,gid=101
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
     deploy:
       resources:
         limits:

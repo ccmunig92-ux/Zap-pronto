@@ -52,7 +52,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     config: { public: true },
     schema: {
       operationId: "getHealthReady", security: [],
-      response: { 200: HealthSchema, 503: ProblemDetailsSchema },
+      response: {
+        200: HealthSchema,
+        503: { content: { "application/problem+json": { schema: ProblemDetailsSchema } } },
+      },
     },
   }, async (request, reply) => {
     let connection: Awaited<ReturnType<TenantTransactionPool["connect"]>> | undefined;

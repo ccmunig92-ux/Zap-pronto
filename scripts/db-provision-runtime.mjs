@@ -48,7 +48,8 @@ export async function loadProvisioningConfig(env = process.env) {
   const sameDatabase = admin.protocol === runtime.protocol && admin.hostname === runtime.hostname &&
     (admin.port || "5432") === (runtime.port || "5432") && admin.pathname === runtime.pathname;
   if (!sameDatabase) throw new Error("DATABASE_TARGET_MISMATCH");
-  return { adminUrl: adminRaw, runtimePassword: decodeURIComponent(runtime.password), runtimeRole: RUNTIME_ROLE };
+  return { adminUrl: adminRaw, runtimeUrl: runtimeRaw,
+    runtimePassword: decodeURIComponent(runtime.password), runtimeRole: RUNTIME_ROLE };
 }
 
 export async function provisionRuntime(config, Client = pg.Client) {
@@ -76,20 +77,127 @@ export async function provisionRuntime(config, Client = pg.Client) {
           SELECT parent.rolname FROM pg_auth_members membership
           JOIN pg_roles member ON member.oid = membership.member
           JOIN pg_roles parent ON parent.oid = membership.roleid
-          WHERE member.rolname = '${RUNTIME_ROLE}' AND parent.rolname <> 'zap_pronto_api'
+          WHERE member.rolname = '${RUNTIME_ROLE}'
         LOOP
           EXECUTE format('REVOKE %I FROM %I', inherited_role, '${RUNTIME_ROLE}');
         END LOOP;
       END
       $provision$;
-      GRANT zap_pronto_api TO ${RUNTIME_ROLE};
+      DO $database_revoke$
+      BEGIN
+        EXECUTE format('REVOKE ALL PRIVILEGES ON DATABASE %I FROM %I', current_database(), '${RUNTIME_ROLE}');
+      END
+      $database_revoke$;
+      REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${RUNTIME_ROLE};
+      REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${RUNTIME_ROLE};
+      REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM ${RUNTIME_ROLE};
+      REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM ${RUNTIME_ROLE};
+      DO $type_revoke$
+      DECLARE target_type record;
+      BEGIN
+        FOR target_type IN
+          SELECT namespace.nspname, type.typname FROM pg_type type
+          JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
+          WHERE namespace.nspname = 'public'
+            AND type.typelem = 0
+            AND type.typrelid = 0
+        LOOP
+          EXECUTE format('REVOKE ALL PRIVILEGES ON TYPE %I.%I FROM %I',
+            target_type.nspname, target_type.typname, '${RUNTIME_ROLE}');
+        END LOOP;
+      END
+      $type_revoke$;
+      GRANT zap_pronto_api TO ${RUNTIME_ROLE} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
     `);
+    const verification = await client.query(`
+      WITH runtime AS (
+        SELECT oid FROM pg_roles WHERE rolname = '${RUNTIME_ROLE}'
+      ), direct_acl AS (
+        SELECT privilege_type FROM pg_database object, LATERAL aclexplode(object.datacl) acl, runtime
+          WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_namespace object, LATERAL aclexplode(object.nspacl) acl, runtime
+          WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_class object, LATERAL aclexplode(object.relacl) acl, runtime
+          WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_attribute object,
+          LATERAL aclexplode(object.attacl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_proc object, LATERAL aclexplode(object.proacl) acl, runtime
+          WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_type object, LATERAL aclexplode(object.typacl) acl, runtime
+          WHERE acl.grantee = runtime.oid AND object.typelem = 0 AND object.typrelid = 0
+        UNION ALL SELECT privilege_type FROM pg_language object,
+          LATERAL aclexplode(object.lanacl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_largeobject_metadata object,
+          LATERAL aclexplode(object.lomacl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_foreign_data_wrapper object,
+          LATERAL aclexplode(object.fdwacl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_foreign_server object,
+          LATERAL aclexplode(object.srvacl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_parameter_acl object,
+          LATERAL aclexplode(object.paracl) acl, runtime WHERE acl.grantee = runtime.oid
+        UNION ALL SELECT privilege_type FROM pg_default_acl object,
+          LATERAL aclexplode(object.defaclacl) acl, runtime WHERE acl.grantee = runtime.oid
+      ), owned_objects AS (
+        SELECT pg_database.oid FROM pg_database, runtime WHERE datdba = runtime.oid
+        UNION ALL SELECT pg_namespace.oid FROM pg_namespace, runtime WHERE nspowner = runtime.oid
+        UNION ALL SELECT pg_class.oid FROM pg_class, runtime WHERE relowner = runtime.oid
+        UNION ALL SELECT pg_proc.oid FROM pg_proc, runtime WHERE proowner = runtime.oid
+        UNION ALL SELECT pg_type.oid FROM pg_type, runtime WHERE typowner = runtime.oid
+        UNION ALL SELECT pg_language.oid FROM pg_language, runtime WHERE lanowner = runtime.oid
+        UNION ALL SELECT pg_largeobject_metadata.oid FROM pg_largeobject_metadata, runtime
+          WHERE lomowner = runtime.oid
+        UNION ALL SELECT pg_foreign_data_wrapper.oid FROM pg_foreign_data_wrapper, runtime
+          WHERE fdwowner = runtime.oid
+        UNION ALL SELECT pg_foreign_server.oid FROM pg_foreign_server, runtime WHERE srvowner = runtime.oid
+        UNION ALL SELECT pg_tablespace.oid FROM pg_tablespace, runtime WHERE spcowner = runtime.oid
+      )
+      SELECT
+        (SELECT count(*)::integer FROM pg_auth_members membership
+          JOIN pg_roles member ON member.oid = membership.member
+          JOIN pg_roles parent ON parent.oid = membership.roleid
+          WHERE member.rolname = '${RUNTIME_ROLE}' AND parent.rolname = 'zap_pronto_api'
+            AND membership.admin_option = false AND membership.inherit_option = false
+            AND membership.set_option = true) AS valid_membership_count,
+        (SELECT count(*)::integer FROM pg_auth_members membership
+          JOIN pg_roles member ON member.oid = membership.member
+          WHERE member.rolname = '${RUNTIME_ROLE}') AS total_membership_count,
+        (SELECT count(*)::integer FROM direct_acl) AS direct_acl_count,
+        (SELECT count(*)::integer FROM owned_objects) AS owned_object_count,
+        (SELECT count(*)::integer FROM pg_roles WHERE rolname = '${RUNTIME_ROLE}' AND rolcanlogin
+          AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication
+          AND NOT rolbypassrls AND NOT rolinherit) AS hardened_role_count
+    `);
+    const state = verification.rows[0];
+    if (!state || state.valid_membership_count !== 1 || state.total_membership_count !== 1 ||
+      state.direct_acl_count !== 0 || state.owned_object_count !== 0 || state.hardened_role_count !== 1) {
+      throw new Error("RUNTIME_ROLE_PRIVILEGE_DRIFT");
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     await client.end();
+  }
+
+  const runtimeClient = new Client({ connectionString: config.runtimeUrl });
+  await runtimeClient.connect();
+  try {
+    await runtimeClient.query("BEGIN");
+    await runtimeClient.query("SET LOCAL ROLE zap_pronto_api");
+    const identity = await runtimeClient.query(
+      "SELECT session_user = $1 AS session_is_runtime, current_user = 'zap_pronto_api' AS role_is_api",
+      [RUNTIME_ROLE],
+    );
+    if (identity.rows[0]?.session_is_runtime !== true || identity.rows[0]?.role_is_api !== true) {
+      throw new Error("RUNTIME_ROLE_CONNECTION_INVALID");
+    }
+    await runtimeClient.query("ROLLBACK");
+  } catch (error) {
+    await runtimeClient.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await runtimeClient.end();
   }
 }
 

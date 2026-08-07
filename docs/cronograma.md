@@ -118,6 +118,9 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - O environment `oidc-homologation` foi criado pela sessão administrativa do proprietário, ainda sem
   variáveis, secrets ou proteções aprovadas. A implantação HTTPS e as duas contas sintéticas exclusivas
   também não estão disponíveis; a Fase 4 continua fechada até configurar e executar o gate na `main`.
+- A fundação integrada de staging está na PR #5: o gate sobe PostgreSQL 18.3, aplica migrations,
+  neutraliza deriva de privilégios do login runtime, inicia API e web, valida health pelo proxy e prova
+  recuperação/persistência após reinício do banco. O merge ainda depende do CI do SHA final.
 
 ## Premissas
 
@@ -299,8 +302,7 @@ Gate automatizado do corte:
 
 ## Sequência imediata
 
-1. Concluir a fundação integrada de homologação (`Dockerfile.api`, `Dockerfile.web`, proxy same-origin,
-   PostgreSQL isolado, migração e provisionamento do login restrito da API), mantendo-a coberta pelo CI.
+1. Revisar e integrar a PR #5 somente com o smoke completo e os demais checks verdes no SHA final.
 2. Preparar o environment `oidc-homologation` com proteção administrativa, domínio HTTPS, IdP real,
    segredos escopados ao environment e duas contas sintéticas exclusivas; então executar a jornada real
    de navegador e registrar o SHA e a execução como evidência.

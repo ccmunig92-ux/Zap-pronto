@@ -26,4 +26,3 @@ if (!new Set(["true", "false"]).has(required("VITE_OIDC_AUTOMATIC_SILENT_RENEW")
   throw new Error("VITE_OIDC_AUTOMATIC_SILENT_RENEW_INVALID");
 }
 writeFileSync("/workspace/oidc-authority-origin", authority.origin, { encoding: "utf8", mode: 0o444 });
-

@@ -7,11 +7,18 @@ map $host $zap_content_security_policy {
   default "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self' ${OIDC_AUTHORITY_ORIGIN}; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'";
 }
 
+log_format zap_safe '$remote_addr [$time_local] "$request_method $uri $server_protocol" '
+                    '$status $body_bytes_sent request_id=$request_id';
+
 server {
   listen 8080;
   server_name _;
   server_tokens off;
   root /usr/share/nginx/html;
+  resolver 127.0.0.11 valid=5s ipv6=off;
+  set $zap_api_upstream "${API_UPSTREAM}";
+  set $zap_health_live_upstream "${API_UPSTREAM}/health/live";
+  access_log /dev/stdout zap_safe;
 
   location = /health/web {
     access_log off;
@@ -21,9 +28,36 @@ server {
     return 200 '{"status":"ok"}';
   }
 
+  location = /health/live {
+    limit_except GET { deny all; }
+    include /etc/nginx/security-headers.conf;
+    add_header Cache-Control "no-store" always;
+    proxy_pass $zap_health_live_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $zap_forwarded_proto;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $proxy_host;
+    proxy_ssl_verify on;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_ssl_verify_depth 3;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 10s;
+    proxy_read_timeout 10s;
+  }
+
+  location = /health/ready {
+    include /etc/nginx/security-headers.conf;
+    add_header Cache-Control "no-store" always;
+    return 404;
+  }
+
   location /v1/ {
     include /etc/nginx/security-headers.conf;
-    proxy_pass ${API_UPSTREAM};
+    proxy_pass $zap_api_upstream;
     proxy_http_version 1.1;
     proxy_set_header Connection "";
     proxy_set_header Host $host;

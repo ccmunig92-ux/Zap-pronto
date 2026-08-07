@@ -17,7 +17,8 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O usuário da migration URL precisa de `CREATEROLE` no primeiro boot para criar os roles de componente e
   o login runtime; na imagem oficial ele é o `POSTGRES_USER` inicial. Essa credencial não chega à API.
 - `database_runtime_url` usa `zap_pronto_runtime` com senha não vazia. O provisionador valida que admin e
-  runtime apontam ao mesmo banco e falha fechado caso contrário.
+  runtime apontam ao mesmo banco, remove memberships e grants diretos residuais, recusa ownership/default
+  privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
 - O password do owner contido na migration URL corresponde a `postgres_password`.
 
 Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels ou no repositório.
@@ -35,3 +36,5 @@ Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels
 8. Limites de CPU/memória, filesystem read-only, `no-new-privileges` e `cap_drop: ALL` aparecem na configuração
    renderizada para todos os serviços aos quais se aplicam.
 9. O Nginx do host encaminha HTTPS somente ao loopback configurado, sem publicar diretamente a porta interna.
+10. A rotação local do driver de logs limita cada serviço a cinco arquivos de 10 MB; a retenção externa deve
+    ser definida antes de produção.
