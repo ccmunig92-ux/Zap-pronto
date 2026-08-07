@@ -49,11 +49,45 @@ compose exec -T postgres psql --username zap_pronto_owner --dbname zap_pronto --
 
 bundle=$(sh "$repo_root/scripts/staging-backup.sh")
 [ -s "$bundle/data.dump" ]
-(cd "$bundle" && sha256sum --check --strict data.dump.sha256)
+(cd "$bundle" && sha256sum --check --strict bundle.sha256)
+
+assert_marker() {
+  compose exec -T postgres psql --username zap_pronto_owner --dbname zap_pronto \
+    --tuples-only --no-align --command \
+    "SELECT name FROM tenants WHERE id='71000000-0000-4000-8000-000000000001';" \
+    | grep -qx backup-smoke-marker
+}
+assert_api_running() {
+  container=$(compose ps --quiet api)
+  [ -n "$container" ] && [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true ]
+}
+
+# Todas estas falhas acontecem antes do stop e devem deixar aplicação/dados intocados.
+export ALLOW_STAGING_RESTORE=yes
+export STAGING_RESTORE_CONFIRM=wrong-project
+! sh "$repo_root/scripts/staging-backup-restore.sh" "$bundle" >/dev/null 2>&1
+assert_api_running; assert_marker
+
+checksum_bundle="$work_dir/checksum-invalid"
+cp -R "$bundle" "$checksum_bundle"
+printf 'tamper' >> "$checksum_bundle/data.dump"
+export STAGING_RESTORE_CONFIRM="$project"
+! sh "$repo_root/scripts/staging-backup-restore.sh" "$checksum_bundle" >/dev/null 2>&1
+assert_api_running; assert_marker
+
+toc_bundle="$work_dir/toc-invalid"
+cp -R "$bundle" "$toc_bundle"
+printf '%s\n' '99999; 0 0 TABLE DATA public schema_migrations zap_pronto_owner' >> "$toc_bundle/toc.list"
+(cd "$toc_bundle" && sha256sum data.dump toc.list manifest.txt > bundle.sha256)
+! sh "$repo_root/scripts/staging-backup-restore.sh" "$toc_bundle" >/dev/null 2>&1
+assert_api_running; assert_marker
+
+# Bundle válido contra alvo ocupado deve parar a app, rejeitar antes do pg_restore e preservar os dados.
+! sh "$repo_root/scripts/staging-backup-restore.sh" "$bundle" >/dev/null 2>&1
+assert_marker
+compose up --detach --wait api
 
 compose down --volumes --remove-orphans
-export ALLOW_STAGING_RESTORE=yes
-export STAGING_RESTORE_CONFIRM="$project"
 export STAGING_RESTORE_START_APPLICATION=no
 sh "$repo_root/scripts/staging-backup-restore.sh" "$bundle"
 compose up --detach --wait api

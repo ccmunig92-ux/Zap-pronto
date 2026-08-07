@@ -40,7 +40,9 @@ jobs:
       - run: pnpm typecheck:all
       - run: pnpm test:all
       - run: pnpm build:all
-      - run: node --test deploy/web/default-conf.test.mjs scripts/db-provision-runtime.test.mjs scripts/staging-preflight.test.mjs
+      - run: >-
+          node --test deploy/web/default-conf.test.mjs deploy/staging/rollback-web.test.mjs
+          scripts/db-provision-runtime.test.mjs scripts/staging-preflight.test.mjs scripts/staging-workflow.test.mjs
       - name: Validate operational shell scripts
         run: >-
           sh -n scripts/staging-smoke.sh scripts/staging-backup.sh scripts/staging-backup-restore.sh

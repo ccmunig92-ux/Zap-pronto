@@ -61,8 +61,8 @@ compose exec -T postgres pg_dump --username "${POSTGRES_USER:-zap_pronto_owner}"
   --exclude-table-data=public.app_permissions \
   --exclude-table-data=public.app_role_permissions > "$temporary/data.dump"
 [ -s "$temporary/data.dump" ] || { echo "BACKUP_ARCHIVE_EMPTY" >&2; exit 1; }
-compose exec -T postgres pg_restore --list < "$temporary/data.dump" >/dev/null
-(cd "$temporary" && sha256sum data.dump > data.dump.sha256)
+compose exec -T postgres pg_restore --list < "$temporary/data.dump" > "$temporary/toc.list"
+[ -s "$temporary/toc.list" ] || { echo "BACKUP_TOC_EMPTY" >&2; exit 1; }
 {
   printf 'created_at_utc=%s\n' "$stamp"
   printf 'compose_project=%s\n' "$project"
@@ -71,6 +71,7 @@ compose exec -T postgres pg_restore --list < "$temporary/data.dump" >/dev/null
     --dbname "${POSTGRES_DB:-zap_pronto}" --tuples-only --no-align --field-separator='|' \
     --command "SELECT 'migration=' || filename || '|' || checksum_sha256 FROM schema_migrations ORDER BY filename;"
 } > "$temporary/manifest.txt"
+(cd "$temporary" && sha256sum data.dump toc.list manifest.txt > bundle.sha256)
 chmod 600 "$temporary"/*
 mv -- "$temporary" "$bundle"
 bundle=$(CDPATH= cd -- "$bundle" && pwd -P)

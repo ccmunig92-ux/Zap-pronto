@@ -1,5 +1,5 @@
-import { readFile, stat, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { readFile, stat, lstat, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
@@ -62,10 +62,21 @@ export async function validateSecrets(env, repoRoot) {
   for (const name of SECRET_NAMES) {
     const file = required(env, name);
     if (!isAbsolute(file)) fail(`${name}_NOT_ABSOLUTE`);
+    await assertNoSymlinkPath(name, file);
     let canonical, metadata;
     try { canonical = await realpath(file); metadata = await stat(canonical); } catch { fail(`${name}_UNREADABLE`); }
     validateSecretMetadata(name, canonical, metadata, root, seen, SECRET_OWNERSHIP[name]);
     seen.add(canonical);
+  }
+}
+
+async function assertNoSymlinkPath(name, file) {
+  const parents = [];
+  let current = file;
+  while (dirname(current) !== current) { parents.push(current); current = dirname(current); }
+  for (const candidate of parents.reverse()) {
+    let metadata; try { metadata = await lstat(candidate); } catch { fail(`${name}_UNREADABLE`); }
+    if (metadata.isSymbolicLink()) fail(`${name}_SYMLINK_REJECTED`);
   }
 }
 
@@ -92,6 +103,37 @@ export function validateResources(compose) {
   }
 }
 
+const EXPECTED_SECRETS = Object.freeze({
+  postgres:["postgres_password"], migrate:["database_migration_url"],
+  "provision-runtime":["database_migration_url","database_runtime_url"], api:["database_runtime_url"], web:[],
+});
+const EXPECTED_DEPENDS = Object.freeze({
+  postgres:{}, migrate:{postgres:"service_healthy"}, "provision-runtime":{migrate:"service_completed_successfully"},
+  api:{"provision-runtime":"service_completed_successfully"}, web:{api:"service_healthy"},
+});
+const EXPECTED_NETWORKS = Object.freeze({ postgres:["data"], migrate:["data"], "provision-runtime":["data"], api:["app","data"], web:["app"] });
+
+export function validateComposeInvariants(compose) {
+  if (compose.networks?.data?.internal !== true) fail("DATA_NETWORK_NOT_INTERNAL");
+  for (const serviceName of Object.keys(MINIMUMS)) {
+    const service = compose.services?.[serviceName];
+    if (!service) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_MISSING`);
+    const ports = service.ports ?? [];
+    if (serviceName === "web") {
+      if (ports.length !== 1 || ports[0].host_ip !== "127.0.0.1" || Number(ports[0].target) !== 8080 || ports[0].protocol !== "tcp") fail("WEB_PORT_INVALID");
+    } else if (ports.length) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_PORTS_FORBIDDEN`);
+    if (serviceName !== "postgres" && (service.read_only !== true || !service.cap_drop?.includes("ALL"))) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_HARDENING_INVALID`);
+    if (!service.security_opt?.includes("no-new-privileges:true")) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_NO_NEW_PRIVILEGES_REQUIRED`);
+    if (service.logging?.driver !== "json-file" || service.logging?.options?.["max-size"] !== "10m" || String(service.logging?.options?.["max-file"]) !== "5") fail(`${serviceName.toUpperCase().replaceAll("-","_")}_LOG_LIMIT_INVALID`);
+    const secrets = (service.secrets ?? []).map((entry) => typeof entry === "string" ? entry : entry.source).sort();
+    if (JSON.stringify(secrets) !== JSON.stringify([...EXPECTED_SECRETS[serviceName]].sort())) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_SECRETS_INVALID`);
+    const networks = Object.keys(service.networks ?? {}).sort();
+    if (JSON.stringify(networks) !== JSON.stringify([...EXPECTED_NETWORKS[serviceName]].sort())) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_NETWORKS_INVALID`);
+    const depends = Object.fromEntries(Object.entries(service.depends_on ?? {}).map(([name,value]) => [name,value.condition]));
+    if (JSON.stringify(depends) !== JSON.stringify(EXPECTED_DEPENDS[serviceName])) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_DEPENDENCY_INVALID`);
+  }
+}
+
 export async function runPreflight(envFile, repoRoot = resolve(import.meta.dirname, "..")) {
   const env = parseEnv(await readFile(envFile, "utf8"));
   validateEnvironment(env);
@@ -100,6 +142,7 @@ export async function runPreflight(envFile, repoRoot = resolve(import.meta.dirna
   if (rendered.status !== 0) fail("COMPOSE_INVALID");
   let compose; try { compose = JSON.parse(rendered.stdout); } catch { fail("COMPOSE_INVALID"); }
   validateResources(compose);
+  validateComposeInvariants(compose);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

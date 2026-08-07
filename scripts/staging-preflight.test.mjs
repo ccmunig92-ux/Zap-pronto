@@ -1,21 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { validateEnvironment, validateResources, validateSecrets, validateSecretMetadata, parseEnv } from "./staging-preflight.mjs";
+import { validateComposeInvariants, validateEnvironment, validateResources, validateSecrets, validateSecretMetadata, parseEnv } from "./staging-preflight.mjs";
 
 const digest = "a".repeat(64);
 const validEnv = { ZAP_API_IMAGE:`ghcr.io/acme/api@sha256:${digest}`, ZAP_WEB_IMAGE:`ghcr.io/acme/web@sha256:${digest}`,
   POSTGRES_IMAGE:`postgres@sha256:${digest}`, OIDC_ISSUER:"https://id.example/tenant/", OIDC_AUTHORITY_ORIGIN:"https://id.example",
   OIDC_AUDIENCE:"zap-pronto", OIDC_JWKS_URL:"https://id.example/jwks", OIDC_DISCOVERY_URL:"https://id.example/discovery" };
-const compose = { services: { postgres:{deploy:{resources:{limits:{cpus:"1.50",memory:"1536M"}}}},
-  migrate:{deploy:{resources:{limits:{cpus:"1",memory:"512M"}}}},
-  "provision-runtime":{deploy:{resources:{limits:{cpus:"0.5",memory:"256M"}}}},
-  api:{deploy:{resources:{limits:{cpus:"1",memory:"768M"}}}}, web:{deploy:{resources:{limits:{cpus:"0.5",memory:"256M"}}}} } };
+const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resources:{limits:{cpus,memory}}},
+  networks:Object.fromEntries(networks.map((name)=>[name,null])),secrets:secrets.map((source)=>({source})),depends_on,
+  read_only:true,cap_drop:["ALL"],security_opt:["no-new-privileges:true"],
+  logging:{driver:"json-file",options:{"max-size":"10m","max-file":"5"}}});
+const compose = { networks:{data:{internal:true}}, services: {
+  postgres:{...hardened("1.50","1536M",["data"],["postgres_password"]),read_only:undefined,cap_drop:undefined},
+  migrate:hardened("1","512M",["data"],["database_migration_url"],{postgres:{condition:"service_healthy"}}),
+  "provision-runtime":hardened("0.5","256M",["data"],["database_migration_url","database_runtime_url"],{migrate:{condition:"service_completed_successfully"}}),
+  api:hardened("1","768M",["app","data"],["database_runtime_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),
+  web:{...hardened("0.5","256M",["app"],[],{api:{condition:"service_healthy"}}),ports:[{host_ip:"127.0.0.1",target:8080,protocol:"tcp"}]},
+} };
 
 test("accepts immutable images, coherent HTTPS OIDC and minimum resources", () => {
-  validateEnvironment(validEnv); validateResources(compose);
+  validateEnvironment(validEnv); validateResources(compose); validateComposeInvariants(compose);
+});
+
+test("rejects exposed internal services, topology drift and weakened hardening", () => {
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,api:{...compose.services.api,ports:[{host_ip:"127.0.0.1",target:3000,protocol:"tcp"}]}}}), /API_PORTS_FORBIDDEN/);
+  assert.throws(() => validateComposeInvariants({...compose,networks:{data:{internal:false}}}), /DATA_NETWORK_NOT_INTERNAL/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,web:{...compose.services.web,ports:[{host_ip:"0.0.0.0",target:8080,protocol:"tcp"}]}}}), /WEB_PORT_INVALID/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,api:{...compose.services.api,read_only:false}}}), /API_HARDENING_INVALID/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,migrate:{...compose.services.migrate,secrets:[]}}}), /MIGRATE_SECRETS_INVALID/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,web:{...compose.services.web,depends_on:{}}}}), /WEB_DEPENDENCY_INVALID/);
 });
 
 test("rejects mutable images and unsafe or divergent OIDC endpoints", () => {
@@ -47,5 +63,16 @@ test("requires canonical 0400 ownership for non-root container secret readers", 
     validateSecretMetadata("DATABASE_RUNTIME_URL_FILE", names[2], api, process.cwd(), new Set(), {uid:1000,gid:1000});
     assert.throws(() => validateSecretMetadata("SECRET", names[0], {...postgres,mode:0o100600}, process.cwd(), new Set(), {uid:70,gid:70}), /MODE_NOT_0400/);
     assert.throws(() => validateSecretMetadata("SECRET", names[0], postgres, process.cwd(), new Set(), {uid:1000,gid:1000}), /OWNER_MISMATCH/);
+  } finally { rmSync(directory,{recursive:true,force:true}); }
+});
+
+test("rejects a secret reached through a symlinked parent", {skip: typeof process.getuid !== "function"}, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "zap-preflight-link-"));
+  try {
+    const real = join(directory,"real"); mkdirSync(real); writeFileSync(join(real,"secret"),"opaque");
+    const link = join(directory,"linked"); symlinkSync(real,link,"dir");
+    const throughLink = join(link,"secret");
+    await assert.rejects(validateSecrets({POSTGRES_PASSWORD_FILE:throughLink,
+      DATABASE_MIGRATION_URL_FILE:throughLink,DATABASE_RUNTIME_URL_FILE:throughLink},process.cwd()), /SYMLINK_REJECTED/);
   } finally { rmSync(directory,{recursive:true,force:true}); }
 });

@@ -40,7 +40,24 @@ jobs:
           test -n "$OIDC_WEB_REDIRECT_URI"
           test -n "$OIDC_WEB_POST_LOGOUT_REDIRECT_URI"
 
-      - name: Build and publish API
+      - name: Build API candidate locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile.api
+          load: true
+          tags: zap-pronto-api:scan-${{ github.sha }}
+          cache-from: type=gha,scope=staging-api
+          cache-to: type=gha,mode=max,scope=staging-api
+      - name: Scan API for critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: zap-pronto-api:scan-${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+      - name: Publish approved API
         id: api
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -51,23 +68,36 @@ jobs:
           sbom: true
           provenance: false
           cache-from: type=gha,scope=staging-api
-          cache-to: type=gha,mode=max,scope=staging-api
       - name: Attest API provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/zap-pronto-api
           subject-digest: ${{ steps.api.outputs.digest }}
           push-to-registry: true
-      - name: Scan API for critical vulnerabilities
+
+      - name: Build web candidate locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile.web
+          load: true
+          tags: zap-pronto-web:scan-${{ github.sha }}
+          build-args: |
+            VITE_OIDC_AUTHORITY=${{ vars.OIDC_ISSUER }}
+            VITE_OIDC_CLIENT_ID=${{ vars.OIDC_WEB_CLIENT_ID }}
+            VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
+            VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
+          cache-from: type=gha,scope=staging-web
+          cache-to: type=gha,mode=max,scope=staging-web
+      - name: Scan web for critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/zap-pronto-api@${{ steps.api.outputs.digest }}
+          image-ref: zap-pronto-web:scan-${{ github.sha }}
           format: table
           exit-code: "1"
           severity: CRITICAL
           ignore-unfixed: true
-
-      - name: Build and publish web
+      - name: Publish approved web
         id: web
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -83,21 +113,12 @@ jobs:
             VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
             VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
           cache-from: type=gha,scope=staging-web
-          cache-to: type=gha,mode=max,scope=staging-web
       - name: Attest web provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/zap-pronto-web
           subject-digest: ${{ steps.web.outputs.digest }}
           push-to-registry: true
-      - name: Scan web for critical vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/zap-pronto-web@${{ steps.web.outputs.digest }}
-          format: table
-          exit-code: "1"
-          severity: CRITICAL
-          ignore-unfixed: true
 
       - name: Record immutable references
         run: |
