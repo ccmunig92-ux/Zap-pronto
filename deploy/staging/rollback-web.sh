@@ -24,6 +24,10 @@ printf '%s' "$target_image" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$' \
   || { echo "PREVIOUS_WEB_IMAGE_IMMUTABLE_DIGEST_REQUIRED" >&2; exit 1; }
 [ -r "$env_file" ] || { echo "STAGING_ENV_FILE_NOT_READABLE" >&2; exit 1; }
 command -v flock >/dev/null 2>&1 || { echo "FLOCK_REQUIRED" >&2; exit 1; }
+command -v gh >/dev/null 2>&1 || { echo "GITHUB_CLI_REQUIRED" >&2; exit 1; }
+attestation_repo=${STAGING_ATTESTATION_REPOSITORY:-ccmunig92-ux/Zap-pronto}
+printf '%s' "$attestation_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
+  || { echo "STAGING_ATTESTATION_REPOSITORY_INVALID" >&2; exit 1; }
 
 # Lock the deployment's existing env-file inode read-only. This avoids a
 # predictable privileged lock file and also covers alternate paths to the same
@@ -45,6 +49,10 @@ target_repository=${target_image%@sha256:*}
   || { echo "WEB_ROLLBACK_REPOSITORY_MISMATCH:$target_repository" >&2; exit 1; }
 [ "$current_image" != "$target_image" ] || { echo "WEB_ALREADY_USES_REQUESTED_IMAGE" >&2; exit 1; }
 
+gh attestation verify "oci://$target_image" --repo "$attestation_repo" \
+  --signer-workflow "$attestation_repo/.github/workflows/staging-images.yml" \
+  --deny-self-hosted-runners >/dev/null \
+  || { echo "WEB_TARGET_ATTESTATION_INVALID" >&2; exit 1; }
 docker pull "$target_image" >/dev/null
 verify_image() {
   expected_image=$1

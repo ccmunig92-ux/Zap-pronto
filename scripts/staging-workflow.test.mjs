@@ -7,6 +7,7 @@ const source = await readFile(new URL("../.github/workflows/staging-images.yml",
 test("publication is manual, default-branch-only and environment-scoped", () => {
   assert.match(source, /workflow_dispatch:/);
   assert.match(source, /github\.ref_name == github\.event\.repository\.default_branch/);
+  assert.match(source, /vars\.STAGING_RELEASE_ENABLED == 'true'/);
   assert.match(source, /environment: oidc-homologation/);
   assert.doesNotMatch(source, /^  (?:pull_request|push):/m);
 });

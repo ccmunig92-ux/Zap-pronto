@@ -28,3 +28,11 @@ test("failed rollback restores and verifies the exact previous digest", () => {
   assert.match(source, /WEB_ACTIVE_IMAGE_MISMATCH/);
   assert.doesNotMatch(source, /compose up[^\n]+\|\| true/);
 });
+
+test("target provenance is verified before the image is pulled", () => {
+  const verify = source.indexOf('gh attestation verify "oci://$target_image"');
+  const pull = source.indexOf('docker pull "$target_image"');
+  assert.ok(verify > 0 && verify < pull);
+  assert.match(source, /--signer-workflow/);
+  assert.match(source, /--deny-self-hosted-runners/);
+});

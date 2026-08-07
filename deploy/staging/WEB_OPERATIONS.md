@@ -31,7 +31,9 @@ diagnosticar nem reiniciar a API.
 
 ## Rollback do web
 
-Identifique previamente o digest da última imagem web homologada. Tags mutáveis são recusadas:
+Identifique previamente o digest da última imagem web homologada. Tags mutáveis são recusadas. O host
+precisa do GitHub CLI autenticado: antes do pull, o script valida a provenance contra o workflow
+`ccmunig92-ux/Zap-pronto/.github/workflows/staging-images.yml` e rejeita runners auto-hospedados.
 
 ```sh
 sh deploy/staging/rollback-web.sh \
