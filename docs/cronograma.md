@@ -103,6 +103,9 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
+- Gate que bloqueia o primeiro endpoint da Fase 4: executar em navegador a jornada com um IdP OIDC
+  externo homologado, usando ao menos um administrador e um atendente reais, e provar login, `/v1/me`,
+  expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não substituem esse gate.
 
 ## Premissas
 
@@ -233,6 +236,46 @@ Critérios de aceite:
 - transferência preserva histórico e motivo;
 - alerta não dispara sem demanda, fora do turno ou em pausa autorizada;
 - reconexão da UI não perde eventos.
+
+### Primeiro corte vertical da Fase 4 — inbox humana mínima
+
+Este corte permanece **bloqueado pelo gate final da Fase 3** e não deve registrar rotas antes da prova
+OIDC externa descrita acima. Quando liberado, deve reutilizar exclusivamente `human_handoffs`,
+`conversations`, `service_cases`, `workflow_transitions`, outbox, RLS, `protectedRoute` e o cliente
+OpenAPI existentes.
+
+Escopo mínimo, sem frontend neste primeiro commit:
+
+1. `GET /v1/inbox/handoffs?unitId=<uuid>&limit=<1..100>&cursor=<opaco>` com permissão
+   `handoff.read` e escopo unitário validado no banco. Retorna somente handoffs `QUEUED` de unidade ativa
+   à qual o ator pertence, ordenados deterministicamente por prioridade, `queued_at` e `id`.
+2. `POST /v1/inbox/handoffs/{handoffId}/claim`, `Idempotency-Key` obrigatório e body contendo apenas
+   `expectedVersion`. A unidade é resolvida pelo handoff sob RLS; tenant, unidade e ator nunca vêm do body.
+3. A rota de claim chama o `claimHandoff` canônico na mesma transação de autenticação, RBAC e RLS.
+   Um único concorrente muda handoff `QUEUED -> ACTIVE`, caso `WAITING_HUMAN -> IN_REVIEW` e conversa
+   `HUMAN_QUEUED -> HUMAN_ACTIVE`; o perdedor recebe 409 genérico.
+4. O response inclui identificadores, status, versão e estado de automação, mas não payload clínico,
+   token de canal ou metadados internos. Erros cross-tenant/cross-unit convergem para 404 genérico.
+
+Migration incremental exigida antes da rota:
+
+- comando idempotente de claim por `(tenant_id,idempotency_key)` e fingerprint
+  `(handoffId,expectedVersion,actorId)`, com replay do mesmo vencedor e conflito para payload/ator diferente;
+- função SQL estreita de listagem unit-scoped e função de claim, ou grants mínimos equivalentes, sem conceder
+  UPDATE direto das tabelas operacionais ao handler HTTP;
+- índice da fila compatível com `(tenant_id,unit_id,status,priority,queued_at,id)` e prova por `EXPLAIN`;
+- auditoria e outbox atômicas contendo correlation ID, sem PII desnecessária.
+
+Gate automatizado do corte:
+
+- PostgreSQL real com dois tenants, duas unidades e dois atendentes concorrentes: exatamente um claim;
+- atendente de outra unidade e papéis sem `handoff.claim` recebem negação sem revelar existência;
+- replay da mesma chave não incrementa versões nem duplica audit/outbox; fingerprint divergente retorna 409;
+- antes e depois do claim, `automation_status` permanece em estado que veta Hermes
+  (`HUMAN_QUEUED`/`HUMAN_ACTIVE`); teste adversarial deve provar que o futuro comando outbound do Hermes
+  falha fechado nesses estados;
+- matriz route-policy/OpenAPI inclui permission+unit scope e respostas 400/401/403/404/409;
+- nenhuma rota de transferência, composer, presença, produtividade ou realtime entra neste corte.
 
 ## Fases 5 a 9
 

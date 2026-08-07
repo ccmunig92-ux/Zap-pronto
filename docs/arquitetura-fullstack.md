@@ -28,3 +28,22 @@ não executam SQL e não reimplementam casos de uso.
    permanece um gate de runtime, não um token simulado no frontend.
 
 Não criar BFF, GraphQL paralelo, acesso Supabase direto, DTO manual duplicado ou microserviço de auth.
+
+## Boundary do primeiro inbox humano
+
+O inbox não cria um segundo modelo de conversa ou fila. A projeção de leitura parte de
+`human_handoffs` e seus vínculos tenant-aware com conversa, caso e unidade. O claim reutiliza o agregado
+e as transições existentes; API e frontend não atualizam status diretamente.
+
+Fluxo obrigatório quando o gate OIDC externo liberar a Fase 4:
+
+`cliente OpenAPI -> protectedRoute(handoff.*, unit) -> transação autenticada/RLS -> domínio handoffs -> PostgreSQL`
+
+A unidade pedida para listar pode vir da query apenas como identificador de recurso e precisa ser
+autorizada pelo banco. No claim, a unidade deve ser derivada do próprio handoff, nunca repetida no body.
+O estado de automação da conversa é a autoridade para o takeover: `HUMAN_REQUESTED`, `HUMAN_QUEUED`,
+`HUMAN_ACTIVE` e `SUSPENDED` proíbem resposta Hermes. Ocultar o composer no frontend não constitui essa
+garantia; o futuro comando outbound deve revalidar o estado na mesma transação da gravação da mensagem.
+
+O corte inicial cobre apenas listagem e claim. Transferência, devolução, encerramento, presença, SLA
+operacional, produtividade e realtime permanecem incrementos posteriores sobre o mesmo agregado.
