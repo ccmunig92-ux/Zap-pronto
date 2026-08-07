@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test dist"
+    "test": "pnpm build && node ../../scripts/run-built-tests.mjs dist"
   },
   "types": "./src/index.ts",
   "exports": { ".": { "types": "./src/index.ts", "default": "./dist/index.js" } },

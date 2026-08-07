@@ -19,6 +19,7 @@ declare module "fastify" {
     authenticated?: boolean;
     bootstrap?: boolean;
     preProvisioning?: boolean;
+    authorizationScope?: "tenant" | "unit";
   }
 }
 
@@ -31,6 +32,16 @@ export const publicEndpointInventory = Object.freeze([
   "HEAD /health/live",
 ] as const);
 const publicEndpointAllowlist = new Set<string>(publicEndpointInventory);
+
+export interface RegisteredRoutePolicy {
+  readonly method: string; readonly url: string;
+  readonly policy: "public" | "bootstrap" | "preProvisioning" | "permission";
+  readonly permission?: Permission; readonly scope?: "tenant" | "unit";
+}
+const registeredPolicies = new WeakMap<FastifyInstance, RegisteredRoutePolicy[]>();
+export function getRegisteredRoutePolicies(app: FastifyInstance): readonly RegisteredRoutePolicy[] {
+  return registeredPolicies.get(app) ?? [];
+}
 
 function routeKeys(method: string | string[], url: string): string[] {
   return (Array.isArray(method) ? method : [method]).map((value) => `${value} ${url}`);
@@ -45,6 +56,8 @@ export function registerAuthenticationBoundary(
   app: FastifyInstance,
   options: AuthenticationPluginOptions,
 ): void {
+  const inventory: RegisteredRoutePolicy[] = [];
+  registeredPolicies.set(app, inventory);
   app.addHook("onRoute", (route) => {
     const isVersioned = route.url === "/v1" || route.url.startsWith("/v1/");
     const publicRoute = route.config?.public === true;
@@ -64,6 +77,15 @@ export function registerAuthenticationBoundary(
     }
     if (route.config?.preProvisioning === true && route.url !== "/v1/auth/invitations/accept") {
       throw new Error(`ROUTE_PREPROVISIONING_POLICY_FORBIDDEN:${route.method}:${route.url}`);
+    }
+    if (isVersioned) {
+      const policy = publicRoute ? "public" : route.config?.bootstrap ? "bootstrap"
+        : route.config?.preProvisioning ? "preProvisioning" : "permission";
+      for (const method of Array.isArray(route.method) ? route.method : [route.method]) {
+        inventory.push({ method, url: route.url, policy,
+          ...(route.config?.permission ? { permission: route.config.permission } : {}),
+          ...(route.config?.authorizationScope ? { scope: route.config.authorizationScope } : {}) });
+      }
     }
   });
   app.addHook("onRequest", async (request) => {

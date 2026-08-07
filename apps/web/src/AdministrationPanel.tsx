@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ApiProblem } from "@zap-pronto/api-client";
+import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type {
   AdministrativeInvitation, AdministrativeInvitationsPage, AdministrativeUser, AdministrativeUsersPage,
   ChangeUserStatusRequest, ReissueInvitationRequest, ReissueInvitationResponse, RevokeInvitationRequest,
@@ -24,7 +24,9 @@ function tomorrow(): string {
   return value.toISOString().slice(0, 16);
 }
 
-export function AdministrationPanel({ client }: { readonly client: AdministrationClient }) {
+export function AdministrationPanel({ client, onAuthenticationRequired = () => undefined,
+  onAuthorizationChanged = () => undefined }: { readonly client: AdministrationClient;
+  readonly onAuthenticationRequired?: () => void; readonly onAuthorizationChanged?: () => void }) {
   const [users, setUsers] = useState<AdministrativeUser[]>([]);
   const [invitations, setInvitations] = useState<AdministrativeInvitation[]>([]);
   const [userCursor, setUserCursor] = useState<string>();
@@ -48,7 +50,11 @@ export function AdministrationPanel({ client }: { readonly client: Administratio
       ]);
       setUsers(userPage.items); setUserCursor(userPage.nextCursor);
       setInvitations(invitationPage.items); setInvitationCursor(invitationPage.nextCursor);
-    } catch { setPageError("Não foi possível carregar usuários e convites."); }
+    } catch (cause) {
+      if (cause instanceof AuthenticationRequired) onAuthenticationRequired();
+      else if (cause instanceof ApiProblem && cause.problem.status === 403) onAuthorizationChanged();
+      else setPageError("Não foi possível carregar usuários e convites.");
+    }
     finally { setLoading(false); }
   }
   useEffect(() => { void loadInitial(); }, [client]);
@@ -80,7 +86,9 @@ export function AdministrationPanel({ client }: { readonly client: Administratio
       }
       setPending(undefined); setMutationKey(undefined); await loadInitial();
     } catch (error) {
-      if (error instanceof ApiProblem) setMutationError({ message: error.problem.title,
+      if (error instanceof AuthenticationRequired) onAuthenticationRequired();
+      else if (error instanceof ApiProblem && error.problem.status === 403) onAuthorizationChanged();
+      else if (error instanceof ApiProblem) setMutationError({ message: error.problem.title,
         correlationId: error.problem.correlationId });
       else setMutationError({ message: "Não foi possível concluir a ação." });
     } finally { setSubmitting(false); }
@@ -90,14 +98,22 @@ export function AdministrationPanel({ client }: { readonly client: Administratio
     try {
       const page = await client.listAdministrativeUsers({ limit: 25, cursor: userCursor });
       setUsers((items) => [...items, ...page.items]); setUserCursor(page.nextCursor);
-    } catch { setPageError("Não foi possível carregar mais usuários."); }
+    } catch (cause) {
+      if (cause instanceof AuthenticationRequired) onAuthenticationRequired();
+      else if (cause instanceof ApiProblem && cause.problem.status === 403) onAuthorizationChanged();
+      else setPageError("Não foi possível carregar mais usuários.");
+    }
   }
   async function loadMoreInvitations(): Promise<void> {
     if (!invitationCursor) return;
     try {
       const page = await client.listAdministrativeInvitations({ limit: 25, cursor: invitationCursor });
       setInvitations((items) => [...items, ...page.items]); setInvitationCursor(page.nextCursor);
-    } catch { setPageError("Não foi possível carregar mais convites."); }
+    } catch (cause) {
+      if (cause instanceof AuthenticationRequired) onAuthenticationRequired();
+      else if (cause instanceof ApiProblem && cause.problem.status === 403) onAuthorizationChanged();
+      else setPageError("Não foi possível carregar mais convites.");
+    }
   }
 
   if (loading) return <section><h2>Administração de acesso</h2><p>Carregando…</p></section>;

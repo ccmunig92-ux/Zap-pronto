@@ -13,10 +13,15 @@ const transportClient = createApiClient({
 let pendingCurrentUser: ReturnType<typeof transportClient.getCurrentUser> | undefined;
 export const apiClient = {
   getCurrentUser() {
-    pendingCurrentUser ??= transportClient.getCurrentUser().catch((error: unknown) => {
-      pendingCurrentUser = undefined;
-      throw error;
-    });
+    if (!pendingCurrentUser) {
+      const request = transportClient.getCurrentUser();
+      pendingCurrentUser = request;
+      request.then(() => {
+        if (pendingCurrentUser === request) pendingCurrentUser = undefined;
+      }, () => {
+        if (pendingCurrentUser === request) pendingCurrentUser = undefined;
+      });
+    }
     return pendingCurrentUser;
   },
   getUserInvitationOptions() {

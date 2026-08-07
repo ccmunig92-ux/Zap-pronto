@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CurrentUser } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import { apiClient } from "./api.js";
-import { isAuthConfigured, signIn } from "./auth.js";
+import { clearAuthSession, isAuthConfigured, signIn } from "./auth.js";
 import { InvitationPanel, type InvitationClient } from "./InvitationPanel.js";
 import { AdministrationPanel, type AdministrationClient } from "./AdministrationPanel.js";
 import { AcceptInvitationPanel, type AcceptanceClient } from "./AcceptInvitationPanel.js";
@@ -22,6 +22,17 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
 }) {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [loginError, setLoginError] = useState<string>();
+  function invalidateAuthentication(): void {
+    setSession({ status: "authentication-required" });
+    void clearAuthSession();
+  }
+  function refreshAuthorization(): void {
+    setSession({ status: "loading" });
+    client.getCurrentUser().then((currentUser) => setSession({ status: "ready", currentUser })).catch((error: unknown) => {
+      if (error instanceof AuthenticationRequired) invalidateAuthentication();
+      else setSession({ status: "error", message: "Não foi possível atualizar suas permissões." });
+    });
+  }
   useEffect(() => {
     let active = true;
     client.getCurrentUser().then((currentUser) => {
@@ -43,7 +54,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     <button type="button" disabled={!configured} onClick={() => {
       void signIn().catch(() => setLoginError("Não foi possível iniciar a autenticação."));
     }}>Entrar</button>{loginError && <p>{loginError}</p>}
-    {configured && <AcceptInvitationPanel client={acceptanceClient}
+    {configured && <AcceptInvitationPanel client={acceptanceClient} onAuthenticationRequired={invalidateAuthentication}
       onAccepted={(currentUser) => setSession({ status: "ready", currentUser })}/>}</main>;
   if (session.status === "error") return <main><h1>Falha ao carregar a sessão</h1><p>{session.message}</p>
     {session.correlationId && <small>Correlação: {session.correlationId}</small>}</main>;
@@ -55,6 +66,9 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     <section><h2>Unidades vinculadas</h2><ul>{currentUser.memberships.map((membership) =>
       <li key={membership.unitId}><strong>{membership.unitName}</strong> <span>{membership.role}</span></li>)}</ul></section>
     {currentUser.grants.some((grant) => grant.permission === "tenant.users.manage" && grant.scope === "TENANT")
-      && <><InvitationPanel client={invitationClient}/><AdministrationPanel client={administrationClient}/></>}
+      && <><InvitationPanel client={invitationClient} onAuthenticationRequired={invalidateAuthentication}
+        onAuthorizationChanged={refreshAuthorization}/>
+        <AdministrationPanel client={administrationClient} onAuthenticationRequired={invalidateAuthentication}
+          onAuthorizationChanged={refreshAuthorization}/></>}
   </main>;
 }
