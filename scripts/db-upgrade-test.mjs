@@ -123,6 +123,7 @@ try {
   assert.match(firstRun, /applied 0015_oidc_invitation_acceptance\.sql/);
   assert.match(firstRun, /applied 0016_invitation_acceptance_rate_limit\.sql/);
   assert.match(firstRun, /applied 0017_handoff_inbox_internal\.sql/);
+  assert.match(firstRun, /applied 0018_handoff_commands\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();

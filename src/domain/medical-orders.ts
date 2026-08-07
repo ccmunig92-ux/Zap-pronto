@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { TenantQueryClient } from "../database/tenant-transaction.js";
-import { requestHandoff } from "./handoffs.js";
 
 interface QueryResult<Row> { readonly rowCount: number | null; readonly rows: readonly Row[] }
 async function query<Row>(client: TenantQueryClient, text: string, values: unknown[]): Promise<QueryResult<Row>> {
@@ -65,45 +64,8 @@ async function ensureMedicalOrderHandoff(
   input: { serviceCaseId: string; conversationId: string; expectedCaseVersion: number;
     reason: string; priority: "NORMAL" | "HIGH"; idempotencyKey: string },
 ): Promise<void> {
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':handoff-case:' || $1, 0))",
-    [input.serviceCaseId],
-  );
-  const existing = await query<{ id: string; service_case_id: string }>(client, `
-    SELECT id, service_case_id FROM human_handoffs
-    WHERE conversation_id=$1 AND status IN ('REQUESTED','QUEUED','ACTIVE')
-    ORDER BY requested_at, id LIMIT 1 FOR UPDATE
-  `, [input.conversationId]);
-  if (existing.rowCount === 0) {
-    await requestHandoff(client, input);
-    return;
-  }
-  if (existing.rows[0]!.service_case_id !== input.serviceCaseId) {
-    throw new Error("HANDOFF_OPEN_FOR_ANOTHER_CASE");
-  }
-  const serviceCase = await query<{ status: string; version: number }>(client, `
-    SELECT status, version FROM service_cases WHERE id=$1 FOR UPDATE
-  `, [input.serviceCaseId]);
-  if (serviceCase.rowCount !== 1) throw new Error("SERVICE_CASE_NOT_FOUND");
-  const current = serviceCase.rows[0]!;
-  if (current.status === "WAITING_HUMAN" || current.status === "IN_REVIEW") return;
-  if (current.version !== input.expectedCaseVersion
-    || !["COLLECTING", "READY_FOR_HANDOFF"].includes(current.status)) {
-    throw new Error("CONCURRENT_MODIFICATION");
-  }
-  const moved = await query<{ version: number }>(client, `
-    UPDATE service_cases SET status='WAITING_HUMAN', version=version+1, state_changed_at=now()
-    WHERE id=$1 AND version=$2 AND status IN ('COLLECTING','READY_FOR_HANDOFF') RETURNING version
-  `, [input.serviceCaseId, input.expectedCaseVersion]);
-  if (moved.rowCount !== 1) throw new Error("CONCURRENT_MODIFICATION");
-  await client.query(`
-    INSERT INTO workflow_transitions
-      (tenant_id, aggregate_type, aggregate_id, from_status, to_status, reason,
-       actor_id, correlation_id, metadata)
-    VALUES (current_app_tenant_id(), 'SERVICE_CASE', $1, $2, 'WAITING_HUMAN', $3,
-      current_app_actor_id(), current_setting('app.correlation_id'),
-      jsonb_build_object('reusedHandoffId', $4::uuid))
-  `, [input.serviceCaseId, current.status, input.reason, existing.rows[0]!.id]);
+  await client.query("SELECT ensure_medical_order_handoff_command($1,$2,$3,$4,$5)",
+    [input.serviceCaseId,input.expectedCaseVersion,input.reason,input.priority,input.idempotencyKey]);
 }
 
 export async function receiveMedicalOrder(
@@ -153,7 +115,7 @@ export async function receiveMedicalOrder(
       AND attachment.media_type IN ('IMAGE', 'DOCUMENT')
     WHERE service_case.id = $1 AND service_case.unit_id IS NOT NULL
       AND service_case.kind = 'MEDICAL_ORDER' AND message.direction='INBOUND' AND message.actor='CUSTOMER'
-    FOR SHARE OF service_case, message, attachment
+    FOR SHARE OF message, attachment
   `, [input.serviceCaseId, input.messageId, input.attachmentId]);
   if (source.rowCount !== 1) throw new Error("MEDICAL_ORDER_SOURCE_INVALID");
   if (source.rows[0]!.sha256 !== input.documentSha256) throw new Error("DOCUMENT_HASH_MISMATCH");

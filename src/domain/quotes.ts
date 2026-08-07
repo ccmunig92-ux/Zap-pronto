@@ -92,7 +92,7 @@ export async function createReadyQuote(client: TenantQueryClient, input: CreateQ
     JOIN price_lists pl ON pl.tenant_id = version.tenant_id AND pl.id = version.price_list_id
       AND pl.unit_id = sc.unit_id
     WHERE sc.id = $1 AND sc.unit_id IS NOT NULL
-    FOR SHARE OF sc, version, pl
+    FOR SHARE OF version, pl
   `, [input.serviceCaseId, input.priceListVersionId]);
   if (context.rowCount !== 1) throw new Error("QUOTE_CONTEXT_NOT_FOUND");
   const scope = context.rows[0]!;

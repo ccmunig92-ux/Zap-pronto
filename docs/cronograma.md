@@ -251,7 +251,12 @@ OpenAPI existentes.
 O corte interno de persistência/domínio foi implementado na migration `0017`, ainda sem rota HTTP:
 projeção unit-scoped da fila, prioridade determinística, claim concorrente com fingerprint e replay,
 auditoria/outbox exatamente uma vez e veto do Hermes no banco durante takeover humano. A exposição HTTP
-continua bloqueada pelo gate OIDC e pela remoção dos grants DML históricos do papel da API.
+continua bloqueada pelo gate OIDC.
+
+A migration `0018` concluiu o hardening interno dos comandos de request e claim: funções SQL estreitas,
+fingerprint completo, replay, locks, permissão unitária, auditoria/outbox e remoção de `SELECT`/`INSERT`/`UPDATE`
+diretos de `human_handoffs` e de `INSERT`/`UPDATE` em conversas e casos pelo papel da API. O reaproveitamento
+de handoff por pedidos médicos usa a mesma fronteira e também produz evidência transacional.
 
 Escopo mínimo, sem frontend neste primeiro commit:
 

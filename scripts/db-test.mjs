@@ -64,6 +64,7 @@ try {
       "0015_oidc_invitation_acceptance.sql",
       "0016_invitation_acceptance_rate_limit.sql",
       "0017_handoff_inbox_internal.sql",
+      "0018_handoff_commands.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -136,7 +137,7 @@ try {
       "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
     protectedTables.sort();
-    const globalHiddenTables = ["invitation_acceptance_rate_limits", "handoff_claim_commands"];
+    const globalHiddenTables = ["invitation_acceptance_rate_limits", "handoff_claim_commands", "handoff_request_commands"];
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -202,8 +203,8 @@ try {
 
     const apiWritable = new Set([
       "units", "channel_connections", "channel_connection_units",
-      "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
-      "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
+      "contacts", "contact_identities", "message_attachments",
+      "catalog_items", "price_lists", "price_list_versions", "prices",
       "quotes", "medical_orders", "medical_order_pages", "medical_order_items",
     ]);
     const apiInsertOnly = new Set([
@@ -212,7 +213,8 @@ try {
     ]);
     const apiHidden = new Set([
       "user_invitations", "user_invitation_units", "user_lifecycle_commands",
-      "invitation_acceptance_rate_limits", "handoff_claim_commands",
+      "invitation_acceptance_rate_limits", "handoff_claim_commands", "handoff_request_commands",
+      "human_handoffs",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
@@ -247,6 +249,24 @@ try {
         assert.deepEqual(privileges.rows[0], expected, `${role}:${table}:PRIVILEGE_MATRIX_MISMATCH`);
       }
     }
+
+    const handoffExecutor = await target.query(`SELECT r.rolcanlogin,r.rolsuper,r.rolbypassrls,r.rolinherit,
+      (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member=r.oid OR m.roleid=r.oid) AS memberships
+      FROM pg_roles r WHERE r.rolname='zap_pronto_handoff_executor'`);
+    assert.deepEqual(handoffExecutor.rows[0], { rolcanlogin:false,rolsuper:false,rolbypassrls:false,
+      rolinherit:false,memberships:0 });
+    const handoffFunctionSecurity = await target.query(`SELECT p.proname,owner.rolname AS owner,
+      p.prosecdef,coalesce(array_to_string(p.proconfig,','),'') AS config,
+      EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
+        WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public_execute,
+      has_function_privilege('zap_pronto_api',p.oid,'EXECUTE') AS api_execute
+      FROM pg_proc p JOIN pg_roles owner ON owner.oid=p.proowner
+      WHERE p.proname IN ('request_handoff_command','claim_handoff_command','ensure_medical_order_handoff_command')
+      ORDER BY p.proname`);
+    assert.equal(handoffFunctionSecurity.rowCount,3);
+    for (const fn of handoffFunctionSecurity.rows) assert.deepEqual(fn,
+      { proname:fn.proname,owner:'zap_pronto_handoff_executor',prosecdef:true,
+        config:'search_path=pg_catalog, public,row_security=on',public_execute:false,api_execute:true });
 
     const outboxColumnPrivileges = await target.query(`
       SELECT
@@ -1092,7 +1112,7 @@ try {
 
       // Elevação exclusiva do banco descartável para exercitar todas as policies.
       await target.query("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO zap_pronto_api");
-      await target.query("GRANT SELECT ON user_invitations,user_invitation_units,user_lifecycle_commands TO zap_pronto_api");
+      await target.query("GRANT SELECT ON user_invitations,user_invitation_units,user_lifecycle_commands,human_handoffs TO zap_pronto_api");
       await target.query("REVOKE UPDATE, DELETE ON audit_events FROM zap_pronto_api");
 
       for (const table of protectedTables) {
@@ -1303,6 +1323,7 @@ try {
       const handoffA = await target.query(
         "SELECT id, version FROM human_handoffs WHERE idempotency_key = 'handoff-a'",
       );
+      await target.query("REVOKE SELECT,INSERT,UPDATE ON human_handoffs FROM zap_pronto_api; REVOKE INSERT,UPDATE ON conversations,service_cases FROM zap_pronto_api");
       await target.query(`
         UPDATE conversations SET automation_status = 'HUMAN_REQUESTED'
         WHERE id = '44000000-0000-4000-8000-000000000001';
@@ -1325,6 +1346,70 @@ try {
         handoffId: handoffA.rows[0].id,
         expectedVersion: handoffA.rows[0].version,
       };
+      const blockedHandoffActorId = "66000000-0000-4000-8000-000000000021";
+      const revokedHandoffActorId = "66000000-0000-4000-8000-000000000022";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name,status,blocked_at) VALUES
+        ($1,'40000000-0000-4000-8000-000000000001','handoff-blocked@test.local','Blocked Handoff','BLOCKED',now())`,
+      [blockedHandoffActorId]);
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name,status,revoked_at) VALUES
+        ($1,'40000000-0000-4000-8000-000000000001','handoff-revoked@test.local','Revoked Handoff','REVOKED',now())`,
+      [revokedHandoffActorId]);
+      for (const deniedActorId of [blockedHandoffActorId, revokedHandoffActorId]) {
+        await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+          SELECT tenant_id,$1,id,'ATTENDANT' FROM units WHERE code='POOL-A'`, [deniedActorId]);
+      }
+      const directHandoffCommand = async (actorId, sql, values, correlationId) => {
+        const client = await runtimePool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_api");
+          await client.query(`SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),
+            set_config('app.correlation_id',$3,true)`,
+          ["40000000-0000-4000-8000-000000000001", actorId, correlationId]);
+          return await client.query(sql, values);
+        } finally {
+          await client.query("ROLLBACK").catch(() => undefined);
+          client.release();
+        }
+      };
+      const deniedHandoffEvidence = () => target.query(`SELECT
+        (SELECT jsonb_build_array(status::text,version,assigned_user_id) FROM human_handoffs WHERE id=$1) AS handoff,
+        (SELECT jsonb_build_array(status::text,version) FROM service_cases
+          WHERE id='45000000-0000-4000-8000-000000000001') AS service_case,
+        (SELECT jsonb_build_array(automation_status::text,version,assigned_user_id) FROM conversations
+          WHERE id='44000000-0000-4000-8000-000000000001') AS conversation,
+        (SELECT count(*)::integer FROM handoff_request_commands WHERE idempotency_key LIKE 'security-denied-%') AS requests,
+        (SELECT count(*)::integer FROM handoff_claim_commands WHERE idempotency_key LIKE 'security-denied-%') AS claims,
+        (SELECT count(*)::integer FROM audit_events WHERE action IN ('HANDOFF_REQUESTED','HANDOFF_CLAIMED','HANDOFF_REUSED')
+          AND metadata->>'correlationId' LIKE 'security-denied-%') AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE idempotency_key LIKE 'security-denied-%') AS outbox`,
+      [claimInput.handoffId]);
+      const deniedBaseline = (await deniedHandoffEvidence()).rows[0];
+      const deniedCommands = (actorId, suffix) => [
+        ["SELECT request_handoff_command($1,1,'SECURITY_TEST','NORMAL',$2,NULL)",
+          ["45000000-0000-4000-8000-000000000001", `security-denied-request-${suffix}`]],
+        ["SELECT claim_handoff_command($1,$2,$3)",
+          [claimInput.handoffId, claimInput.expectedVersion, `security-denied-claim-${suffix}`]],
+        ["SELECT ensure_medical_order_handoff_command($1,1,'SECURITY_TEST','NORMAL',$2)",
+          ["45000000-0000-4000-8000-000000000001", `security-denied-ensure-${suffix}`]],
+      ];
+      for (const [actorId, suffix] of [[blockedHandoffActorId, "blocked"], [revokedHandoffActorId, "revoked"]]) {
+        for (const [sql, values] of deniedCommands(actorId, suffix)) {
+          await assert.rejects(directHandoffCommand(actorId, sql, values, `security-denied-${suffix}`),
+            (error) => error instanceof Error && "code" in error && ["42501", "P0002"].includes(error.code));
+        }
+      }
+      await target.query("UPDATE units SET active=false WHERE code='POOL-A'");
+      try {
+        for (const [sql, values] of deniedCommands(actorAId, "inactive-unit")) {
+          await assert.rejects(directHandoffCommand(actorAId, sql, values, "security-denied-inactive-unit"),
+            (error) => error instanceof Error && "code" in error && ["42501", "P0002"].includes(error.code));
+        }
+      } finally {
+        await target.query("UPDATE units SET active=true WHERE code='POOL-A'");
+      }
+      assert.deepEqual((await deniedHandoffEvidence()).rows[0], deniedBaseline,
+        "DENIED_HANDOFF_COMMAND_CREATED_SIDE_EFFECTS");
       const queueUnitAId = (await target.query("SELECT id FROM units WHERE code='POOL-A'")).rows[0].id;
       const queueA = await withTenantTransaction(runtimePool,
         { ...claimContext, correlationId: "list-queue-a" },
@@ -1409,6 +1494,49 @@ try {
           priority: "NORMAL",
           idempotencyKey: "handoff-request-b",
       };
+      const quoteHandoffRaceInput = {
+        serviceCaseId: "55000000-0000-4000-8000-000000000002",
+        priceListVersionId: "59000000-0000-4000-8000-000000000002",
+        items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 1 }],
+        discountMinor: 0n,
+        validUntil: new Date(Date.now() + 86_400_000),
+        idempotencyKey: "quote-handoff-race-b",
+      };
+      const quoteHandoffRace = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "quote-handoff-race-b",
+        }, (client) => createReadyQuote(client, quoteHandoffRaceInput)),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "request-handoff-b",
+        }, (client) => requestHandoff(client, concurrentHandoffRequest)),
+      ]);
+      assert.equal(quoteHandoffRace.filter((result) => result.status === "fulfilled").length, 2,
+        quoteHandoffRace.map((result) => result.status === "rejected"
+          ? `${result.reason?.code ?? "ERROR"}:${result.reason?.message ?? result.reason}` : "FULFILLED").join(" | "));
+      const racedQuote = quoteHandoffRace[0].value;
+      assert.deepEqual({ status: racedQuote.status, subtotal: racedQuote.subtotalMinor, total: racedQuote.totalMinor },
+        { status: "READY", subtotal: 2000n, total: 2000n });
+      const quoteHandoffRaceEvidence = await target.query(`SELECT
+        quote.status::text AS quote_status,quote.total_minor::text AS total_minor,
+        version.status::text AS price_status,service_case.status::text AS case_status,
+        conversation.automation_status::text AS automation_status,
+        (quote.unit_id=service_case.unit_id AND quote.conversation_id=service_case.conversation_id) AS routing_consistent,
+        (SELECT count(*)::integer FROM human_handoffs handoff WHERE handoff.service_case_id=service_case.id
+          AND handoff.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs
+        FROM quotes quote JOIN service_cases service_case
+          ON service_case.tenant_id=quote.tenant_id AND service_case.id=quote.service_case_id
+        JOIN conversations conversation
+          ON conversation.tenant_id=service_case.tenant_id AND conversation.id=service_case.conversation_id
+        JOIN price_list_versions version
+          ON version.tenant_id=quote.tenant_id AND version.id=quote.price_list_version_id
+        WHERE quote.idempotency_key='quote-handoff-race-b'`);
+      assert.deepEqual(quoteHandoffRaceEvidence.rows[0], {
+        quote_status: "READY", total_minor: "2000", price_status: "PUBLISHED",
+        case_status: "WAITING_HUMAN", automation_status: "HUMAN_QUEUED",
+        routing_consistent: true, open_handoffs: 1,
+      });
       const concurrentHandoffRequests = await Promise.allSettled([
         withTenantTransaction(runtimePool, {
           tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
@@ -1423,6 +1551,11 @@ try {
       const requestedHandoff = concurrentHandoffRequests[0].value;
       assert.equal(concurrentHandoffRequests[1].value.id, requestedHandoff.id);
       assert.equal(requestedHandoff.status, "QUEUED");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+        correlationId: "request-handoff-b-divergent",
+      }, (client) => requestHandoff(client, { ...concurrentHandoffRequest, reason: "DOCUMENT_UNREADABLE" })),
+      /IDEMPOTENCY_KEY_REUSED/);
       const requestEvidence = await target.query(`
         SELECT c.automation_status, c.assigned_user_id, sc.status AS case_status, sc.version AS case_version,
           h.status AS handoff_status, h.queued_at IS NOT NULL AS was_queued,
@@ -1430,6 +1563,8 @@ try {
             WHERE wt.correlation_id IN ('request-handoff-b','request-handoff-b-replay')) AS transitions,
           (SELECT count(*)::integer FROM outbox_events oe
             WHERE oe.idempotency_key = 'handoff.queued:' || h.id::text) AS outbox_events
+          ,(SELECT count(*)::integer FROM audit_events ae
+            WHERE ae.action='HANDOFF_REQUESTED' AND ae.entity_id=h.id::text) AS audit_events
         FROM human_handoffs h
         JOIN service_cases sc ON sc.tenant_id = h.tenant_id AND sc.id = h.service_case_id
         JOIN conversations c ON c.tenant_id = h.tenant_id AND c.id = h.conversation_id
@@ -1444,6 +1579,7 @@ try {
         was_queued: true,
         transitions: 4,
         outbox_events: 1,
+        audit_events: 1,
       });
 
       const readyQuote = await withTenantTransaction(
