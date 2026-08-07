@@ -2,11 +2,12 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 06/08/2026
+## Status de execução — 07/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
-- Fase atual: **Fase 3 — API, autenticação e RBAC** (aguardando integração da Fase 2).
+- Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
+- Fase atual: **Fase 3 — API, autenticação e RBAC**, reconstruída sobre a `main` sem migrations da Fase 4.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -19,7 +20,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Matriz RLS das 19 tabelas: SELECT/INSERT/UPDATE/DELETE cruzados testados localmente.
 - Membership ator/tenant e matriz CRUD RLS: concluídos.
 - Papéis separados de API e worker: concluídos e reauditos.
-- Fase 2A em execução no branch `codex/phase-2-operational-domain`:
+- Fase 2A concluída e integrada pelo branch `codex/phase-2-operational-domain`:
   lifecycle tipado, histórico tenant-aware e outbox com lease/dead-letter modelados;
   solicitação de handoff atômica e claim otimista implementados.
 - Prova local da Fase 2A: migration do zero, RLS e dois claims concorrentes com exatamente um vencedor.
@@ -114,9 +115,9 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   na branch padrão pode usar o environment protegido. O probe aceita apenas chaves públicas RSA compatíveis
   com RS256/verify, exatamente como o verificador de runtime. O E2E exige frontend HTTPS, defaults seguros
   para variáveis opcionais, renovação posterior à expiração original e bloqueio reversível da conta de teste.
-- Bloqueio operacional atual: o environment `oidc-homologation`, suas variáveis/secrets, a implantação HTTPS
-  e as duas contas exclusivas ainda não estão disponíveis. A conta `gh` ativa possui escrita, mas a API nega
-  administração do environment; a Fase 4 continua fechada até um administrador preparar e executar o gate.
+- O environment `oidc-homologation` foi criado pela sessão administrativa do proprietário, ainda sem
+  variáveis, secrets ou proteções aprovadas. A implantação HTTPS e as duas contas sintéticas exclusivas
+  também não estão disponíveis; a Fase 4 continua fechada até configurar e executar o gate na `main`.
 
 ## Premissas
 
