@@ -28,6 +28,30 @@ export interface ClaimHandoffInput {
   readonly expectedVersion: number;
 }
 
+export interface IdempotentClaimHandoffInput extends ClaimHandoffInput {
+  readonly idempotencyKey: string;
+}
+
+export interface HandoffQueueCursor {
+  readonly priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  readonly queuedAt: Date;
+  readonly id: string;
+}
+
+export interface ListQueuedHandoffsInput {
+  readonly unitId: string;
+  readonly limit: number;
+  readonly cursor?: HandoffQueueCursor;
+}
+
+export interface QueuedHandoff extends HandoffResult {
+  readonly unitId: string;
+  readonly priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  readonly queuedAt: Date;
+  readonly slaDueAt: Date | null;
+  readonly automationStatus: string;
+}
+
 export interface HandoffResult {
   readonly id: string;
   readonly conversationId: string;
@@ -224,6 +248,11 @@ export async function claimHandoff(
     VALUES (current_app_tenant_id(), 'handoff', $1, 'handoff.claimed',
       jsonb_build_object('handoffId', $1::uuid, 'actorId', current_app_actor_id()), $2::text)
   `, [current.id, `handoff.claimed:${current.id}`]);
+  await client.query(`
+    INSERT INTO audit_events (tenant_id,actor_type,actor_id,action,entity_type,entity_id,metadata)
+    VALUES (current_app_tenant_id(),'USER',current_app_actor_id()::text,'HANDOFF_CLAIMED','handoff',$1::text,
+      jsonb_build_object('correlationId',current_setting('app.correlation_id'),'version',$2::integer))
+  `, [current.id, claimedVersion]);
 
   return {
     id: current.id,
@@ -232,4 +261,38 @@ export async function claimHandoff(
     status: "ACTIVE",
     version: claimedVersion,
   };
+}
+
+/** Projeção interna da fila; a autorização por unidade é revalidada pela função SQL estreita. */
+export async function listQueuedHandoffs(
+  client: TenantQueryClient,
+  input: ListQueuedHandoffsInput,
+): Promise<readonly QueuedHandoff[]> {
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw new Error("INVALID_QUEUE_LIMIT");
+  const cursor = input.cursor;
+  const result = await query<{
+    id: string; conversation_id: string; service_case_id: string; unit_id: string;
+    priority: QueuedHandoff["priority"]; queued_at: Date; sla_due_at: Date | null;
+    status: HandoffStatus; version: number; automation_status: string;
+  }>(client, "SELECT * FROM list_queued_handoffs($1,$2,$3,$4,$5)", [input.unitId,input.limit,
+    cursor?.priority ?? null,cursor?.queuedAt ?? null,cursor?.id ?? null]);
+  return result.rows.map((row) => ({ id: row.id,conversationId: row.conversation_id,
+    serviceCaseId: row.service_case_id,unitId: row.unit_id,priority: row.priority,queuedAt: row.queued_at,
+    slaDueAt: row.sla_due_at,status: row.status,version: row.version,automationStatus: row.automation_status }));
+}
+
+/** Replay idempotente não executa novamente transições, auditoria ou outbox. */
+export async function claimHandoffIdempotent(
+  client: TenantQueryClient,
+  input: IdempotentClaimHandoffInput,
+): Promise<HandoffResult> {
+  const idempotencyKey = requiredText(input.idempotencyKey,"INVALID_IDEMPOTENCY_KEY",200);
+  const replay = await query<{ result: HandoffResult | null }>(client,
+    "SELECT get_handoff_claim_replay($1,$2,$3) AS result",
+    [idempotencyKey,input.handoffId,input.expectedVersion]);
+  if (replay.rows[0]?.result) return replay.rows[0].result;
+  const claimed = await claimHandoff(client,input);
+  await client.query("SELECT store_handoff_claim_result($1,$2,$3,$4::jsonb)",
+    [idempotencyKey,input.handoffId,input.expectedVersion,JSON.stringify(claimed)]);
+  return claimed;
 }

@@ -248,6 +248,11 @@ OIDC externa descrita acima. Quando liberado, deve reutilizar exclusivamente `hu
 `conversations`, `service_cases`, `workflow_transitions`, outbox, RLS, `protectedRoute` e o cliente
 OpenAPI existentes.
 
+O corte interno de persistência/domínio foi implementado na migration `0017`, ainda sem rota HTTP:
+projeção unit-scoped da fila, prioridade determinística, claim concorrente com fingerprint e replay,
+auditoria/outbox exatamente uma vez e veto do Hermes no banco durante takeover humano. A exposição HTTP
+continua bloqueada pelo gate OIDC e pela remoção dos grants DML históricos do papel da API.
+
 Escopo mínimo, sem frontend neste primeiro commit:
 
 1. `GET /v1/inbox/handoffs?unitId=<uuid>&limit=<1..100>&cursor=<opaco>` com permissão

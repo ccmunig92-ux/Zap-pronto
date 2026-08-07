@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import pg from "pg";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
-import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
+import { claimHandoffIdempotent, listQueuedHandoffs, requestHandoff } from "../dist/domain/handoffs.js";
 import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
 import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
 import { listAdministrativeInvitations, listAdministrativeUsers } from "../dist/domain/user-administration.js";
@@ -63,6 +63,7 @@ try {
       "0014_invitation_user_lifecycle.sql",
       "0015_oidc_invitation_acceptance.sql",
       "0016_invitation_acceptance_rate_limit.sql",
+      "0017_handoff_inbox_internal.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -135,7 +136,7 @@ try {
       "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
     protectedTables.sort();
-    const globalHiddenTables = ["invitation_acceptance_rate_limits"];
+    const globalHiddenTables = ["invitation_acceptance_rate_limits", "handoff_claim_commands"];
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -211,7 +212,7 @@ try {
     ]);
     const apiHidden = new Set([
       "user_invitations", "user_invitation_units", "user_lifecycle_commands",
-      "invitation_acceptance_rate_limits",
+      "invitation_acceptance_rate_limits", "handoff_claim_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
@@ -1314,20 +1315,36 @@ try {
         tenantId: "40000000-0000-4000-8000-000000000001",
         actorId: actorAId,
       };
+      const competingAttendantId = "66000000-0000-4000-8000-000000000001";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name) VALUES
+        ($1,'40000000-0000-4000-8000-000000000001','claim-attendant@test.local','Claim Attendant')`,
+      [competingAttendantId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT tenant_id,$1,id,'ATTENDANT' FROM units WHERE code='POOL-A'`, [competingAttendantId]);
       const claimInput = {
         handoffId: handoffA.rows[0].id,
         expectedVersion: handoffA.rows[0].version,
       };
+      const queueUnitAId = (await target.query("SELECT id FROM units WHERE code='POOL-A'")).rows[0].id;
+      const queueA = await withTenantTransaction(runtimePool,
+        { ...claimContext, correlationId: "list-queue-a" },
+        (client) => listQueuedHandoffs(client, { unitId: queueUnitAId, limit: 10 }));
+      assert.ok(queueA.some((item) => item.id === claimInput.handoffId));
+      const forbiddenQueueUnitId = (await target.query("SELECT id FROM units WHERE code='POOL-B'")).rows[0].id;
+      await assert.rejects(withTenantTransaction(runtimePool,
+        { ...claimContext, correlationId: "list-cross-unit" },
+        (client) => listQueuedHandoffs(client, { unitId: forbiddenQueueUnitId, limit: 10 })),
+      /AUTHORIZATION_DENIED/);
       const claimResults = await Promise.allSettled([
         withTenantTransaction(
           runtimePool,
           { ...claimContext, correlationId: "concurrent-claim-a" },
-          (client) => claimHandoff(client, claimInput),
+          (client) => claimHandoffIdempotent(client, { ...claimInput, idempotencyKey: "claim-command-a1" }),
         ),
         withTenantTransaction(
           competingRuntimePool,
-          { ...claimContext, correlationId: "concurrent-claim-b" },
-          (client) => claimHandoff(client, claimInput),
+          { ...claimContext, actorId: competingAttendantId, correlationId: "concurrent-claim-b" },
+          (client) => claimHandoffIdempotent(client, { ...claimInput, idempotencyKey: "claim-command-a2" }),
         ),
       ]);
       assert.equal(
@@ -1340,6 +1357,18 @@ try {
       assert.equal(claimResults.filter((result) => result.status === "rejected").length, 1);
       const rejectedClaim = claimResults.find((result) => result.status === "rejected");
       assert.match(rejectedClaim.reason.message, /HANDOFF_CLAIM_CONFLICT/);
+      const winningIndex = claimResults.findIndex((result) => result.status === "fulfilled");
+      const winningKey = `claim-command-a${winningIndex + 1}`;
+      const winningActorId = winningIndex === 0 ? actorAId : competingAttendantId;
+      const otherActorId = winningIndex === 0 ? competingAttendantId : actorAId;
+      const replayedClaim = await withTenantTransaction(runtimePool,
+        { ...claimContext, actorId: winningActorId, correlationId: "claim-replay" },
+        (client) => claimHandoffIdempotent(client, { ...claimInput, idempotencyKey: winningKey }));
+      assert.equal(replayedClaim.status, "ACTIVE");
+      await assert.rejects(withTenantTransaction(runtimePool,
+        { ...claimContext, actorId: otherActorId, correlationId: "claim-replay-divergent" },
+        (client) => claimHandoffIdempotent(client, { ...claimInput,
+          idempotencyKey: winningKey })), /IDEMPOTENCY_KEY_REUSED/);
 
       const claimEvidence = await target.query(`
         SELECT h.status, h.version, h.assigned_user_id,
@@ -1347,15 +1376,22 @@ try {
             WHERE wt.aggregate_type = 'HANDOFF' AND wt.aggregate_id = h.id AND wt.to_status = 'ACTIVE') AS transitions,
           (SELECT count(*)::integer FROM outbox_events oe
             WHERE oe.idempotency_key = 'handoff.claimed:' || h.id::text) AS outbox_events
+          ,(SELECT count(*)::integer FROM audit_events ae
+            WHERE ae.action='HANDOFF_CLAIMED' AND ae.entity_id=h.id::text) AS audit_events
         FROM human_handoffs h WHERE h.id = $1
       `, [handoffA.rows[0].id]);
       assert.deepEqual(claimEvidence.rows[0], {
         status: "ACTIVE",
         version: 2,
-        assigned_user_id: actorAId,
+        assigned_user_id: winningActorId,
         transitions: 1,
         outbox_events: 1,
+        audit_events: 1,
       });
+      await assert.rejects(target.query(`INSERT INTO messages
+        (tenant_id,conversation_id,direction,actor,body)
+        VALUES ('40000000-0000-4000-8000-000000000001','44000000-0000-4000-8000-000000000001',
+          'OUTBOUND','HERMES','must be vetoed')`), /HERMES_AUTOMATION_SUSPENDED/);
       const claimedCase = await target.query(
         "SELECT status, version FROM service_cases WHERE id = '45000000-0000-4000-8000-000000000001'",
       );

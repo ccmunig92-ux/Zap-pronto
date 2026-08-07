@@ -39,6 +39,7 @@
       ,"./domain/user-administration": { "types": "./src/domain/user-administration.ts", "default": "./dist/domain/user-administration.js" }
       ,"./domain/user-invitation-acceptance": { "types": "./src/domain/user-invitation-acceptance.ts", "default": "./dist/domain/user-invitation-acceptance.js" }
       ,"./domain/invitation-acceptance-rate-limit": { "types": "./src/domain/invitation-acceptance-rate-limit.ts", "default": "./dist/domain/invitation-acceptance-rate-limit.js" }
+      ,"./domain/handoffs": { "types": "./src/domain/handoffs.ts", "default": "./dist/domain/handoffs.js" }
   },
   "types": "./src/index.ts"
 }
