@@ -48,6 +48,30 @@ export async function buildApp(options: BuildAppOptions = {}) {
     config: { public: true },
     schema: { operationId: "getHealthLive", security: [], response: { 200: HealthSchema } },
   }, async () => ({ status: "ok" as const }));
+  app.get("/health/ready", {
+    config: { public: true },
+    schema: {
+      operationId: "getHealthReady", security: [],
+      response: { 200: HealthSchema, 503: ProblemDetailsSchema },
+    },
+  }, async (request, reply) => {
+    let connection: Awaited<ReturnType<TenantTransactionPool["connect"]>> | undefined;
+    try {
+      connection = await (options.pool ?? unavailablePool).connect();
+      await connection.query("SELECT 1");
+      return { status: "ok" as const };
+    } catch {
+      return reply.status(503).type("application/problem+json").send({
+        type: "urn:zap-pronto:error:service-unavailable",
+        title: "Service Unavailable",
+        status: 503,
+        detail: "The service is not ready",
+        correlationId: request.id,
+      });
+    } finally {
+      connection?.release();
+    }
+  });
   registerCurrentUserRoute(app, options.pool ?? unavailablePool);
   registerUserInvitationRoutes(app, options.pool ?? unavailablePool);
   registerUserAdministrationRoutes(app, options.pool ?? unavailablePool);

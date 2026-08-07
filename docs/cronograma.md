@@ -299,9 +299,12 @@ Gate automatizado do corte:
 
 ## Sequência imediata
 
-1. Publicar o workflow na branch padrão, preparar o environment protegido `oidc-homologation` com um
-   administrador e executar a jornada real de navegador com contas exclusivas de dois papéis.
-2. Expor o primeiro fluxo vertical da inbox somente depois desse gate, reutilizando contratos,
+1. Concluir a fundação integrada de homologação (`Dockerfile.api`, `Dockerfile.web`, proxy same-origin,
+   PostgreSQL isolado, migração e provisionamento do login restrito da API), mantendo-a coberta pelo CI.
+2. Preparar o environment `oidc-homologation` com proteção administrativa, domínio HTTPS, IdP real,
+   segredos escopados ao environment e duas contas sintéticas exclusivas; então executar a jornada real
+   de navegador e registrar o SHA e a execução como evidência.
+3. Expor o primeiro fluxo vertical da inbox somente depois desse gate, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

@@ -40,6 +40,19 @@ jobs:
       - run: pnpm typecheck:all
       - run: pnpm test:all
       - run: pnpm build:all
+      - run: node --test scripts/db-provision-runtime.test.mjs
+      - name: Validate integrated staging manifest
+        run: docker compose --env-file deploy/staging/.env.example -f deploy/staging/compose.yaml config --quiet
+      - name: Build API staging image
+        run: docker build --file Dockerfile.api --tag zap-pronto-api:ci .
+      - name: Build web staging image
+        run: >-
+          docker build --file Dockerfile.web --tag zap-pronto-web:ci
+          --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com
+          --build-arg VITE_OIDC_CLIENT_ID=ci-public-client
+          --build-arg VITE_OIDC_REDIRECT_URI=https://staging.example.com/auth/callback
+          --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://staging.example.com/
+          .
       - run: pnpm db:test
         env:
           DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres

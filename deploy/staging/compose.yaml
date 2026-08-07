@@ -1,0 +1,178 @@
+name: zap-pronto-staging
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must reference an immutable PostgreSQL 18.3 image}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zap_pronto}
+      POSTGRES_USER: ${POSTGRES_USER:-zap_pronto_owner}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1536M
+        reservations:
+          memory: 256M
+
+  migrate:
+    image: ${ZAP_API_IMAGE:?ZAP_API_IMAGE must reference an immutable staging API image}
+    restart: "no"
+    command: ["node", "scripts/db-migrate.mjs"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_migration_url
+    secrets:
+      - database_migration_url
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+
+  provision-runtime:
+    image: ${ZAP_API_IMAGE:?ZAP_API_IMAGE must reference an immutable staging API image}
+    restart: "no"
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_migration_url
+      DATABASE_RUNTIME_URL_FILE: /run/secrets/database_runtime_url
+    command: ["node", "scripts/db-provision-runtime.mjs"]
+    secrets:
+      - database_migration_url
+      - database_runtime_url
+    networks:
+      - data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  api:
+    image: ${ZAP_API_IMAGE:?ZAP_API_IMAGE must reference an immutable staging API image}
+    restart: unless-stopped
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: "3000"
+      DATABASE_URL_FILE: /run/secrets/database_runtime_url
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:?OIDC_JWKS_URL is required}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-}
+      OIDC_ORGANIZATION_CLAIM: ${OIDC_ORGANIZATION_CLAIM:-}
+    secrets:
+      - database_runtime_url
+    networks:
+      - app
+      - data
+    depends_on:
+      provision-runtime:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+        reservations:
+          memory: 192M
+
+  web:
+    image: ${ZAP_WEB_IMAGE:?ZAP_WEB_IMAGE must reference an immutable staging web image}
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: http://api:3000
+      OIDC_AUTHORITY_ORIGIN: ${OIDC_AUTHORITY_ORIGIN:?OIDC_AUTHORITY_ORIGIN is required}
+    ports:
+      - "127.0.0.1:${STAGING_HTTP_PORT:-18080}:8080"
+    networks:
+      - app
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/health/web"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/cache/nginx:size=32m,mode=0755
+      - /etc/nginx/conf.d:size=8m,mode=0755
+      - /var/run:size=8m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+networks:
+  app:
+  data:
+    internal: true
+
+volumes:
+  postgres_data:
+
+secrets:
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?POSTGRES_PASSWORD_FILE must be outside the repository}
+  database_migration_url:
+    file: ${DATABASE_MIGRATION_URL_FILE:?DATABASE_MIGRATION_URL_FILE must be outside the repository}
+  database_runtime_url:
+    file: ${DATABASE_RUNTIME_URL_FILE:?DATABASE_RUNTIME_URL_FILE must be outside the repository}
