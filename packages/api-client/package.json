@@ -1,0 +1,18 @@
+{
+  "name": "@zap-pronto/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && node ../../scripts/run-built-tests.mjs dist"
+  },
+  "types": "./src/index.ts",
+  "exports": { ".": { "types": "./src/index.ts", "default": "./dist/index.js" } },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.41",
+    "@zap-pronto/contracts": "workspace:*",
+    "openapi-fetch": "^0.15.0"
+  }
+}

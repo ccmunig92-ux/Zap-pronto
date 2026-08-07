@@ -2,11 +2,12 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 06/08/2026
+## Status de execução — 07/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
-- Fase atual: **Fase 3 — API, autenticação e RBAC** (aguardando integração da Fase 2).
+- Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
+- Fase atual: **Fase 3 — API, autenticação e RBAC**, reconstruída sobre a `main` sem migrations da Fase 4.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -19,7 +20,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Matriz RLS das 19 tabelas: SELECT/INSERT/UPDATE/DELETE cruzados testados localmente.
 - Membership ator/tenant e matriz CRUD RLS: concluídos.
 - Papéis separados de API e worker: concluídos e reauditos.
-- Fase 2A em execução no branch `codex/phase-2-operational-domain`:
+- Fase 2A concluída e integrada pelo branch `codex/phase-2-operational-domain`:
   lifecycle tipado, histórico tenant-aware e outbox com lease/dead-letter modelados;
   solicitação de handoff atômica e claim otimista implementados.
 - Prova local da Fase 2A: migration do zero, RLS e dois claims concorrentes com exatamente um vencedor.
@@ -43,7 +44,80 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   repetição; registro da migration é atômico ao DDL; RLS comercial e clínica isola filiais.
 - Gate final da Fase 2: handoff concorrente com replay único, recebimento/extracão/revisão médica
   concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
-- Fases 3–9: não iniciadas.
+- Fase 3A iniciada em branch empilhada própria: workspace full-stack único, contratos TypeBox,
+  composition root Fastify, OpenAPI gerado e shell React sem acesso direto ao banco.
+- Fase 3A identidade/RBAC em validação: catálogo persistido alinhado a `user_units`, provedores OIDC e
+  identidades resolvidas por issuer, audience, organização e subject, com RLS e função estreita.
+- Boundary HTTP fail-closed em validação: toda rota `/v1` exige declaração explícita e rotas protegidas
+  executam resolução OIDC, contexto RLS e autorização RBAC na mesma transação do caso de uso.
+- Primeiro corte vertical da Fase 3 implementado localmente: `GET /v1/me` deriva usuário e tenant do
+  OIDC/banco, nega conta sem unidade ativa e expõe vínculos/grants sem dados internos do provedor.
+- OpenAPI gera o cliente TypeScript canônico com verificação de drift; o shell React consome somente
+  esse cliente e não envia tenant, ator ou unidade como fonte de autorização.
+- Fase 3B lifecycle persistente iniciado: migration `0012` separa conta, convite e identidade OIDC,
+  normaliza email por tenant, armazena somente digest do token e aplica TTL, estados e RLS; a tabela
+  de comandos modela a idempotência, ainda não exposta por rota.
+- Prova local da fundação 3B: migration limpa e upgrade legado passam; email case-insensitive duplicado,
+  digest inválido, segundo convite pendente e timestamps incoerentes são rejeitados pelo PostgreSQL;
+  bloqueio/reativação/revogação são versionados, auditados e serializados por tenant, e revogação OIDC
+  ocorre atomicamente. Escrita direta em usuários, vínculos e tabelas de convite foi retirada da API.
+- Primeiro corte vertical administrativo 3B concluído localmente: `GET /v1/users/invitations/options` e
+  `POST /v1/users/invitations` percorrem React, cliente OpenAPI, API protegida, domínio e PostgreSQL sem
+  DTO, mock ou acesso ao banco paralelos. Provider e unidades são opções ativas resolvidas pelo servidor.
+- Convites usam token CSPRNG de 32 bytes; somente o SHA-256 é persistido. O token bruto aparece apenas
+  no primeiro `201`, nunca em replay, auditoria, outbox ou comando. Se a primeira resposta se perder, a
+  operação segura exigirá revogação e reemissão; essa rota ainda é pendente.
+- Prova local do convite: RBAC negativo, unidade cross-tenant, JSON/NULL inválido, replay sem duplicação,
+  conflito de idempotência, expiração auditada e privilégios SQL estreitos passaram em PostgreSQL real;
+  API, cliente, OpenAPI e dez testes web também passaram.
+- Lifecycle administrativo 3B concluído localmente no fluxo único: listagens paginadas de usuários e
+  convites, bloqueio, reativação e revogação de conta, além de revogação e reemissão atômicas de convite.
+  Todas as mutações exigem Idempotency-Key, versão otimista quando aplicável, motivo, auditoria e outbox.
+- Reemissão invalida o convite anterior e entrega novo token bruto somente no primeiro `201`; replay não
+  recupera token. Self-removal, último administrador, unidade/tenant alheios e concorrência são bloqueados.
+- A listagem de convites permanece atrás de função SQL estreita e autorizada; a API não recebeu SELECT
+  direto nas tabelas protegidas. Paginação usa cursor validado e limite máximo de 100.
+- Prova local do lifecycle administrativo: migrations 0001–0014 e upgrade legado aprovados no PostgreSQL
+  real; core com 22 testes, API 14, cliente 7 e frontend 14 aprovados; OpenAPI sem drift.
+- Aceite OIDC 3B concluído localmente: rota pré-provisionamento exige Bearer assinado e email verificado;
+  o body contém somente o token. Tenant, provedor, usuário, unidades e permissões são derivados no banco.
+  A migration `0015` cria conta, vínculos, identidade, aceite, comando, auditoria e outbox atomicamente.
+- Token bruto permanece apenas no estado transitório do frontend e nunca entra em URL, storage, log ou SQL;
+  concorrência produz um vencedor e replay só é permitido para o mesmo comando e principal verificado.
+- Prova local do aceite: migrations 0001–0015 e upgrade aprovados; core 25, API 15, cliente 8 e frontend
+  17 testes aprovados. Issuer/audience/org/email divergentes, convite vencido e cross-tenant falham fechados.
+- Rate limit distribuído do aceite concluído na migration `0016`: PostgreSQL consome e confirma uma
+  tentativa antes da transação de aceite, com chave SHA-256 da identidade verificada, janela fixa de
+  15 minutos e máximo de 10 tentativas. A 11ª retorna 429 e `Retry-After`, sem retry automático na UI.
+- Prova do limiter: duas conexões concorrentes produziram dez permissões e duas recusas; o consumo
+  permanece após rollback posterior, tabela não tem grants diretos e cleanup é limitado com `SKIP LOCKED`.
+- Matriz final local de RBAC/IDOR concluída: JWT RS256 assinado, JWKS HTTP, API e PostgreSQL reais
+  exercitam dois tenants, duas unidades e os cinco papéis. IDOR cross-tenant retorna 404 genérico,
+  versão obsoleta retorna 409 e contas bloqueadas/revogadas perdem acesso na requisição seguinte.
+- O frontend desmonta imediatamente estado administrativo e token transitório após 401; após 403,
+  consulta `/v1/me` novamente e deixa os grants atuais decidirem a remontagem. O cache de sessão não
+  reutiliza grants antigos depois da conclusão da requisição pendente.
+- O executor de testes compilados agora enumera `*.test.js` deterministicamente. Isso corrige a falha
+  Linux/Node 24 em que `node --test dist` não encontrava a API e reportava falso positivo no cliente.
+- As duas execuções do GitHub Actions para o commit `1305c31` concluíram verdes, incluindo tipagem,
+  testes, build, integração PostgreSQL e upgrade legado.
+- A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
+  até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
+- Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
+- Gate que bloqueia o primeiro endpoint da Fase 4: executar em navegador a jornada com um IdP OIDC
+  externo homologado, usando ao menos um administrador e um atendente reais, e provar login, `/v1/me`,
+  expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não substituem esse gate.
+- Pré-check operacional desse gate: preencher `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` e, quando
+  aplicável, `OIDC_ORGANIZATION_CLAIM`, e executar `pnpm --filter @zap-pronto/api oidc:probe`. O comando
+  falha fechado para configuração insegura, discovery divergente, redirect, timeout, JSON inválido ou JWKS
+  sem chave pública de assinatura. Ele não recebe tokens e não substitui as duas jornadas reais no navegador.
+- O workflow de homologação não executa código de PR com credenciais reais: somente `workflow_dispatch`
+  na branch padrão pode usar o environment protegido. O probe aceita apenas chaves públicas RSA compatíveis
+  com RS256/verify, exatamente como o verificador de runtime. O E2E exige frontend HTTPS, defaults seguros
+  para variáveis opcionais, renovação posterior à expiração original e bloqueio reversível da conta de teste.
+- O environment `oidc-homologation` foi criado pela sessão administrativa do proprietário, ainda sem
+  variáveis, secrets ou proteções aprovadas. A implantação HTTPS e as duas contas sintéticas exclusivas
+  também não estão disponíveis; a Fase 4 continua fechada até configurar e executar o gate na `main`.
 
 ## Premissas
 
@@ -175,6 +249,46 @@ Critérios de aceite:
 - alerta não dispara sem demanda, fora do turno ou em pausa autorizada;
 - reconexão da UI não perde eventos.
 
+### Primeiro corte vertical da Fase 4 — inbox humana mínima
+
+Este corte permanece **bloqueado pelo gate final da Fase 3** e não deve registrar rotas antes da prova
+OIDC externa descrita acima. Quando liberado, deve reutilizar exclusivamente `human_handoffs`,
+`conversations`, `service_cases`, `workflow_transitions`, outbox, RLS, `protectedRoute` e o cliente
+OpenAPI existentes.
+
+Escopo mínimo, sem frontend neste primeiro commit:
+
+1. `GET /v1/inbox/handoffs?unitId=<uuid>&limit=<1..100>&cursor=<opaco>` com permissão
+   `handoff.read` e escopo unitário validado no banco. Retorna somente handoffs `QUEUED` de unidade ativa
+   à qual o ator pertence, ordenados deterministicamente por prioridade, `queued_at` e `id`.
+2. `POST /v1/inbox/handoffs/{handoffId}/claim`, `Idempotency-Key` obrigatório e body contendo apenas
+   `expectedVersion`. A unidade é resolvida pelo handoff sob RLS; tenant, unidade e ator nunca vêm do body.
+3. A rota de claim chama o `claimHandoff` canônico na mesma transação de autenticação, RBAC e RLS.
+   Um único concorrente muda handoff `QUEUED -> ACTIVE`, caso `WAITING_HUMAN -> IN_REVIEW` e conversa
+   `HUMAN_QUEUED -> HUMAN_ACTIVE`; o perdedor recebe 409 genérico.
+4. O response inclui identificadores, status, versão e estado de automação, mas não payload clínico,
+   token de canal ou metadados internos. Erros cross-tenant/cross-unit convergem para 404 genérico.
+
+Migration incremental exigida antes da rota:
+
+- comando idempotente de claim por `(tenant_id,idempotency_key)` e fingerprint
+  `(handoffId,expectedVersion,actorId)`, com replay do mesmo vencedor e conflito para payload/ator diferente;
+- função SQL estreita de listagem unit-scoped e função de claim, ou grants mínimos equivalentes, sem conceder
+  UPDATE direto das tabelas operacionais ao handler HTTP;
+- índice da fila compatível com `(tenant_id,unit_id,status,priority,queued_at,id)` e prova por `EXPLAIN`;
+- auditoria e outbox atômicas contendo correlation ID, sem PII desnecessária.
+
+Gate automatizado do corte:
+
+- PostgreSQL real com dois tenants, duas unidades e dois atendentes concorrentes: exatamente um claim;
+- atendente de outra unidade e papéis sem `handoff.claim` recebem negação sem revelar existência;
+- replay da mesma chave não incrementa versões nem duplica audit/outbox; fingerprint divergente retorna 409;
+- antes e depois do claim, `automation_status` permanece em estado que veta Hermes
+  (`HUMAN_QUEUED`/`HUMAN_ACTIVE`); teste adversarial deve provar que o futuro comando outbound do Hermes
+  falha fechado nesses estados;
+- matriz route-policy/OpenAPI inclui permission+unit scope e respostas 400/401/403/404/409;
+- nenhuma rota de transferência, composer, presença, produtividade ou realtime entra neste corte.
+
 ## Fases 5 a 9
 
 - Gateway: webhook rápido, envelope canônico, worker, ordem por conversa, storage privado, antivírus e estados de entrega.
@@ -185,9 +299,9 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Validar o gate da Fase 2 no CI remoto e manter o PR sem merge até revisão da integração.
-2. Integrar a Fase 2 ao `main` somente após decisão explícita de merge.
-3. Iniciar a Fase 3 em branch próprio: contrato OpenAPI, autenticação substituível e RBAC por unidade.
-4. Implementar primeiro a matriz de autorização e os testes IDOR; rotas vêm depois dos contratos.
+1. Publicar o workflow na branch padrão, preparar o environment protegido `oidc-homologation` com um
+   administrador e executar a jornada real de navegador com contas exclusivas de dois papéis.
+2. Expor o primeiro fluxo vertical da inbox somente depois desse gate, reutilizando contratos,
+   API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

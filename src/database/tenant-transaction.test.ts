@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  withAuthenticatedTenantTransaction,
   withTenantTransaction,
+  withVerifiedOidcBootstrapTransaction,
   type TenantTransactionPool,
 } from "./tenant-transaction.js";
 
@@ -11,14 +13,22 @@ const context = {
   correlationId: "request-12345678",
 };
 
-function fakePool(log: string[], failOnQuery?: string): TenantTransactionPool {
+function fakePool(
+  log: string[],
+  failOnQuery?: string,
+  resolvedRows: unknown[] = [],
+): TenantTransactionPool {
   return {
     async connect() {
       return {
-        async query(query: string) {
+        async query(query: string, values?: unknown[]) {
           const normalized = query.replace(/\s+/g, " ").trim();
           log.push(normalized);
           if (normalized === failOnQuery) throw new Error(`${normalized}_FAILED`);
+          if (normalized.startsWith("SELECT tenant_id, user_id FROM resolve_oidc_principal")) {
+            log.push(`OIDC_VALUES:${JSON.stringify(values)}`);
+            return { rows: resolvedRows };
+          }
           return {};
         },
         release(error?: Error | boolean) {
@@ -90,5 +100,120 @@ describe("withTenantTransaction", () => {
     );
 
     assert.deepEqual(log.slice(-2), ["ROLLBACK", "RELEASE_DESTROYED"]);
+  });
+});
+
+describe("withAuthenticatedTenantTransaction", () => {
+  const principal = {
+    issuer: "https://identity.example.com",
+    audience: "zap-pronto",
+    subject: "subject-123",
+    organizationClaim: "org_id",
+    organizationValue: "clinic-a",
+    correlationId: "request-oidc-12345678",
+  };
+
+  test("resolve OIDC, instala o contexto derivado e executa tudo na mesma transação", async () => {
+    const log: string[] = [];
+    const result = await withAuthenticatedTenantTransaction(
+      fakePool(log, undefined, [{
+        tenant_id: context.tenantId,
+        user_id: context.actorId,
+      }]),
+      principal,
+      async () => {
+        log.push("OPERATION");
+        return "ok";
+      },
+    );
+
+    assert.equal(result, "ok");
+    assert.deepEqual(log, [
+      "BEGIN",
+      "SET LOCAL ROLE zap_pronto_api",
+      "SELECT tenant_id, user_id FROM resolve_oidc_principal($1, $2, $3, $4, $5)",
+      `OIDC_VALUES:${JSON.stringify([principal.issuer, principal.audience, principal.subject, principal.organizationClaim, principal.organizationValue])}`,
+      "SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true), set_config('app.correlation_id', $3, true)",
+      "SELECT assert_app_context_authorized()",
+      "OPERATION",
+      "COMMIT",
+      "RELEASE",
+    ]);
+  });
+
+  test("nega resolução vazia antes da operação e faz rollback", async () => {
+    const log: string[] = [];
+    let operated = false;
+
+    await assert.rejects(
+      withAuthenticatedTenantTransaction(fakePool(log), principal, async () => {
+        operated = true;
+      }),
+      /AUTH_UNAUTHORIZED/,
+    );
+
+    assert.equal(operated, false);
+    assert.deepEqual(log.slice(-2), ["ROLLBACK", "RELEASE"]);
+    assert.ok(!log.some((entry) => entry.includes("set_config")));
+  });
+
+  test("rejeita organização incompleta antes de obter conexão", async () => {
+    let connected = false;
+    const pool: TenantTransactionPool = {
+      async connect() {
+        connected = true;
+        return fakePool([]).connect();
+      },
+    };
+
+    await assert.rejects(
+      withAuthenticatedTenantTransaction(
+        pool,
+        {
+          issuer: principal.issuer,
+          audience: principal.audience,
+          subject: principal.subject,
+          organizationClaim: principal.organizationClaim,
+          correlationId: principal.correlationId,
+        },
+        async () => undefined,
+      ),
+      /INVALID_OIDC_ORGANIZATION/,
+    );
+    assert.equal(connected, false);
+  });
+
+  test("nega principal resolvido com identificadores inválidos e faz rollback", async () => {
+    const log: string[] = [];
+
+    await assert.rejects(
+      withAuthenticatedTenantTransaction(
+        fakePool(log, undefined, [{ tenant_id: "tenant-invalido", user_id: context.actorId }]),
+        principal,
+        async () => undefined,
+      ),
+      /INVALID_TENANT_ID/,
+    );
+
+    assert.deepEqual(log.slice(-2), ["ROLLBACK", "RELEASE"]);
+  });
+});
+
+describe("withVerifiedOidcBootstrapTransaction", () => {
+  test("verifica o formato do principal mas não instala tenant ou ator antes do bootstrap", async () => {
+    const log: string[] = [];
+    const result = await withVerifiedOidcBootstrapTransaction(fakePool(log), {
+      issuer: "https://issuer.example", audience: "zap-pronto", subject: "new-subject",
+      correlationId: "bootstrap-request-12345678",
+    }, async (client) => {
+      await client.query("SELECT bootstrap_invitation()");
+      return "accepted";
+    });
+    assert.equal(result, "accepted");
+    assert.deepEqual(log, ["BEGIN", "SET LOCAL ROLE zap_pronto_api",
+      "SELECT set_config('app.correlation_id', $1, true)", "SELECT bootstrap_invitation()", "COMMIT", "RELEASE"]);
+    assert.equal(log.at(-1), "RELEASE");
+    assert.ok(!log.some((query) => query.includes("app.tenant_id") || query.includes("app.actor_id")
+      || query.includes("resolve_oidc_principal")));
   });
 });

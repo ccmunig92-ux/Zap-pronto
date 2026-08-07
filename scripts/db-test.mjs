@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
 import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
 import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
 import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
+import { listAdministrativeInvitations, listAdministrativeUsers } from "../dist/domain/user-administration.js";
+import { buildApp } from "../apps/api/dist/app.js";
+import { createOidcIdentityVerifier } from "../apps/api/dist/auth/oidc-verifier.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -51,6 +56,13 @@ try {
       "0007_quotes.sql",
       "0008_medical_orders.sql",
       "0009_phase2_hardening.sql",
+      "0010_identity_rbac.sql",
+      "0011_permission_policy.sql",
+      "0012_user_lifecycle.sql",
+      "0013_admin_invitations.sql",
+      "0014_invitation_user_lifecycle.sql",
+      "0015_oidc_invitation_acceptance.sql",
+      "0016_invitation_acceptance_rate_limit.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -113,13 +125,18 @@ try {
     `, [runtimeRole, workerRuntimeRole]);
     assert.deepEqual(crossMembership.rows[0], { api_is_worker: false, worker_is_api: false });
 
+    const catalogTables = ["app_permissions", "app_role_permissions", "app_roles"];
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
       "contact_identities", "contacts", "conversations", "human_handoffs",
       "medical_order_items", "medical_order_pages", "medical_order_review_events", "medical_orders",
-      "message_attachments", "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
+      "message_attachments", "messages", "oidc_providers", "outbox_events", "price_list_versions", "price_lists", "prices",
       "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
+      "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
+    protectedTables.sort();
+    const globalHiddenTables = ["invitation_acceptance_rate_limits"];
+    const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
              count(p.policyname)::integer AS policy_count
@@ -130,7 +147,7 @@ try {
       GROUP BY c.relname, c.relrowsecurity, c.relforcerowsecurity
       ORDER BY c.relname
     `);
-    assert.deepEqual(rlsCatalog.rows.map((row) => row.relname), protectedTables);
+    assert.deepEqual(rlsCatalog.rows.map((row) => row.relname), allProtectedTables);
     for (const table of rlsCatalog.rows) {
       assert.equal(table.relrowsecurity, true, `${table.relname}:RLS_DISABLED`);
       assert.equal(table.relforcerowsecurity, true, `${table.relname}:FORCE_RLS_DISABLED`);
@@ -183,7 +200,7 @@ try {
     }
 
     const apiWritable = new Set([
-      "units", "users", "user_units", "channel_connections", "channel_connection_units",
+      "units", "channel_connections", "channel_connection_units",
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
       "quotes", "medical_orders", "medical_order_pages", "medical_order_items",
@@ -192,13 +209,17 @@ try {
       "messages", "audit_events", "workflow_transitions", "quote_items",
       "medical_order_review_events",
     ]);
+    const apiHidden = new Set([
+      "user_invitations", "user_invitation_units", "user_lifecycle_commands",
+      "invitation_acceptance_rate_limits",
+    ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
       "human_handoffs", "outbox_events",
     ]);
 
-    for (const table of protectedTables) {
+    for (const table of allProtectedTables) {
       for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
         const privileges = await target.query(`
           SELECT
@@ -209,7 +230,7 @@ try {
         `, [role, `public.${table}`]);
         const expected = role === "zap_pronto_api"
           ? {
-              can_select: true,
+              can_select: !apiHidden.has(table),
               can_insert: apiWritable.has(table) || apiInsertOnly.has(table),
               can_update: apiWritable.has(table),
               can_delete: false,
@@ -364,6 +385,63 @@ try {
         ('50000000-0000-4000-8000-000000000002', 'USER', 'actor-b', 'TEST', 'tenant', 'b');
     `);
 
+    await target.query(`
+      INSERT INTO oidc_providers
+        (id, tenant_id, code, issuer, audience, organization_claim, organization_value, config_reference)
+      VALUES
+        ('61000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001',
+         'primary', 'https://identity.test', 'zap-pronto', 'org_id', 'tenant-a', 'secret://oidc/tenant-a'),
+        ('71000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002',
+         'primary', 'https://identity.test', 'zap-pronto', 'org_id', 'tenant-b', 'secret://oidc/tenant-b');
+      INSERT INTO user_oidc_identities
+        (id, tenant_id, user_id, oidc_provider_id, subject)
+      VALUES
+        ('62000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001',
+         '60000000-0000-4000-8000-000000000003', '61000000-0000-4000-8000-000000000001', 'shared-subject'),
+        ('72000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002',
+         '70000000-0000-4000-8000-000000000004', '71000000-0000-4000-8000-000000000002', 'shared-subject');
+      INSERT INTO user_invitations
+        (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+      VALUES
+        ('63000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
+         '61000000-0000-4000-8000-000000000001','invite-a@test.local','Invite A',decode(repeat('aa',32),'hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003'),
+        ('73000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000002',
+         '71000000-0000-4000-8000-000000000002','invite-b@test.local','Invite B',decode(repeat('bb',32),'hex'),now()+interval '1 day','70000000-0000-4000-8000-000000000004');
+      INSERT INTO user_invitation_units (tenant_id,invitation_id,unit_id,role)
+      SELECT invitation.tenant_id,invitation.id,unit.id,'ATTENDANT'
+      FROM user_invitations invitation JOIN units unit ON unit.tenant_id=invitation.tenant_id;
+      INSERT INTO user_lifecycle_commands
+        (tenant_id,idempotency_key,operation,request_fingerprint,result)
+      VALUES
+        ('40000000-0000-4000-8000-000000000001','invite-command-a','INVITE',decode(repeat('ca',32),'hex'),'{}'),
+        ('50000000-0000-4000-8000-000000000002','invite-command-b','INVITE',decode(repeat('cb',32),'hex'),'{}');
+    `);
+
+    await assert.rejects(
+      target.query(`INSERT INTO users (tenant_id,email,display_name)
+        VALUES ('40000000-0000-4000-8000-000000000001','ACTOR-A@TEST.LOCAL','Duplicate')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23505",
+    );
+    await assert.rejects(
+      target.query(`INSERT INTO user_invitations
+        (tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+        VALUES ('40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+        'other@test.local','Other',decode('aa','hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23514",
+    );
+    await assert.rejects(
+      target.query(`INSERT INTO user_invitations
+        (tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+        VALUES ('40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+        'invite-a@test.local','Replay',decode(repeat('cc',32),'hex'),now()+interval '1 day','60000000-0000-4000-8000-000000000003')`),
+      (error) => error instanceof Error && "code" in error && error.code === "23505",
+    );
+    await assert.rejects(
+      target.query(`UPDATE users SET status='BLOCKED',blocked_at=NULL
+        WHERE id='60000000-0000-4000-8000-000000000003'`),
+      (error) => error instanceof Error && "code" in error && error.code === "23514",
+    );
+
     await assert.rejects(
       target.query(`
         UPDATE conversations SET status = 'CLOSED', closed_at = now(), automation_status = 'HUMAN_ACTIVE'
@@ -384,8 +462,621 @@ try {
     const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     const competingWorkerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     try {
+      const consumeInvitationAcceptanceRateLimit = async (pool, principalKeyHash) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_api");
+          const result = await client.query(
+            "SELECT * FROM consume_invitation_acceptance_rate_limit($1)",
+            [principalKeyHash],
+          );
+          await client.query("COMMIT");
+          return result.rows[0];
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
+        }
+      };
+
+      const limiterPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app','consume_invitation_acceptance_rate_limit(bytea)','EXECUTE') AS app_execute,
+        has_table_privilege('zap_pronto_api','invitation_acceptance_rate_limits','SELECT') AS api_select,
+        has_table_privilege('zap_pronto_api','invitation_acceptance_rate_limits','INSERT') AS api_insert,
+        has_table_privilege('zap_pronto_worker','invitation_acceptance_rate_limits','SELECT') AS worker_select`);
+      assert.deepEqual(limiterPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, app_execute: false,
+        api_select: false, api_insert: false, worker_select: false,
+      });
+
+      await assert.rejects(
+        consumeInvitationAcceptanceRateLimit(runtimePool, Buffer.alloc(31, 0x16)),
+        (error) => error instanceof Error && "code" in error && error.code === "22023"
+          && /INVALID_RATE_LIMIT_PRINCIPAL_KEY_HASH/.test(error.message),
+      );
+
+      const concurrentLimiterKey = Buffer.alloc(32, 0x16);
+      const concurrentLimiterResults = await Promise.all(
+        Array.from({ length: 12 }, (_, index) => consumeInvitationAcceptanceRateLimit(
+          index % 2 === 0 ? runtimePool : competingRuntimePool,
+          concurrentLimiterKey,
+        )),
+      );
+      assert.equal(concurrentLimiterResults.filter((result) => result.allowed).length, 10);
+      assert.equal(concurrentLimiterResults.filter((result) => !result.allowed).length, 2);
+      assert.equal(Math.min(...concurrentLimiterResults.map((result) => result.remaining)), 0);
+      for (const denied of concurrentLimiterResults.filter((result) => !result.allowed)) {
+        assert.ok(denied.retry_after_seconds >= 1 && denied.retry_after_seconds <= 900);
+        assert.ok(denied.reset_at instanceof Date && denied.reset_at.getTime() > Date.now());
+      }
+      const concurrentLimiterEvidence = await target.query(
+        "SELECT attempts FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [concurrentLimiterKey],
+      );
+      assert.equal(concurrentLimiterEvidence.rows[0].attempts, 12);
+
+      const persistedLimiterKey = Buffer.alloc(32, 0x17);
+      const firstPersistedConsumption = await consumeInvitationAcceptanceRateLimit(runtimePool, persistedLimiterKey);
+      assert.deepEqual(
+        { allowed: firstPersistedConsumption.allowed, remaining: firstPersistedConsumption.remaining,
+          retry_after_seconds: firstPersistedConsumption.retry_after_seconds },
+        { allowed: true, remaining: 9, retry_after_seconds: 0 },
+      );
+      const failedApplicationTransaction = await runtimePool.connect();
+      try {
+        await failedApplicationTransaction.query("BEGIN");
+        await failedApplicationTransaction.query("SET LOCAL ROLE zap_pronto_api");
+        await failedApplicationTransaction.query("SELECT 1");
+        await failedApplicationTransaction.query("ROLLBACK");
+      } finally {
+        await failedApplicationTransaction.query("ROLLBACK").catch(() => undefined);
+        failedApplicationTransaction.release();
+      }
+      const persistedLimiterEvidence = await target.query(
+        "SELECT attempts FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [persistedLimiterKey],
+      );
+      assert.equal(persistedLimiterEvidence.rows[0].attempts, 1);
+
+      const staleLimiterKey = Buffer.alloc(32, 0x18);
+      await target.query(`INSERT INTO invitation_acceptance_rate_limits
+        (principal_key_hash,window_started_at,attempts,updated_at)
+        VALUES ($1,clock_timestamp()-interval '2 days',1,clock_timestamp()-interval '2 days')`, [staleLimiterKey]);
+      await consumeInvitationAcceptanceRateLimit(runtimePool, Buffer.alloc(32, 0x19));
+      const staleLimiterEvidence = await target.query(
+        "SELECT count(*)::integer AS count FROM invitation_acceptance_rate_limits WHERE principal_key_hash=$1",
+        [staleLimiterKey],
+      );
+      assert.equal(staleLimiterEvidence.rows[0].count, 0);
+
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
+      const oidcClient = await runtimePool.connect();
+      try {
+        await oidcClient.query("BEGIN");
+        await oidcClient.query("SET LOCAL ROLE zap_pronto_api");
+        const principal = await oidcClient.query(
+          "SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)",
+          ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "tenant-a"],
+        );
+        assert.deepEqual(principal.rows, [{
+          tenant_id: "40000000-0000-4000-8000-000000000001",
+          user_id: actorAId,
+          oidc_provider_id: "61000000-0000-4000-8000-000000000001",
+          identity_id: "62000000-0000-4000-8000-000000000001",
+        }]);
+        await oidcClient.query("COMMIT");
+        for (const invalidIdentity of [
+          ["https://identity.test", "wrong-audience", "shared-subject", "org_id", "tenant-a"],
+          ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "missing-tenant"],
+          ["https://identity.test", "zap-pronto", "shared-subject", null, null],
+        ]) {
+          await oidcClient.query("BEGIN");
+          await oidcClient.query("SET LOCAL ROLE zap_pronto_api");
+          await assert.rejects(
+            oidcClient.query("SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)", invalidIdentity),
+            (error) => error instanceof Error && "code" in error && error.code === "28000"
+              && /AUTH_UNAUTHORIZED/.test(error.message),
+          );
+          await oidcClient.query("ROLLBACK");
+        }
+      } finally {
+        await oidcClient.query("ROLLBACK").catch(() => undefined);
+        oidcClient.release();
+      }
+
+      await target.query("UPDATE oidc_providers SET status='DISABLED' WHERE id='61000000-0000-4000-8000-000000000001'");
+      const disabledProviderClient = await runtimePool.connect();
+      try {
+        await disabledProviderClient.query("BEGIN");
+        await disabledProviderClient.query("SET LOCAL ROLE zap_pronto_api");
+        await assert.rejects(
+          disabledProviderClient.query(
+            "SELECT * FROM resolve_oidc_principal($1,$2,$3,$4,$5)",
+            ["https://identity.test", "zap-pronto", "shared-subject", "org_id", "tenant-a"],
+          ),
+          (error) => error instanceof Error && "code" in error && error.code === "28000"
+            && /AUTH_UNAUTHORIZED/.test(error.message),
+        );
+      } finally {
+        await disabledProviderClient.query("ROLLBACK").catch(() => undefined);
+        disabledProviderClient.release();
+      }
+      await target.query("UPDATE oidc_providers SET status='ACTIVE' WHERE id='61000000-0000-4000-8000-000000000001'");
+
+      const httpApp = await buildApp({
+        pool: runtimePool,
+        identityVerifier: { async verifyBearer() {
+          return { issuer: "https://identity.test", audience: "zap-pronto", subject: "shared-subject",
+            organization: { claim: "org_id", value: "tenant-a" } };
+        } },
+      });
+      try {
+        const currentUserResponse = await httpApp.inject({
+          method: "GET",
+          url: `/v1/me?tenantId=50000000-0000-4000-8000-000000000002&userId=${actorBId}`,
+          headers: { authorization: "Bearer database-backed-token" },
+        });
+        assert.equal(currentUserResponse.statusCode, 200);
+        assert.equal(currentUserResponse.headers["cache-control"], "no-store");
+        const currentUser = currentUserResponse.json();
+        assert.equal(currentUser.user.id, actorAId);
+        assert.equal(currentUser.user.email, "actor-a@test.local");
+        assert.equal(currentUser.tenant.id, "40000000-0000-4000-8000-000000000001");
+        assert.deepEqual(currentUser.memberships.map((membership) => membership.unitCode), ["POOL-A"]);
+        assert.ok(currentUser.grants.every((grant) =>
+          grant.scope === "UNIT" && grant.unitId === currentUser.memberships[0].unitId));
+        assert.doesNotMatch(JSON.stringify(currentUser), /shared-subject|identity\.test|61000000|62000000/);
+        await target.query(`UPDATE user_units SET role='TENANT_ADMIN'
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+        const tenantAdminResponse = await httpApp.inject({ method: "GET", url: "/v1/me",
+          headers: { authorization: "Bearer database-backed-token" } });
+        assert.equal(tenantAdminResponse.statusCode, 200);
+        assert.ok(tenantAdminResponse.json().grants.every((grant) =>
+          grant.scope === "TENANT" && !("unitId" in grant)));
+        await target.query(`UPDATE user_units SET role='ATTENDANT'
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+        await target.query(`UPDATE units SET active=false
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+        const inactiveUnitResponse = await httpApp.inject({ method: "GET", url: "/v1/me",
+          headers: { authorization: "Bearer database-backed-token" } });
+        assert.equal(inactiveUnitResponse.statusCode, 403);
+        assert.equal(inactiveUnitResponse.json().type, "urn:zap-pronto:error:account-not-assigned");
+        await target.query(`UPDATE units SET active=true
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      } finally {
+        await httpApp.close();
+      }
+
+      const lifecycleTargetId = "64000000-0000-4000-8000-000000000001";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','lifecycle-target@test.local','Lifecycle Target')`,
+      [lifecycleTargetId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT' FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`, [lifecycleTargetId]);
+      await target.query(`INSERT INTO user_oidc_identities
+        (tenant_id,user_id,oidc_provider_id,subject)
+        VALUES ('40000000-0000-4000-8000-000000000001',$1,
+        '61000000-0000-4000-8000-000000000001','lifecycle-target')`, [lifecycleTargetId]);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-non-admin",
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,$2,$3,1,'BLOCKED','Unauthorized')",
+      ["lifecycle-unauthorized", Buffer.alloc(32, 0xa0), lifecycleTargetId])),
+      (error) => error instanceof Error && "code" in error && error.code === "42501");
+      const invitationUnit = await target.query(`SELECT id FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      const invitationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const invitationAssignments = JSON.stringify([{ unitId: invitationUnit.rows[0].id, role: "ATTENDANT" }]);
+      const createInvitation = (overrides = {}) => {
+        const values = {
+          key: "admin-invite-security-a", fingerprint: Buffer.alloc(32, 0xd1),
+          id: "66000000-0000-4000-8000-000000000001", provider: "primary",
+          email: "security-invite@test.local", name: "Security Invite", expiresAt: invitationExpiresAt,
+          digest: Buffer.alloc(32, 0xe1), assignments: invitationAssignments, ...overrides,
+        };
+        return withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "admin-invite-security",
+        }, async (client) => client.query(
+          "SELECT * FROM admin_create_user_invitation($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [values.key, values.fingerprint, values.id, values.provider, values.email, values.name,
+            values.expiresAt, values.digest, values.assignments],
+        ));
+      };
+      await assert.rejects(createInvitation({ key: "admin-invite-unauthorized" }),
+        (error) => error instanceof Error && "code" in error && error.code === "42501");
+      await target.query(`UPDATE user_units SET role='TENANT_ADMIN'
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+      const administrativeUsers = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-users-list",
+      }, (client) => listAdministrativeUsers(client, { limit: 100 }));
+      assert.ok(administrativeUsers.items.some((user) => user.id === actorAId));
+      assert.ok(!administrativeUsers.items.some((user) => user.email === "actor-b@test.local"));
+      const administrativeInvitations = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-list",
+      }, (client) => listAdministrativeInvitations(client, { limit: 2 }));
+      assert.ok(administrativeInvitations.items.every((invitation) => invitation.email !== "invite-b@test.local"));
+      await assert.rejects(createInvitation({ key: "admin-invite-null-assignments", assignments: null }),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await assert.rejects(createInvitation({ key: "admin-invite-null-role", assignments: JSON.stringify([
+        { unitId: invitationUnit.rows[0].id, role: null },
+      ]) }), (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await target.query(`INSERT INTO user_invitations
+        (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_at,created_by_user_id)
+        VALUES ('67000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
+          '61000000-0000-4000-8000-000000000001','security-invite@test.local','Expired Invite',
+          decode(repeat('f1',32),'hex'),now()-interval '1 day',now()-interval '2 days',$1)`, [actorAId]);
+      const invitationCreated = await createInvitation();
+      assert.deepEqual(invitationCreated.rows.map((row) => ({ id: row.id, replayed: row.replayed })),
+        [{ id: "66000000-0000-4000-8000-000000000001", replayed: false }]);
+      const firstInvitationPage = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-first-page",
+      }, (client) => listAdministrativeInvitations(client, { limit: 1 }));
+      assert.equal(firstInvitationPage.items.length, 1);
+      assert.ok(firstInvitationPage.nextCursor);
+      const secondInvitationPage = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-second-page",
+      }, (client) => listAdministrativeInvitations(client, { limit: 1, cursor: firstInvitationPage.nextCursor }));
+      assert.equal(secondInvitationPage.items.length, 1);
+      assert.notEqual(secondInvitationPage.items[0].id, firstInvitationPage.items[0].id);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-cross-cursor",
+      }, (client) => client.query("SELECT * FROM admin_list_user_invitations($1,2)",
+      ["71000000-0000-4000-8000-000000000002"])),
+      (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-internal-limit",
+      }, (client) => client.query("SELECT * FROM admin_list_user_invitations(NULL,101)"));
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "admin-invitations-invalid-limit",
+      }, (client) => client.query("SELECT * FROM admin_list_user_invitations(NULL,102)")),
+      (error) => error instanceof Error && "code" in error && error.code === "22023");
+      const invitationReplay = await createInvitation({
+        id: "68000000-0000-4000-8000-000000000001", digest: Buffer.alloc(32, 0xe2),
+      });
+      assert.deepEqual(invitationReplay.rows.map((row) => ({ id: row.id, replayed: row.replayed })),
+        [{ id: "66000000-0000-4000-8000-000000000001", replayed: true }]);
+      await assert.rejects(createInvitation({ fingerprint: Buffer.alloc(32, 0xd2) }),
+        (error) => error instanceof Error && "code" in error && error.code === "23505");
+      const tenantBUnit = await target.query(`SELECT id FROM units
+        WHERE tenant_id='50000000-0000-4000-8000-000000000002' AND code='POOL-B'`);
+      await assert.rejects(createInvitation({ key: "admin-invite-cross-unit", fingerprint: Buffer.alloc(32, 0xd3),
+        id: "69000000-0000-4000-8000-000000000001", email: "cross-unit-invite@test.local",
+        digest: Buffer.alloc(32, 0xe3), assignments: JSON.stringify([
+          { unitId: tenantBUnit.rows[0].id, role: "ATTENDANT" },
+      ]) }), (error) => error instanceof Error && "code" in error && error.code === "P0002");
+
+      const acceptanceDigest = Buffer.alloc(32, 0xe4);
+      await createInvitation({ key: "admin-invite-acceptance", fingerprint: Buffer.alloc(32, 0xd6),
+        id: "6d000000-0000-4000-8000-000000000001", email: "accepted-invite@test.local",
+        digest: acceptanceDigest });
+      const acceptInvitation = async (pool, overrides = {}) => {
+        const values = { key: "accept-invitation-security", fingerprint: Buffer.alloc(32, 0xe6),
+          digest: acceptanceDigest, userId: "6f000000-0000-4000-8000-000000000001",
+          issuer: "https://identity.test", audience: "zap-pronto", subject: "accepted-subject",
+          organizationClaim: "org_id", organizationValue: "tenant-a",
+          email: "accepted-invite@test.local", emailVerified: true,
+          correlationId: "accept-invitation-security", ...overrides };
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_api");
+          const accepted = await client.query(
+            "SELECT * FROM accept_user_invitation_oidc($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            [values.key, values.fingerprint, values.digest, values.userId, values.issuer, values.audience,
+              values.subject, values.organizationClaim, values.organizationValue, values.email,
+              values.emailVerified, values.correlationId],
+          );
+          const context = await client.query(`SELECT current_app_tenant_id() AS tenant_id,
+            current_app_actor_id() AS actor_id`);
+          await client.query("COMMIT");
+          return { accepted, context: context.rows[0] };
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally { client.release(); }
+      };
+      await assert.rejects(acceptInvitation(runtimePool, { email: "wrong-email@test.local" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { organizationValue: "tenant-b" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { digest: Buffer.alloc(32, 0xbb),
+        email: "invite-b@test.local", organizationValue: "tenant-a" }),
+      (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { digest: Buffer.alloc(32, 0xf1),
+        email: "security-invite@test.local" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { emailVerified: false }),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      const acceptedInvitation = await acceptInvitation(runtimePool);
+      assert.deepEqual(acceptedInvitation.accepted.rows.map((row) => ({
+        tenant_id: row.tenant_id, user_id: row.user_id, invitation_id: row.invitation_id,
+        replayed: row.replayed,
+      })), [{ tenant_id: "40000000-0000-4000-8000-000000000001",
+        user_id: "6f000000-0000-4000-8000-000000000001",
+        invitation_id: "6d000000-0000-4000-8000-000000000001", replayed: false }]);
+      assert.deepEqual(acceptedInvitation.context, {
+        tenant_id: "40000000-0000-4000-8000-000000000001",
+        actor_id: "6f000000-0000-4000-8000-000000000001",
+      });
+      const acceptedReplay = await acceptInvitation(runtimePool, {
+        userId: "6f000000-0000-4000-8000-000000000099",
+      });
+      assert.equal(acceptedReplay.accepted.rows[0].user_id, "6f000000-0000-4000-8000-000000000001");
+      assert.equal(acceptedReplay.accepted.rows[0].replayed, true);
+      await assert.rejects(acceptInvitation(runtimePool, { key: "accept-invitation-other-key",
+        fingerprint: Buffer.alloc(32, 0xe7) }),
+      (error) => error instanceof Error && "code" in error && error.code === "28000");
+
+      const concurrentAcceptanceDigest = Buffer.alloc(32, 0xe5);
+      await createInvitation({ key: "admin-invite-accept-concurrent", fingerprint: Buffer.alloc(32, 0xd7),
+        id: "6e000000-0000-4000-8000-000000000001", email: "accepted-concurrent@test.local",
+        digest: concurrentAcceptanceDigest });
+      const concurrentAcceptances = await Promise.allSettled([
+        acceptInvitation(runtimePool, { key: "accept-concurrent-first", fingerprint: Buffer.alloc(32, 0xe8),
+          digest: concurrentAcceptanceDigest, userId: "6f000000-0000-4000-8000-000000000002",
+          subject: "accepted-concurrent-first", email: "accepted-concurrent@test.local" }),
+        acceptInvitation(competingRuntimePool, { key: "accept-concurrent-second", fingerprint: Buffer.alloc(32, 0xe9),
+          digest: concurrentAcceptanceDigest, userId: "6f000000-0000-4000-8000-000000000003",
+          subject: "accepted-concurrent-second", email: "accepted-concurrent@test.local" }),
+      ]);
+      assert.equal(concurrentAcceptances.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(concurrentAcceptances.filter((result) => result.status === "rejected").length, 1);
+      const acceptanceEvidence = await target.query(`SELECT
+        (SELECT count(*)::integer FROM users WHERE email_normalized='accepted-concurrent@test.local') AS concurrent_users,
+        (SELECT count(*)::integer FROM user_oidc_identities WHERE subject LIKE 'accepted-concurrent-%') AS concurrent_identities,
+        (SELECT count(*)::integer FROM audit_events WHERE action='USER_INVITATION_ACCEPTED'
+          AND entity_id IN ('6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')) AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE event_type='user.invitation.accepted'
+          AND aggregate_id IN ('6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')) AS outbox`);
+      assert.deepEqual(acceptanceEvidence.rows[0], {
+        concurrent_users: 1, concurrent_identities: 1, audits: 2, outbox: 2,
+      });
+      const invitationEvidence = await target.query(`SELECT
+        (SELECT status::text FROM user_invitations WHERE id='67000000-0000-4000-8000-000000000001') AS old_status,
+        (SELECT count(*)::integer FROM user_invitations WHERE id='66000000-0000-4000-8000-000000000001') AS invitations,
+        (SELECT count(*)::integer FROM user_lifecycle_commands WHERE idempotency_key='admin-invite-security-a') AS commands,
+        (SELECT count(*)::integer FROM audit_events WHERE entity_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')) AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE aggregate_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001')) AS outbox,
+        (SELECT result ? 'token' OR result ? 'tokenDigest' FROM user_lifecycle_commands
+          WHERE idempotency_key='admin-invite-security-a') AS command_leaks_token`);
+      assert.deepEqual(invitationEvidence.rows[0], {
+        old_status: "EXPIRED", invitations: 1, commands: 1, audits: 2, outbox: 2,
+        command_leaks_token: false,
+      });
+      const reissueInvitation = (pool, key, fingerprintByte, replacementId, digestByte) =>
+        withTenantTransaction(pool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: `reissue-${fingerprintByte}`,
+        }, async (client) => client.query(
+          "SELECT * FROM admin_reissue_user_invitation($1,$2,$3,$4,$5,$6,$7)",
+          [key, Buffer.alloc(32, fingerprintByte), "66000000-0000-4000-8000-000000000001",
+            replacementId, invitationExpiresAt, Buffer.alloc(32, digestByte), "Rotate exposed invitation"],
+        ));
+      const concurrentReissues = await Promise.allSettled([
+        reissueInvitation(runtimePool, "admin-reissue-security-a", 0xb1,
+          "6a000000-0000-4000-8000-000000000001", 0xc1),
+        reissueInvitation(competingRuntimePool, "admin-reissue-security-b", 0xb2,
+          "6b000000-0000-4000-8000-000000000001", 0xc2),
+      ]);
+      assert.equal(concurrentReissues.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(concurrentReissues.filter((result) => result.status === "rejected").length, 1);
+      const successfulReissue = concurrentReissues.find((result) => result.status === "fulfilled");
+      const replacementInvitationId = successfulReissue.value.rows[0].id;
+      assert.equal(successfulReissue.value.rows[0].replayed, false);
+      const successfulReissueKey = replacementInvitationId.startsWith("6a")
+        ? "admin-reissue-security-a" : "admin-reissue-security-b";
+      const successfulFingerprintByte = replacementInvitationId.startsWith("6a") ? 0xb1 : 0xb2;
+      const successfulDigestByte = replacementInvitationId.startsWith("6a") ? 0xc1 : 0xc2;
+      const reissueReplay = await reissueInvitation(runtimePool, successfulReissueKey,
+        successfulFingerprintByte, "6c000000-0000-4000-8000-000000000001", successfulDigestByte);
+      assert.equal(reissueReplay.rows[0].id, replacementInvitationId);
+      assert.equal(reissueReplay.rows[0].replayed, true);
+      const revokeInvitation = (key, fingerprint, targetId, reason = "Administrative revocation") =>
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: `revoke-${fingerprint}`,
+        }, async (client) => client.query(
+          "SELECT * FROM admin_revoke_user_invitation($1,$2,$3,$4)",
+          [key, Buffer.alloc(32, fingerprint), targetId, reason],
+        ));
+      const revokedInvitation = await revokeInvitation("admin-revoke-security", 0xd4, replacementInvitationId);
+      assert.equal(revokedInvitation.rows[0].status, "REVOKED");
+      assert.equal(revokedInvitation.rows[0].replayed, false);
+      const revokeReplay = await revokeInvitation("admin-revoke-security", 0xd4, replacementInvitationId);
+      assert.equal(revokeReplay.rows[0].replayed, true);
+      await assert.rejects(revokeInvitation("admin-revoke-cross-tenant", 0xd5,
+        "73000000-0000-4000-8000-000000000002"),
+      (error) => error instanceof Error && "code" in error && error.code === "P0002");
+      const lifecycleInvitationEvidence = await target.query(`SELECT
+        (SELECT status::text FROM user_invitations WHERE id='66000000-0000-4000-8000-000000000001') AS original_status,
+        (SELECT status::text FROM user_invitations WHERE id=$1) AS replacement_status,
+        (SELECT count(*)::integer FROM audit_events WHERE entity_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',$1::text)) AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE aggregate_id IN
+          ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',$1)) AS outbox`,
+      [replacementInvitationId]);
+      assert.deepEqual(lifecycleInvitationEvidence.rows[0], {
+        original_status: "REVOKED", replacement_status: "REVOKED", audits: 5, outbox: 5,
+      });
+      await target.query(`DELETE FROM audit_events WHERE entity_id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
+      await target.query(`DELETE FROM outbox_events WHERE aggregate_id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
+      await target.query(`DELETE FROM user_lifecycle_commands WHERE idempotency_key LIKE 'admin-%security%'
+        OR idempotency_key LIKE 'admin-invite-accept%' OR idempotency_key LIKE 'accept-%'`);
+      await target.query(`DELETE FROM user_invitations WHERE id IN
+        ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
+      await target.query("DELETE FROM user_oidc_identities WHERE subject LIKE 'accepted-%'");
+      await target.query(`DELETE FROM user_units WHERE user_id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
+      await target.query(`DELETE FROM users WHERE id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
+
+      const changeStatus = (status, version, reason, overrides = {}) => withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: `lifecycle-${status.toLowerCase()}`,
+      }, async (client) => {
+        const values = { key: `lifecycle-${status.toLowerCase()}-${version}`,
+          fingerprint: Buffer.alloc(32, status === "BLOCKED" ? 0xa1 : status === "ACTIVE" ? 0xa2 : 0xa3),
+          target: lifecycleTargetId, ...overrides };
+        return client.query("SELECT * FROM admin_change_user_status($1,$2,$3,$4,$5,$6)",
+          [values.key, values.fingerprint, values.target, version, status, reason]);
+      });
+      assert.deepEqual((await changeStatus("BLOCKED", 1, "Security review")).rows,
+        [{ user_id: lifecycleTargetId, status: "BLOCKED", version: 2, replayed: false }]);
+      assert.deepEqual((await changeStatus("BLOCKED", 1, "Security review")).rows,
+        [{ user_id: lifecycleTargetId, status: "BLOCKED", version: 2, replayed: true }]);
+      await assert.rejects(changeStatus("BLOCKED", 1, "Changed command", { fingerprint: Buffer.alloc(32, 0xaf) }),
+        (error) => error instanceof Error && "code" in error && error.code === "23505");
+      await assert.rejects(changeStatus("ACTIVE", 1, "Stale command"),
+        (error) => error instanceof Error && "code" in error && error.code === "40001");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-cross-tenant",
+      }, async (client) => client.query("SELECT * FROM admin_change_user_status($1,$2,$3,1,'BLOCKED','Cross tenant')",
+      ["lifecycle-cross-tenant", Buffer.alloc(32, 0xa4), actorBId])),
+      (error) => error instanceof Error && "code" in error && error.code === "P0002");
+      assert.deepEqual((await changeStatus("ACTIVE", 2, "Review completed")).rows,
+        [{ user_id: lifecycleTargetId, status: "ACTIVE", version: 3, replayed: false }]);
+      assert.deepEqual((await changeStatus("REVOKED", 3, "Access permanently revoked")).rows,
+        [{ user_id: lifecycleTargetId, status: "REVOKED", version: 4, replayed: false }]);
+      await assert.rejects(changeStatus("ACTIVE", 4, "Invalid reversal"),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "lifecycle-self-block",
+      }, async (client) => client.query(
+        "SELECT * FROM admin_change_user_status($1,$2,$3,1,'BLOCKED','Self block')",
+        ["lifecycle-self-block", Buffer.alloc(32, 0xa5), actorAId])),
+      (error) => error instanceof Error && "code" in error && error.code === "42501");
+      const lifecycleEvidence = await target.query(`SELECT
+        (SELECT status FROM user_oidc_identities WHERE user_id=$1) AS identity_status,
+        (SELECT count(*)::integer FROM audit_events WHERE entity_id=$1::text AND action='USER_STATUS_CHANGED') AS audit_count,
+        (SELECT count(*)::integer FROM outbox_events WHERE aggregate_id=$1 AND event_type='user.status_changed') AS outbox_count`,
+      [lifecycleTargetId]);
+      assert.deepEqual(lifecycleEvidence.rows[0], {
+        identity_status: "REVOKED", audit_count: 3, outbox_count: 3,
+      });
+      const lifecyclePrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api','admin_change_user_status(text,bytea,uuid,integer,text,text)','EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker','admin_change_user_status(text,bytea,uuid,integer,text,text)','EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app','admin_change_user_status(text,bytea,uuid,integer,text,text)','EXECUTE') AS app_execute,
+        has_function_privilege('zap_pronto_api','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS api_invite_execute,
+        has_function_privilege('zap_pronto_worker','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS worker_invite_execute,
+        has_function_privilege('zap_pronto_app','admin_create_user_invitation(text,bytea,uuid,text,text,text,timestamptz,bytea,jsonb)','EXECUTE') AS app_invite_execute,
+        has_function_privilege('zap_pronto_api','admin_revoke_user_invitation(text,bytea,uuid,text)','EXECUTE') AS api_revoke_invite_execute,
+        has_function_privilege('zap_pronto_worker','admin_revoke_user_invitation(text,bytea,uuid,text)','EXECUTE') AS worker_revoke_invite_execute,
+        has_function_privilege('zap_pronto_app','admin_revoke_user_invitation(text,bytea,uuid,text)','EXECUTE') AS app_revoke_invite_execute,
+        has_function_privilege('zap_pronto_api','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS api_reissue_invite_execute,
+        has_function_privilege('zap_pronto_worker','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS worker_reissue_invite_execute,
+        has_function_privilege('zap_pronto_app','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS app_reissue_invite_execute,
+        has_function_privilege('zap_pronto_api','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS api_accept_invite_execute,
+        has_function_privilege('zap_pronto_worker','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS worker_accept_invite_execute,
+        has_function_privilege('zap_pronto_app','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS app_accept_invite_execute,
+        has_function_privilege('zap_pronto_api','admin_list_user_invitations(uuid,integer)','EXECUTE') AS api_list_invite_execute,
+        has_function_privilege('zap_pronto_worker','admin_list_user_invitations(uuid,integer)','EXECUTE') AS worker_list_invite_execute,
+        has_function_privilege('zap_pronto_app','admin_list_user_invitations(uuid,integer)','EXECUTE') AS app_list_invite_execute,
+        has_table_privilege('zap_pronto_api','user_invitations','SELECT') AS api_select_invitations,
+        has_table_privilege('zap_pronto_api','users','INSERT') AS api_insert_user,
+        has_table_privilege('zap_pronto_api','users','UPDATE') AS api_update_user,
+        has_table_privilege('zap_pronto_api','user_units','UPDATE') AS api_update_membership`);
+      assert.deepEqual(lifecyclePrivileges.rows[0], {
+        api_execute: true, worker_execute: false, app_execute: false,
+        api_invite_execute: true, worker_invite_execute: false, app_invite_execute: false,
+        api_revoke_invite_execute: true, worker_revoke_invite_execute: false, app_revoke_invite_execute: false,
+        api_reissue_invite_execute: true, worker_reissue_invite_execute: false, app_reissue_invite_execute: false,
+        api_accept_invite_execute: true, worker_accept_invite_execute: false, app_accept_invite_execute: false,
+        api_list_invite_execute: true, worker_list_invite_execute: false, app_list_invite_execute: false,
+        api_select_invitations: false,
+        api_insert_user: false, api_update_user: false, api_update_membership: false,
+      });
+      const competingAdminId = "65000000-0000-4000-8000-000000000001";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','competing-admin@test.local','Competing Admin')`,
+      [competingAdminId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'TENANT_ADMIN' FROM units
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`, [competingAdminId]);
+      const concurrentRemoval = (pool, actorId, targetId, correlationId) => withTenantTransaction(pool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId, correlationId,
+      }, async (client) => client.query(
+        "SELECT * FROM admin_change_user_status($1,$2,$3,1,'BLOCKED','Concurrency test')",
+        [`admin-race-${targetId}`, Buffer.alloc(32, targetId === actorAId ? 0xa6 : 0xa7), targetId]));
+      const concurrentAdminResults = await Promise.allSettled([
+        concurrentRemoval(runtimePool, actorAId, competingAdminId, "admin-race-a"),
+        concurrentRemoval(competingRuntimePool, competingAdminId, actorAId, "admin-race-b"),
+      ]);
+      assert.equal(concurrentAdminResults.filter((result) => result.status === "fulfilled").length, 1,
+        concurrentAdminResults.map((result) => result.status === "rejected"
+          ? `${result.reason?.code ?? "ERROR"}:${result.reason?.message ?? result.reason}` : "fulfilled").join(" | "));
+      const activeAdminCount = await target.query(`SELECT count(DISTINCT account.id)::integer AS count
+        FROM users account JOIN user_units membership
+          ON membership.tenant_id=account.tenant_id AND membership.user_id=account.id
+        JOIN units unit ON unit.tenant_id=membership.tenant_id AND unit.id=membership.unit_id AND unit.active=true
+        WHERE account.tenant_id='40000000-0000-4000-8000-000000000001' AND account.status='ACTIVE'
+          AND membership.role='TENANT_ADMIN'`);
+      assert.equal(activeAdminCount.rows[0].count, 1);
+      await target.query(`UPDATE users SET status='ACTIVE',blocked_at=NULL,revoked_at=NULL
+        WHERE id IN ($1,$2)`, [actorAId, competingAdminId]);
+      await target.query(`DELETE FROM audit_events WHERE action='USER_STATUS_CHANGED' AND entity_id IN ($1::text,$2::text)`,
+      [actorAId, competingAdminId]);
+      await target.query(`DELETE FROM outbox_events WHERE event_type='user.status_changed' AND aggregate_id IN ($1,$2)`,
+      [actorAId, competingAdminId]);
+      await target.query("DELETE FROM user_lifecycle_commands WHERE target_user_id IN ($1,$2)",
+      [actorAId, competingAdminId]);
+      await target.query("DELETE FROM user_units WHERE user_id=$1", [competingAdminId]);
+      await target.query("DELETE FROM users WHERE id=$1", [competingAdminId]);
+      await target.query(`UPDATE user_units SET role='ATTENDANT'
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND user_id=$1`, [actorAId]);
+      await target.query("DELETE FROM audit_events WHERE entity_id=$1::text", [lifecycleTargetId]);
+      await target.query("DELETE FROM outbox_events WHERE aggregate_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM user_lifecycle_commands WHERE target_user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM user_oidc_identities WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM user_units WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM users WHERE id=$1", [lifecycleTargetId]);
+
+      await assert.rejects(
+        target.query(`INSERT INTO oidc_providers
+          (tenant_id,code,issuer,audience,organization_claim,organization_value,config_reference)
+          VALUES ('50000000-0000-4000-8000-000000000002','duplicate-resolution',
+          'https://identity.test','zap-pronto','org_id','tenant-a','secret://duplicate')`),
+        (error) => error instanceof Error && "code" in error && error.code === "23505",
+      );
+
+      const oidcPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api', 'resolve_oidc_principal(text,text,text,text,text)', 'EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker', 'resolve_oidc_principal(text,text,text,text,text)', 'EXECUTE') AS worker_execute,
+        has_table_privilege('zap_pronto_api', 'oidc_providers', 'INSERT') AS api_insert_provider,
+        has_table_privilege('zap_pronto_worker', 'user_oidc_identities', 'SELECT') AS worker_read_identity
+      `);
+      assert.deepEqual(oidcPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, api_insert_provider: false, worker_read_identity: false,
+      });
+
       const tenantA = await withTenantTransaction(
         runtimePool,
         {
@@ -400,6 +1091,7 @@ try {
 
       // Elevação exclusiva do banco descartável para exercitar todas as policies.
       await target.query("GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO zap_pronto_api");
+      await target.query("GRANT SELECT ON user_invitations,user_invitation_units,user_lifecycle_commands TO zap_pronto_api");
       await target.query("REVOKE UPDATE, DELETE ON audit_events FROM zap_pronto_api");
 
       for (const table of protectedTables) {
@@ -439,7 +1131,7 @@ try {
         assert.equal(result.rowCount, 0, `${table}:CROSS_TENANT_UPDATE_VISIBLE`);
       }
 
-      for (const table of protectedTables) {
+      for (const table of protectedTables.filter((name) => name !== "users")) {
         const tenantColumn = table === "tenants" ? "id" : "tenant_id";
         const insertOverrides = table === "quotes"
           ? { status: "DRAFT", version: 1, subtotal_minor: 0, discount_minor: 0, total_minor: 0 }
@@ -470,6 +1162,17 @@ try {
           `${table}:CROSS_TENANT_INSERT_NOT_BLOCKED_BY_RLS`,
         );
       }
+      await assert.rejects(
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "matrix-insert-users",
+        }, async (client) => client.query(`INSERT INTO users (id,tenant_id,email,display_name)
+          VALUES ('7f000000-0000-4000-8000-000000000099','50000000-0000-4000-8000-000000000002',
+          'cross-tenant@test.local','Cross Tenant')`)),
+        (error) => error instanceof Error && "code" in error && error.code === "42501"
+          && "routine" in error && error.routine === "ExecWithCheckOptions",
+        "users:CROSS_TENANT_INSERT_NOT_BLOCKED_BY_RLS",
+      );
 
       for (const table of protectedTables.filter((name) => name !== "audit_events")) {
         const tenantPredicate = table === "tenants"
@@ -1427,6 +2130,67 @@ try {
         SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT'
         FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
       [actorWithoutUnit]);
+      const tenantAdminId = "60000000-0000-4000-8000-00000000000b";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','tenant-admin-a@test.local','Tenant Admin A')`,
+      [tenantAdminId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'TENANT_ADMIN'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+      [tenantAdminId]);
+      const crossTenantUnitId = (await target.query(
+        "SELECT id FROM units WHERE tenant_id='50000000-0000-4000-8000-000000000002' AND code='POOL-B'",
+      )).rows[0].id;
+      const permissionMatrix = async (actorId) => withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId,
+        correlationId: `permission-matrix-${actorId}`,
+      }, async (client) => (await client.query(`SELECT
+        current_actor_has_permission('handoff.claim',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A')) AS pool_a_claim,
+        current_actor_has_permission('handoff.claim',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A2')) AS pool_a2_claim,
+        current_actor_has_permission('tenant.users.manage', NULL) AS tenant_users_manage,
+        current_actor_has_permission('permission.unknown',
+          (SELECT id FROM units WHERE tenant_id=current_app_tenant_id() AND code='POOL-A')) AS unknown_permission,
+        current_actor_has_permission('handoff.claim', $1) AS cross_tenant_unit`,
+      [crossTenantUnitId])).rows[0]);
+      assert.deepEqual(await permissionMatrix(actorAId), {
+        pool_a_claim: true, pool_a2_claim: false, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      assert.deepEqual(await permissionMatrix(actorWithoutUnit), {
+        pool_a_claim: false, pool_a2_claim: true, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      assert.deepEqual(await permissionMatrix(tenantAdminId), {
+        pool_a_claim: true, pool_a2_claim: true, tenant_users_manage: true,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      for (const [roleCode, canClaim] of [
+        ["UNIT_MANAGER", true], ["SUPERVISOR", true], ["ATTENDANT", true], ["AUDITOR", false],
+      ]) {
+        await target.query("UPDATE user_units SET role=$1 WHERE user_id=$2", [roleCode, actorWithoutUnit]);
+        assert.deepEqual(await permissionMatrix(actorWithoutUnit), {
+          pool_a_claim: false, pool_a2_claim: canClaim, tenant_users_manage: false,
+          unknown_permission: false, cross_tenant_unit: false,
+        }, `RBAC_MATRIX_${roleCode}`);
+      }
+      await target.query("UPDATE user_units SET role='ATTENDANT' WHERE user_id=$1", [actorWithoutUnit]);
+      await target.query(`UPDATE units SET active=false
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      assert.deepEqual(await permissionMatrix(tenantAdminId), {
+        pool_a_claim: false, pool_a2_claim: false, tenant_users_manage: false,
+        unknown_permission: false, cross_tenant_unit: false,
+      });
+      await target.query(`UPDATE units SET active=true
+        WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
+      const permissionFunctionPrivileges = await target.query(`SELECT
+        has_function_privilege('zap_pronto_api', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS api_execute,
+        has_function_privilege('zap_pronto_worker', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS worker_execute,
+        has_function_privilege('zap_pronto_app', 'current_actor_has_permission(text,uuid)', 'EXECUTE') AS legacy_execute`);
+      assert.deepEqual(permissionFunctionPrivileges.rows[0], {
+        api_execute: true, worker_execute: false, legacy_execute: false,
+      });
       const crossUnitCommercialVisibility = await withTenantTransaction(runtimePool, {
         tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
         correlationId: "cross-unit-commercial-deny-a",
@@ -1692,6 +2456,115 @@ try {
       } finally {
         await nullInputWorker.query("ROLLBACK").catch(() => undefined);
         nullInputWorker.release();
+      }
+
+      const httpLifecycleTargetId = "6a000000-0000-4000-8000-000000000010";
+      const httpBlockedUserId = "6a000000-0000-4000-8000-000000000011";
+      await target.query("UPDATE user_units SET role='TENANT_ADMIN' WHERE user_id=$1", [actorBId]);
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name) VALUES
+          ($1,'40000000-0000-4000-8000-000000000001','http-target@test.local','HTTP Target')`,
+      [httpLifecycleTargetId]);
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name,status,blocked_at) VALUES
+          ($1,'40000000-0000-4000-8000-000000000001','http-blocked@test.local','HTTP Blocked','BLOCKED',now())`,
+      [httpBlockedUserId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+          SELECT tenant_id,$1,id,'ATTENDANT' FROM units
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+      [httpLifecycleTargetId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+          SELECT tenant_id,$1,id,'AUDITOR' FROM units
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
+      [httpBlockedUserId]);
+      await target.query(`INSERT INTO user_oidc_identities (tenant_id,user_id,oidc_provider_id,subject) VALUES
+          ('40000000-0000-4000-8000-000000000001',$1,'61000000-0000-4000-8000-000000000001','http-target-subject'),
+          ('40000000-0000-4000-8000-000000000001',$2,'61000000-0000-4000-8000-000000000001','http-blocked-subject'),
+          ('40000000-0000-4000-8000-000000000001',$3,'61000000-0000-4000-8000-000000000001','http-admin-subject')
+      `, [httpLifecycleTargetId, httpBlockedUserId, tenantAdminId]);
+
+      const { privateKey: httpPrivateKey, publicKey: httpPublicKey } = await generateKeyPair("RS256");
+      const httpPublicJwk = await exportJWK(httpPublicKey);
+      const jwksServer = createServer((_request, response) => {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ keys: [{ ...httpPublicJwk, kid: "db-http-key", use: "sig", alg: "RS256" }] }));
+      });
+      await new Promise((resolve) => jwksServer.listen(0, "127.0.0.1", resolve));
+      try {
+        const jwksAddress = jwksServer.address();
+        assert.ok(jwksAddress && typeof jwksAddress === "object");
+        const signedToken = (subject, organization, email) => new SignJWT({
+          org_id: organization, email, email_verified: true,
+        }).setProtectedHeader({ alg: "RS256", kid: "db-http-key" })
+          .setIssuer("https://identity.test").setAudience("zap-pronto").setSubject(subject)
+          .setExpirationTime("5m").sign(httpPrivateKey);
+        const [adminToken, tenantBToken, targetToken, blockedToken] = await Promise.all([
+          signedToken("http-admin-subject", "tenant-a", "tenant-admin-a@test.local"),
+          signedToken("shared-subject", "tenant-b", "actor-b@test.local"),
+          signedToken("http-target-subject", "tenant-a", "http-target@test.local"),
+          signedToken("http-blocked-subject", "tenant-a", "http-blocked@test.local"),
+        ]);
+        const signedHttpApp = await buildApp({ pool: runtimePool, identityVerifier: createOidcIdentityVerifier({
+          issuer: "https://identity.test", audience: "zap-pronto",
+          jwksUrl: `http://127.0.0.1:${jwksAddress.port}/jwks`, organizationClaim: "org_id",
+        }) });
+        try {
+          const auth = (token) => ({ authorization: `Bearer ${token}` });
+          const adminList = await signedHttpApp.inject({ method: "GET", url: "/v1/users", headers: auth(adminToken) });
+          assert.equal(adminList.statusCode, 200);
+          assert.ok(adminList.json().items.every((item) => item.id !== actorBId), "HTTP_CROSS_TENANT_LIST_LEAK");
+          const injectedUnitScope = await signedHttpApp.inject({ method: "GET", url: "/v1/users?unitId="
+            + crossTenantUnitId, headers: auth(adminToken) });
+          assert.equal(injectedUnitScope.statusCode, 200);
+          assert.ok(injectedUnitScope.json().items.every((item) => item.id !== actorBId),
+            "HTTP_CLIENT_SCOPE_INJECTION_LEAK");
+          const tenantBAdminAttempt = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(tenantBToken),
+              "idempotency-key": "http-cross-tenant-status" },
+            payload: { action: "BLOCK", expectedVersion: 1, reason: "Cross tenant attempt" } });
+          assert.equal(tenantBAdminAttempt.statusCode, 404);
+          const staleStatus = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(adminToken),
+              "idempotency-key": "http-stale-version" },
+            payload: { action: "BLOCK", expectedVersion: 99, reason: "Stale version attempt" } });
+          assert.equal(staleStatus.statusCode, 409);
+          const revokedStatus = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(adminToken),
+              "idempotency-key": "http-revoke-target" },
+            payload: { action: "REVOKE", expectedVersion: 1, reason: "Security revocation" } });
+          assert.equal(revokedStatus.statusCode, 200);
+          const revokedMe = await signedHttpApp.inject({ method: "GET", url: "/v1/me", headers: auth(targetToken) });
+          assert.equal(revokedMe.statusCode, 401);
+          const blockedMe = await signedHttpApp.inject({ method: "GET", url: "/v1/me", headers: auth(blockedToken) });
+          assert.equal(blockedMe.statusCode, 401);
+          const revocationEvidence = await target.query(`SELECT account.status,identity.status AS identity_status
+            FROM users account JOIN user_oidc_identities identity
+              ON identity.tenant_id=account.tenant_id AND identity.user_id=account.id WHERE account.id=$1`,
+          [httpLifecycleTargetId]);
+          assert.deepEqual(revocationEvidence.rows[0], { status: "REVOKED", identity_status: "REVOKED" });
+
+          const preProvisioningToken = "r".repeat(43);
+          const preProvisioningDigest = createHash("sha256").update(preProvisioningToken).digest();
+          const preProvisioningInvitationId = "6a000000-0000-4000-8000-000000000012";
+          await target.query(`INSERT INTO user_invitations
+            (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+            VALUES ($1,'40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+              'http-target@test.local','No resurrection',$2,now()+interval '1 hour',$3)`,
+          [preProvisioningInvitationId, preProvisioningDigest, tenantAdminId]);
+          await target.query(`INSERT INTO user_invitation_units (tenant_id,invitation_id,unit_id,role)
+            SELECT tenant_id,$1,id,'ATTENDANT' FROM units
+            WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+          [preProvisioningInvitationId]);
+          const revokedPreProvisioning = await signedHttpApp.inject({ method: "POST",
+            url: "/v1/auth/invitations/accept", headers: { ...auth(targetToken),
+              "idempotency-key": "http-revoked-preprovision" },
+            payload: { invitationToken: preProvisioningToken } });
+          assert.equal(revokedPreProvisioning.statusCode, 403);
+          const noResurrection = await target.query("SELECT status FROM users WHERE id=$1", [httpLifecycleTargetId]);
+          assert.equal(noResurrection.rows[0].status, "REVOKED");
+        } finally {
+          await signedHttpApp.close();
+        }
+      } finally {
+        await new Promise((resolve, reject) => jwksServer.close((error) => error ? reject(error) : resolve()));
       }
 
       for (const forbiddenSql of [

@@ -15,6 +15,7 @@ const quotedDatabase = `"${databaseName}"`;
 const admin = new pg.Client({ connectionString: adminConnection });
 const targetUrl = new URL(adminConnection);
 targetUrl.pathname = `/${databaseName}`;
+const suffix = randomBytes(4).toString("hex");
 const migrationFiles = (await readdir(resolve("database/migrations")))
   .filter((file) => /^\d+_[a-z0-9_]+\.sql$/.test(file))
   .sort((left, right) => left.localeCompare(right));
@@ -66,13 +67,12 @@ try {
       );
     }
 
-    const suffix = randomBytes(4).toString("hex");
     await target.query(`
       INSERT INTO tenants (id, name) VALUES ('10000000-0000-4000-8000-000000000001', 'Legacy Tenant');
       INSERT INTO units (id, tenant_id, code, name) VALUES
         ('11000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'LEGACY', 'Legacy Unit');
       INSERT INTO users (id, tenant_id, email, display_name) VALUES
-        ('12000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'legacy-${suffix}@test.local', 'Legacy User');
+        ('12000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', ' legacy-${suffix}@test.local ', 'Legacy User');
       INSERT INTO user_units (tenant_id, user_id, unit_id, role) VALUES
         ('10000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-000000000001', '11000000-0000-4000-8000-000000000001', 'ATTENDANT');
       INSERT INTO channel_connections (id, tenant_id, type, scope, external_account_id) VALUES
@@ -115,6 +115,13 @@ try {
   const firstRun = await runMigrator();
   assert.match(firstRun, /applied 0005_workflow_foundation\.sql/);
   assert.match(firstRun, /applied 0008_medical_orders\.sql/);
+  assert.match(firstRun, /applied 0010_identity_rbac\.sql/);
+  assert.match(firstRun, /applied 0011_permission_policy\.sql/);
+  assert.match(firstRun, /applied 0012_user_lifecycle\.sql/);
+  assert.match(firstRun, /applied 0013_admin_invitations\.sql/);
+  assert.match(firstRun, /applied 0014_invitation_user_lifecycle\.sql/);
+  assert.match(firstRun, /applied 0015_oidc_invitation_acceptance\.sql/);
+  assert.match(firstRun, /applied 0016_invitation_acceptance_rate_limit\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -150,6 +157,21 @@ try {
       (SELECT count(*)::integer FROM quotes) AS quote_count,
       (SELECT count(*)::integer FROM medical_orders) AS medical_count`);
     assert.deepEqual(newDomainRows.rows[0], { workflow_count: 0, quote_count: 0, medical_count: 0 });
+    const identityUpgrade = await verify.query(`SELECT
+      (SELECT count(*)::integer FROM app_roles) AS role_count,
+      (SELECT count(*)::integer FROM app_permissions) AS permission_count,
+      (SELECT count(*)::integer FROM oidc_providers) AS provider_count,
+      (SELECT count(*)::integer FROM user_oidc_identities) AS identity_count,
+      (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count,
+      (SELECT email FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS normalized_email,
+      (SELECT email_normalized FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS generated_email,
+      (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
+      to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
+    assert.deepEqual(identityUpgrade.rows[0], {
+      role_count: 5, permission_count: 9, provider_count: 0, identity_count: 0, membership_count: 1,
+      normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,
+      permission_policy_exists: true,
+    });
   } finally {
     await verify.end();
   }
