@@ -13,10 +13,16 @@ Defina as variáveis somente no ambiente do processo, nunca em arquivo versionad
 - seletores opcionais `E2E_OIDC_USERNAME_SELECTOR`, `E2E_OIDC_PASSWORD_SELECTOR` e
   `E2E_OIDC_SUBMIT_SELECTOR`
 
+Quando o gate está habilitado, `E2E_BASE_URL` deve ser HTTPS e não pode conter credenciais. Variáveis
+opcionais vazias são tratadas como ausentes; em especial, um `E2E_ATTENDANT_ADMIN_LIST_MATCH` vazio nunca
+pode selecionar implicitamente a primeira conta administrativa.
+
 Gates opcionais fail-closed:
 
 - `E2E_REQUIRE_RENEWAL=true` torna a renovação obrigatória; nesse modo
-  `E2E_RENEW_WAIT_SECONDS` ausente ou inválido falha o teste.
+  `E2E_RENEW_WAIT_SECONDS` ausente ou inválido falha o teste. A espera precisa atravessar o `expires_at`
+  do token emitido no login, e o teste exige que a sessão passe a ter uma expiração posterior. Configure
+  `E2E_OIDC_TEST_TIMEOUT_MS` com pelo menos a espera mais 15 segundos.
 - `E2E_REQUIRE_BLOCK_REVOCATION=true` autoriza bloquear temporariamente a conta exclusiva do atendente,
   comprovar a perda de `/v1/me` em uma sessão já emitida e reativá-la obrigatoriamente no `finally`.
   Nunca use conta operacional ou compartilhada nesse gate. Se o username não for o e-mail mostrado na
@@ -31,7 +37,7 @@ habilita callback silencioso em iframe; não aponte um callback OIDC para uma p�
 Não habilite screenshots, trace, vídeo ou reutilização de perfil. Não imprima variáveis de ambiente e
 não copie diretórios de resultados para artefatos do CI.
 
-No GitHub, o workflow `OIDC external homologation` pode ser executado antes do merge aplicando a label
-`run-oidc-homologation` ao PR. Ele usa exclusivamente o environment protegido `oidc-homologation` e
-falha fechado se variáveis, secrets, implantação HTTPS ou contas não estiverem preparados. Após o
-workflow existir na branch padrão, `workflow_dispatch` continua disponível para novas homologações.
+No GitHub, o workflow `OIDC external homologation` só aceita execução manual (`workflow_dispatch`) na
+branch padrão. Ele não executa código de pull request com credenciais reais. Usa exclusivamente o
+environment protegido `oidc-homologation` e falha fechado se variáveis, secrets, implantação HTTPS ou
+contas não estiverem preparados.

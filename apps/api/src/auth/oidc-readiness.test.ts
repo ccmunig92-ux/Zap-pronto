@@ -20,6 +20,11 @@ test("OIDC config derives discovery from issuer path without changing canonical 
     organizationClaim: "org_id" });
 });
 
+test("OIDC config treats an empty optional discovery URL as absent", () => {
+  const config = loadOidcRuntimeConfig({ ...validEnv, OIDC_DISCOVERY_URL: "   " });
+  assert.equal(config.discoveryUrl, "https://id.example/realms/zap/.well-known/openid-configuration");
+});
+
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 }
@@ -45,4 +50,18 @@ test("OIDC readiness rejects issuer/JWKS mismatch, redirect-like HTTP failure an
   await assert.rejects(probeOidcReadiness(config, { fetch: async () => ++call === 1
     ? json({ issuer: config.issuer, jwks_uri: config.jwksUrl })
     : json({ keys: [{ kty: "RSA", kid: "leaked", d: "private" }] }) }), /NO_SIGNING_KEYS/);
+});
+
+test("OIDC readiness rejects keys incompatible with the verifier RS256 policy", async () => {
+  const config = loadOidcRuntimeConfig(validEnv);
+  for (const key of [
+    { kty: "EC", kid: "ec-only", use: "sig", alg: "ES256" },
+    { kty: "RSA", kid: "encryption", use: "enc", alg: "RS256" },
+    { kty: "RSA", kid: "sign-only", use: "sig", alg: "RS256", key_ops: ["sign"] },
+  ]) {
+    let call = 0;
+    await assert.rejects(probeOidcReadiness(config, { fetch: async () => ++call === 1
+      ? json({ issuer: config.issuer, jwks_uri: config.jwksUrl }) : json({ keys: [key] }) }),
+    /NO_SIGNING_KEYS/);
+  }
 });

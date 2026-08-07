@@ -110,6 +110,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   aplicável, `OIDC_ORGANIZATION_CLAIM`, e executar `pnpm --filter @zap-pronto/api oidc:probe`. O comando
   falha fechado para configuração insegura, discovery divergente, redirect, timeout, JSON inválido ou JWKS
   sem chave pública de assinatura. Ele não recebe tokens e não substitui as duas jornadas reais no navegador.
+- O workflow de homologação não executa código de PR com credenciais reais: somente `workflow_dispatch`
+  na branch padrão pode usar o environment protegido. O probe aceita apenas chaves públicas RSA compatíveis
+  com RS256/verify, exatamente como o verificador de runtime. O E2E exige frontend HTTPS, defaults seguros
+  para variáveis opcionais, renovação posterior à expiração original e bloqueio reversível da conta de teste.
+- Bloqueio operacional atual: o environment `oidc-homologation`, suas variáveis/secrets, a implantação HTTPS
+  e as duas contas exclusivas ainda não estão disponíveis. A conta `gh` ativa possui escrita, mas a API nega
+  administração do environment; a Fase 4 continua fechada até um administrador preparar e executar o gate.
 
 ## Premissas
 
@@ -307,7 +314,8 @@ Gate automatizado do corte:
 
 ## Sequência imediata
 
-1. Executar jornada de navegador com um IdP OIDC externo homologado e contas reais de dois papéis.
+1. Publicar o workflow na branch padrão, preparar o environment protegido `oidc-homologation` com um
+   administrador e executar a jornada real de navegador com contas exclusivas de dois papéis.
 2. Expor o primeiro fluxo vertical da inbox somente depois desse gate, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
