@@ -5,21 +5,45 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 ## Status de execução — 06/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
-- Fase atual: **Fase 1 — isolamento e integridade**.
+- Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
+- Fase atual: **Fase 3 — API, autenticação e RBAC** (aguardando integração da Fase 2).
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
 - Atribuição de atendente fora da unidade: bloqueada em teste real.
 - Controle de migrations por checksum e advisory lock: aprovado localmente.
-- CI com PostgreSQL 18, typecheck e testes: configurado; execução remota pendente do primeiro push.
+- CI com PostgreSQL 18, typecheck e testes: aprovado no `main`.
 - Primeiro commit canônico local: criado e validado.
 - Contexto transacional parametrizado e testes de pool: concluídos.
 - Membership ator/tenant validado no banco: implementado localmente.
 - Matriz RLS das 19 tabelas: SELECT/INSERT/UPDATE/DELETE cruzados testados localmente.
 - Membership ator/tenant e matriz CRUD RLS: concluídos.
 - Papéis separados de API e worker: concluídos e reauditos.
-- Pendente para integrar a Fase 1: CI remoto verde e revisão/merge do PR.
-- Fases 1–9: não iniciadas.
+- Fase 2A em execução no branch `codex/phase-2-operational-domain`:
+  lifecycle tipado, histórico tenant-aware e outbox com lease/dead-letter modelados;
+  solicitação de handoff atômica e claim otimista implementados.
+- Prova local da Fase 2A: migration do zero, RLS e dois claims concorrentes com exatamente um vencedor.
+- Fase 2B concluída localmente: outbox com claim `SKIP LOCKED`, lease/reclaim, ACK por token,
+  retry com backoff, dead-letter auditado e privilégios estreitos de API/worker.
+- Prova local da Fase 2B: dois workers recebem eventos distintos; lease expirado troca o token;
+  ACK obsoleto falha; retry e dead-letter preservam o isolamento por tenant.
+- A entrega assíncrona é `at-least-once`; consumidores devem deduplicar por ID/idempotency key.
+- Fase 2C concluída localmente: versões de preço DRAFT/PUBLISHED/RETIRED, publicação serializada,
+  orçamento com snapshot imutável, cálculo em centavos, revisão humana, envio, aceite,
+  recusa, expiração e cancelamento sem qualquer efeito de agendamento.
+- Prova local da Fase 2C: versão publicada não é alterável; nova versão preserva o snapshot anterior;
+  totais adulterados e snapshots falsos falham; envio concorrente gera uma mutação e replay idempotente;
+  aceite vencido falha; eventos e outbox são atômicos às transições.
+- Fase 2D concluída localmente: pedido médico com origem inbound validada, páginas OCR e itens
+  imutáveis, confiança/política versionadas, revisão humana obrigatória e ilegibilidade fail-closed.
+- Prova local da Fase 2D: replay e divergência idempotente, baixa confiança e ilegibilidade em handoff,
+  evento clínico compatível com o estado real, isolamento por unidade e rollback integral quando há
+  handoff aberto para outro caso; nenhum orçamento ou agendamento é criado.
+- Fase 2 concluída localmente: upgrade legado 0001–0004 até 0009 preserva dados e é no-op na
+  repetição; registro da migration é atômico ao DDL; RLS comercial e clínica isola filiais.
+- Gate final da Fase 2: handoff concorrente com replay único, recebimento/extracão/revisão médica
+  concorrentes reconciliados, publicação tardia idempotente e rollback sem efeitos parciais.
+- Fases 3–9: não iniciadas.
 
 ## Premissas
 
@@ -161,10 +185,9 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Corrigir a migration atual.
-2. Subir PostgreSQL local real.
-3. Provar RLS com dois tenants.
-4. Provar integridade de handoff e atribuição por unidade.
-5. Criar primeiro commit canônico somente depois dos gates verdes.
+1. Validar o gate da Fase 2 no CI remoto e manter o PR sem merge até revisão da integração.
+2. Integrar a Fase 2 ao `main` somente após decisão explícita de merge.
+3. Iniciar a Fase 3 em branch próprio: contrato OpenAPI, autenticação substituível e RBAC por unidade.
+4. Implementar primeiro a matriz de autorização e os testes IDOR; rotas vêm depois dos contratos.
 
-Não iniciar API, interface, Hermes ou Meta antes desses cinco passos.
+Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

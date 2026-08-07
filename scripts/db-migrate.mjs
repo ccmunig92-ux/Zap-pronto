@@ -39,11 +39,21 @@ try {
       continue;
     }
 
-    await client.query(sql);
-    await client.query(
-      "INSERT INTO schema_migrations (filename, checksum_sha256) VALUES ($1, $2)",
-      [filename, checksum],
-    );
+    const transactionalSql = sql
+      .replace(/^\s*BEGIN\s*;\s*/i, "")
+      .replace(/\s*COMMIT\s*;\s*$/i, "");
+    await client.query("BEGIN");
+    try {
+      await client.query(transactionalSql);
+      await client.query(
+        "INSERT INTO schema_migrations (filename, checksum_sha256) VALUES ($1, $2)",
+        [filename, checksum],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
     process.stdout.write(`applied ${filename}\n`);
   }
 } finally {

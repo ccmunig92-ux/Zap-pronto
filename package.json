@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:test": "pnpm build && node scripts/db-test.mjs",
+    "db:test:upgrade": "node scripts/db-upgrade-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test dist"
   },

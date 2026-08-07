@@ -4,6 +4,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
+import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
+import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
+import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -43,6 +46,11 @@ try {
       "0002_tenant_context_hardening.sql",
       "0003_actor_context_authorization.sql",
       "0004_component_roles.sql",
+      "0005_workflow_foundation.sql",
+      "0006_outbox_worker.sql",
+      "0007_quotes.sql",
+      "0008_medical_orders.sql",
+      "0009_phase2_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -107,9 +115,10 @@ try {
 
     const protectedTables = [
       "audit_events", "catalog_items", "channel_connection_units", "channel_connections",
-      "contact_identities", "contacts", "conversations", "human_handoffs", "message_attachments",
-      "messages", "outbox_events", "price_list_versions", "price_lists", "prices", "service_cases",
-      "tenants", "units", "user_units", "users",
+      "contact_identities", "contacts", "conversations", "human_handoffs",
+      "medical_order_items", "medical_order_pages", "medical_order_review_events", "medical_orders",
+      "message_attachments", "messages", "outbox_events", "price_list_versions", "price_lists", "prices",
+      "quote_events", "quote_items", "quotes", "service_cases", "tenants", "units", "user_units", "users", "workflow_transitions",
     ];
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -177,8 +186,12 @@ try {
       "units", "users", "user_units", "channel_connections", "channel_connection_units",
       "contacts", "contact_identities", "conversations", "service_cases", "message_attachments",
       "human_handoffs", "catalog_items", "price_lists", "price_list_versions", "prices",
+      "quotes", "medical_orders", "medical_order_pages", "medical_order_items",
     ]);
-    const apiInsertOnly = new Set(["messages", "outbox_events", "audit_events"]);
+    const apiInsertOnly = new Set([
+      "messages", "audit_events", "workflow_transitions", "quote_items",
+      "medical_order_review_events",
+    ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
@@ -205,13 +218,45 @@ try {
             ? {
                 can_select: workerReadable.has(table),
                 can_insert: table === "audit_events",
-                can_update: table === "outbox_events",
+                can_update: false,
                 can_delete: false,
               }
             : { can_select: false, can_insert: false, can_update: false, can_delete: false };
         assert.deepEqual(privileges.rows[0], expected, `${role}:${table}:PRIVILEGE_MATRIX_MISMATCH`);
       }
     }
+
+    const outboxColumnPrivileges = await target.query(`
+      SELECT
+        has_column_privilege('zap_pronto_api', 'outbox_events', 'tenant_id', 'INSERT') AS api_can_enqueue_tenant,
+        has_column_privilege('zap_pronto_api', 'outbox_events', 'status', 'INSERT') AS api_can_forge_status,
+        has_function_privilege('zap_pronto_worker', 'claim_outbox_events(integer,integer)', 'EXECUTE') AS worker_can_claim,
+        has_function_privilege('zap_pronto_api', 'claim_outbox_events(integer,integer)', 'EXECUTE') AS api_can_claim
+    `);
+    assert.deepEqual(outboxColumnPrivileges.rows[0], {
+      api_can_enqueue_tenant: true,
+      api_can_forge_status: false,
+      worker_can_claim: true,
+      api_can_claim: false,
+    });
+    const executorRole = await admin.query(`
+      SELECT role.rolcanlogin, role.rolsuper, role.rolbypassrls,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = role.oid) AS parent_count,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = role.oid) AS member_count
+      FROM pg_roles role WHERE role.rolname = 'zap_pronto_outbox_executor'
+    `);
+    assert.deepEqual(executorRole.rows[0], {
+      rolcanlogin: false, rolsuper: false, rolbypassrls: false, parent_count: 0, member_count: 0,
+    });
+    const quoteExecutorRole = await admin.query(`
+      SELECT role.rolcanlogin, role.rolsuper, role.rolbypassrls,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member = role.oid) AS parent_count,
+        (SELECT count(*)::integer FROM pg_auth_members m WHERE m.roleid = role.oid) AS member_count
+      FROM pg_roles role WHERE role.rolname = 'zap_pronto_quote_event_executor'
+    `);
+    assert.deepEqual(quoteExecutorRole.rows[0], {
+      rolcanlogin: false, rolsuper: false, rolbypassrls: false, parent_count: 0, member_count: 0,
+    });
 
     for (const role of ["zap_pronto_app", "zap_pronto_api", "zap_pronto_worker"]) {
       const migrationsPrivilege = await target.query(
@@ -255,12 +300,29 @@ try {
       INSERT INTO messages (id, tenant_id, conversation_id, direction, actor, external_message_id, body) VALUES
         ('46000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', 'INBOUND', 'CUSTOMER', 'message-a', 'A'),
         ('56000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', 'INBOUND', 'CUSTOMER', 'message-b', 'B');
-      INSERT INTO message_attachments (tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
-        ('40000000-0000-4000-8000-000000000001', '46000000-0000-4000-8000-000000000001', 'AUDIO', 'tenant-a/audio', 'audio/ogg', repeat('a',64)),
-        ('50000000-0000-4000-8000-000000000002', '56000000-0000-4000-8000-000000000002', 'AUDIO', 'tenant-b/audio', 'audio/ogg', repeat('b',64));
-      INSERT INTO human_handoffs (tenant_id, conversation_id, service_case_id, unit_id, reason, idempotency_key) VALUES
-        ('40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'COMPLETED_COLLECTION', 'handoff-a'),
-        ('50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'COMPLETED_COLLECTION', 'handoff-b');
+      INSERT INTO message_attachments (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
+        ('4c000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '46000000-0000-4000-8000-000000000001', 'DOCUMENT', 'tenant-a/order.pdf', 'application/pdf', repeat('a',64)),
+        ('5c000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '56000000-0000-4000-8000-000000000002', 'DOCUMENT', 'tenant-b/order.pdf', 'application/pdf', repeat('b',64));
+      INSERT INTO medical_orders
+        (id, tenant_id, service_case_id, conversation_id, unit_id, message_id, message_attachment_id,
+         document_sha256, page_count, idempotency_key) VALUES
+        ('4d000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), '46000000-0000-4000-8000-000000000001', '4c000000-0000-4000-8000-000000000001', repeat('a',64), 1, 'medical-seed-a'),
+        ('5d000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), '56000000-0000-4000-8000-000000000002', '5c000000-0000-4000-8000-000000000002', repeat('b',64), 1, 'medical-seed-b');
+      UPDATE medical_orders SET status='PROCESSING',version=version+1 WHERE status='RECEIVED';
+      INSERT INTO medical_order_pages (id, tenant_id, medical_order_id, page_number) VALUES
+        ('4e000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', 1),
+        ('5e000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', 1);
+      INSERT INTO medical_order_items
+        (id, tenant_id, medical_order_id, page_id, sequence, raw_text) VALUES
+        ('4f000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', '4e000000-0000-4000-8000-000000000001', 1, 'Seed A'),
+        ('5f000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', '5e000000-0000-4000-8000-000000000002', 1, 'Seed B');
+      INSERT INTO medical_order_review_events
+        (tenant_id, medical_order_id, medical_order_item_id, action, actor_id, correlation_id, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4d000000-0000-4000-8000-000000000001', '4f000000-0000-4000-8000-000000000001', 'CONFIRMED', '60000000-0000-4000-8000-000000000003', 'medical-seed-a', 'medical-event-a'),
+        ('50000000-0000-4000-8000-000000000002', '5d000000-0000-4000-8000-000000000002', '5f000000-0000-4000-8000-000000000002', 'CONFIRMED', '70000000-0000-4000-8000-000000000004', 'medical-seed-b', 'medical-event-b');
+      INSERT INTO human_handoffs (tenant_id, conversation_id, service_case_id, unit_id, reason, status, queued_at, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-a'),
+        ('50000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'COMPLETED_COLLECTION', 'QUEUED', now(), 'handoff-b');
       INSERT INTO catalog_items (id, tenant_id, code, name) VALUES
         ('47000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'ITEM-A', 'Item A'),
         ('57000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', 'ITEM-B', 'Item B');
@@ -268,27 +330,59 @@ try {
         ('48000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), 'List A'),
         ('58000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), 'List B');
       INSERT INTO price_list_versions (id, tenant_id, price_list_id, version, status, effective_at) VALUES
-        ('49000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', 1, 'ACTIVE', now()),
-        ('59000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 1, 'ACTIVE', now());
+        ('49000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', 1, 'DRAFT', now()),
+        ('59000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 1, 'DRAFT', now());
       INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor) VALUES
         ('40000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', '47000000-0000-4000-8000-000000000001', 1000),
         ('50000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', '57000000-0000-4000-8000-000000000002', 2000);
+      UPDATE price_list_versions SET status='PUBLISHED', published_at=now() WHERE status='DRAFT';
+      INSERT INTO quotes
+        (id, tenant_id, service_case_id, conversation_id, unit_id, price_list_id, price_list_version_id,
+         status, valid_until, prepared_by_user_id, idempotency_key, request_fingerprint) VALUES
+        ('4a000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', '45000000-0000-4000-8000-000000000001', '44000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'), '48000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', 'DRAFT', now() + interval '1 day', '60000000-0000-4000-8000-000000000003', 'quote-seed-a', repeat('a',64)),
+        ('5a000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002', (SELECT id FROM units WHERE code='POOL-B'), '58000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', 'DRAFT', now() + interval '1 day', '70000000-0000-4000-8000-000000000004', 'quote-seed-b', repeat('b',64));
+      INSERT INTO quote_items
+        (tenant_id, quote_id, line_number, catalog_item_id, price_list_version_id,
+         catalog_code_snapshot, description_snapshot, quantity, unit_price_minor, line_total_minor, price_effective_at) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4a000000-0000-4000-8000-000000000001', 1, '47000000-0000-4000-8000-000000000001', '49000000-0000-4000-8000-000000000001', 'ITEM-A', 'Item A', 1, 1000, 1000, now()),
+        ('50000000-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-000000000002', 1, '57000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002', 'ITEM-B', 'Item B', 1, 2000, 2000, now());
+      UPDATE quotes SET status='READY', subtotal_minor=1000, total_minor=1000, version=version+1 WHERE id='4a000000-0000-4000-8000-000000000001';
+      UPDATE quotes SET status='READY', subtotal_minor=2000, total_minor=2000, version=version+1 WHERE id='5a000000-0000-4000-8000-000000000002';
+      INSERT INTO quote_events
+        (tenant_id, quote_id, from_status, to_status, reason, actor_id, correlation_id, idempotency_key) VALUES
+        ('40000000-0000-4000-8000-000000000001', '4a000000-0000-4000-8000-000000000001', 'DRAFT', 'READY', 'TEST_SEED', '60000000-0000-4000-8000-000000000003', 'quote-seed-a', 'quote-event-a'),
+        ('50000000-0000-4000-8000-000000000002', '5a000000-0000-4000-8000-000000000002', 'DRAFT', 'READY', 'TEST_SEED', '70000000-0000-4000-8000-000000000004', 'quote-seed-b', 'quote-event-b');
       INSERT INTO outbox_events (tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key) VALUES
         ('40000000-0000-4000-8000-000000000001', 'conversation', '44000000-0000-4000-8000-000000000001', 'test.a', '{}', 'outbox-a'),
         ('50000000-0000-4000-8000-000000000002', 'conversation', '54000000-0000-4000-8000-000000000002', 'test.b', '{}', 'outbox-b');
+      INSERT INTO workflow_transitions
+        (tenant_id, aggregate_type, aggregate_id, from_status, to_status, reason, actor_id, correlation_id) VALUES
+        ('40000000-0000-4000-8000-000000000001', 'CONVERSATION', '44000000-0000-4000-8000-000000000001', NULL, 'OPEN', 'TEST_SEED', '60000000-0000-4000-8000-000000000003', 'workflow-a'),
+        ('50000000-0000-4000-8000-000000000002', 'CONVERSATION', '54000000-0000-4000-8000-000000000002', NULL, 'OPEN', 'TEST_SEED', '70000000-0000-4000-8000-000000000004', 'workflow-b');
       INSERT INTO audit_events (tenant_id, actor_type, actor_id, action, entity_type, entity_id) VALUES
         ('40000000-0000-4000-8000-000000000001', 'USER', 'actor-a', 'TEST', 'tenant', 'a'),
         ('50000000-0000-4000-8000-000000000002', 'USER', 'actor-b', 'TEST', 'tenant', 'b');
     `);
 
+    await assert.rejects(
+      target.query(`
+        UPDATE conversations SET status = 'CLOSED', closed_at = now(), automation_status = 'HUMAN_ACTIVE'
+        WHERE id = '54000000-0000-4000-8000-000000000002'
+      `),
+      (error) => error instanceof Error && "code" in error && error.code === "23514"
+        && /INVALID_WORKFLOW_TRANSITION/.test(error.message),
+    );
+
     const runtimeUrl = new URL(targetUrl);
     runtimeUrl.username = runtimeRole;
     runtimeUrl.password = runtimePassword;
     const runtimePool = new pg.Pool({ connectionString: runtimeUrl.toString(), max: 1 });
+    const competingRuntimePool = new pg.Pool({ connectionString: runtimeUrl.toString(), max: 1 });
     const workerUrl = new URL(targetUrl);
     workerUrl.username = workerRuntimeRole;
     workerUrl.password = workerRuntimePassword;
     const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
+    const competingWorkerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     try {
       const actorAId = "60000000-0000-4000-8000-000000000003";
       const actorBId = "70000000-0000-4000-8000-000000000004";
@@ -347,6 +441,11 @@ try {
 
       for (const table of protectedTables) {
         const tenantColumn = table === "tenants" ? "id" : "tenant_id";
+        const insertOverrides = table === "quotes"
+          ? { status: "DRAFT", version: 1, subtotal_minor: 0, discount_minor: 0, total_minor: 0 }
+          : table === "medical_orders"
+            ? { status: "RECEIVED", version: 1, overall_confidence: null, extraction_fingerprint: null }
+            : {};
         await assert.rejects(
           withTenantTransaction(
             runtimePool,
@@ -359,11 +458,11 @@ try {
               `INSERT INTO "${table}"
                SELECT (jsonb_populate_record(
                  NULL::"${table}",
-                 to_jsonb(source) || jsonb_build_object('${tenantColumn}', $1::text)
+                 to_jsonb(source) || $2::jsonb || jsonb_build_object('${tenantColumn}', $1::text)
                )).*
                FROM "${table}" source
                LIMIT 1`,
-              ["50000000-0000-4000-8000-000000000002"],
+              ["50000000-0000-4000-8000-000000000002", JSON.stringify(insertOverrides)],
             ),
           ),
           (error) => error instanceof Error && "code" in error && error.code === "42501"
@@ -497,6 +596,892 @@ try {
       );
       assert.deepEqual(afterRollback.rows.map((row) => row.code), ["POOL-B"]);
 
+      const handoffA = await target.query(
+        "SELECT id, version FROM human_handoffs WHERE idempotency_key = 'handoff-a'",
+      );
+      await target.query(`
+        UPDATE conversations SET automation_status = 'HUMAN_REQUESTED'
+        WHERE id = '44000000-0000-4000-8000-000000000001';
+        UPDATE conversations SET automation_status = 'HUMAN_QUEUED'
+        WHERE id = '44000000-0000-4000-8000-000000000001';
+        UPDATE service_cases SET status = 'WAITING_HUMAN'
+        WHERE id = '45000000-0000-4000-8000-000000000001';
+      `);
+      const claimContext = {
+        tenantId: "40000000-0000-4000-8000-000000000001",
+        actorId: actorAId,
+      };
+      const claimInput = {
+        handoffId: handoffA.rows[0].id,
+        expectedVersion: handoffA.rows[0].version,
+      };
+      const claimResults = await Promise.allSettled([
+        withTenantTransaction(
+          runtimePool,
+          { ...claimContext, correlationId: "concurrent-claim-a" },
+          (client) => claimHandoff(client, claimInput),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...claimContext, correlationId: "concurrent-claim-b" },
+          (client) => claimHandoff(client, claimInput),
+        ),
+      ]);
+      assert.equal(
+        claimResults.filter((result) => result.status === "fulfilled").length,
+        1,
+        claimResults.map((result) => result.status === "rejected"
+          ? String(result.reason?.message ?? result.reason)
+          : "FULFILLED").join(" | "),
+      );
+      assert.equal(claimResults.filter((result) => result.status === "rejected").length, 1);
+      const rejectedClaim = claimResults.find((result) => result.status === "rejected");
+      assert.match(rejectedClaim.reason.message, /HANDOFF_CLAIM_CONFLICT/);
+
+      const claimEvidence = await target.query(`
+        SELECT h.status, h.version, h.assigned_user_id,
+          (SELECT count(*)::integer FROM workflow_transitions wt
+            WHERE wt.aggregate_type = 'HANDOFF' AND wt.aggregate_id = h.id AND wt.to_status = 'ACTIVE') AS transitions,
+          (SELECT count(*)::integer FROM outbox_events oe
+            WHERE oe.idempotency_key = 'handoff.claimed:' || h.id::text) AS outbox_events
+        FROM human_handoffs h WHERE h.id = $1
+      `, [handoffA.rows[0].id]);
+      assert.deepEqual(claimEvidence.rows[0], {
+        status: "ACTIVE",
+        version: 2,
+        assigned_user_id: actorAId,
+        transitions: 1,
+        outbox_events: 1,
+      });
+      const claimedCase = await target.query(
+        "SELECT status, version FROM service_cases WHERE id = '45000000-0000-4000-8000-000000000001'",
+      );
+      assert.deepEqual(claimedCase.rows[0], { status: "IN_REVIEW", version: 2 });
+      const claimTransitionCount = await target.query(
+        "SELECT count(*)::integer AS count FROM workflow_transitions WHERE correlation_id IN ('concurrent-claim-a', 'concurrent-claim-b')",
+      );
+      assert.equal(claimTransitionCount.rows[0].count, 3);
+
+      await target.query("DELETE FROM human_handoffs WHERE idempotency_key = 'handoff-b'");
+      const concurrentHandoffRequest = {
+          serviceCaseId: "55000000-0000-4000-8000-000000000002",
+          expectedCaseVersion: 1,
+          reason: "COMPLETED_COLLECTION",
+          priority: "NORMAL",
+          idempotencyKey: "handoff-request-b",
+      };
+      const concurrentHandoffRequests = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "request-handoff-b",
+        }, (client) => requestHandoff(client, concurrentHandoffRequest)),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "50000000-0000-4000-8000-000000000002", actorId: actorBId,
+          correlationId: "request-handoff-b-replay",
+        }, (client) => requestHandoff(client, concurrentHandoffRequest)),
+      ]);
+      assert.equal(concurrentHandoffRequests.filter((result) => result.status === "fulfilled").length, 2);
+      const requestedHandoff = concurrentHandoffRequests[0].value;
+      assert.equal(concurrentHandoffRequests[1].value.id, requestedHandoff.id);
+      assert.equal(requestedHandoff.status, "QUEUED");
+      const requestEvidence = await target.query(`
+        SELECT c.automation_status, c.assigned_user_id, sc.status AS case_status, sc.version AS case_version,
+          h.status AS handoff_status, h.queued_at IS NOT NULL AS was_queued,
+          (SELECT count(*)::integer FROM workflow_transitions wt
+            WHERE wt.correlation_id IN ('request-handoff-b','request-handoff-b-replay')) AS transitions,
+          (SELECT count(*)::integer FROM outbox_events oe
+            WHERE oe.idempotency_key = 'handoff.queued:' || h.id::text) AS outbox_events
+        FROM human_handoffs h
+        JOIN service_cases sc ON sc.tenant_id = h.tenant_id AND sc.id = h.service_case_id
+        JOIN conversations c ON c.tenant_id = h.tenant_id AND c.id = h.conversation_id
+        WHERE h.id = $1
+      `, [requestedHandoff.id]);
+      assert.deepEqual(requestEvidence.rows[0], {
+        automation_status: "HUMAN_QUEUED",
+        assigned_user_id: null,
+        case_status: "WAITING_HUMAN",
+        case_version: 2,
+        handoff_status: "QUEUED",
+        was_queued: true,
+        transitions: 4,
+        outbox_events: 1,
+      });
+
+      const readyQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "50000000-0000-4000-8000-000000000002",
+          actorId: actorBId,
+          correlationId: "quote-create-b",
+        },
+        (client) => createReadyQuote(client, {
+          serviceCaseId: "55000000-0000-4000-8000-000000000002",
+          priceListVersionId: "59000000-0000-4000-8000-000000000002",
+          items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 3 }],
+          discountMinor: 500n,
+          validUntil: new Date(Date.now() + 86_400_000),
+          idempotencyKey: "quote-runtime-b",
+        }),
+      );
+      assert.deepEqual(
+        { status: readyQuote.status, version: readyQuote.version, subtotal: readyQuote.subtotalMinor, total: readyQuote.totalMinor },
+        { status: "READY", version: 2, subtotal: 6000n, total: 5500n },
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "quote-forged-ready-b",
+          },
+          (client) => client.query(`
+            INSERT INTO quotes
+              (tenant_id, service_case_id, conversation_id, unit_id, price_list_id,
+               price_list_version_id, status, valid_until, prepared_by_user_id,
+               idempotency_key, request_fingerprint)
+            SELECT current_app_tenant_id(), '55000000-0000-4000-8000-000000000002',
+              '54000000-0000-4000-8000-000000000002', unit.id,
+              '58000000-0000-4000-8000-000000000002', '59000000-0000-4000-8000-000000000002',
+              'READY', now() + interval '1 day', current_app_actor_id(), 'forged-ready', repeat('f',64)
+            FROM units unit WHERE unit.code='POOL-B'
+          `),
+        ),
+        /INVALID_QUOTE_INSERT/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "quote-version-bypass-b",
+          },
+          async (client) => {
+            await client.query(`
+              INSERT INTO quotes
+                (id, tenant_id, service_case_id, conversation_id, unit_id, price_list_id,
+                 price_list_version_id, revision, status, valid_until, prepared_by_user_id,
+                 idempotency_key, request_fingerprint)
+              SELECT '5d000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+                '55000000-0000-4000-8000-000000000002', '54000000-0000-4000-8000-000000000002',
+                unit.id, '58000000-0000-4000-8000-000000000002',
+                '59000000-0000-4000-8000-000000000002', 99, 'DRAFT', now() + interval '1 day',
+                current_app_actor_id(), 'quote-version-bypass', repeat('d',64)
+              FROM units unit WHERE unit.code='POOL-B'
+            `);
+            await client.query(`
+              UPDATE quotes SET status='READY', valid_until=valid_until + interval '1 day'
+              WHERE id='5d000000-0000-4000-8000-000000000002'
+            `);
+          },
+        ),
+        /QUOTE_IDENTITY_IMMUTABLE|QUOTE_VERSION_INCREMENT_REQUIRED/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "50000000-0000-4000-8000-000000000002",
+            actorId: actorBId,
+            correlationId: "price-empty-publish-b",
+          },
+          async (client) => {
+            await client.query(`
+              INSERT INTO price_list_versions
+                (id, tenant_id, price_list_id, version, status, effective_at)
+              VALUES ('5c000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+                '58000000-0000-4000-8000-000000000002', 99, 'DRAFT', now())
+            `);
+            await client.query(`
+              UPDATE price_list_versions SET status='PUBLISHED', published_at=now()
+              WHERE id='5c000000-0000-4000-8000-000000000002'
+            `);
+          },
+        ),
+        /PRICE_VERSION_EMPTY/,
+      );
+
+      const sendContext = {
+        tenantId: "50000000-0000-4000-8000-000000000002",
+        actorId: actorBId,
+      };
+      const concurrentSends = await Promise.allSettled([
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-send-b-1" },
+          (client) => sendQuote(client, { quoteId: readyQuote.id, expectedVersion: readyQuote.version }),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...sendContext, correlationId: "quote-send-b-2" },
+          (client) => sendQuote(client, { quoteId: readyQuote.id, expectedVersion: readyQuote.version }),
+        ),
+      ]);
+      assert.equal(concurrentSends.filter((result) => result.status === "fulfilled").length, 2);
+      assert.deepEqual(concurrentSends.map((result) => result.value.version), [3, 3]);
+      const sentQuote = concurrentSends.find((result) => result.status === "fulfilled").value;
+      assert.equal(sentQuote.version, 3);
+      const acceptedQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-accept-b" },
+        (client) => acceptQuote(client, { quoteId: readyQuote.id, expectedVersion: sentQuote.version }),
+      );
+      assert.equal(acceptedQuote.status, "ACCEPTED");
+      assert.equal(acceptedQuote.version, 4);
+
+      const quoteEvidence = await target.query(`
+        SELECT quote.status, quote.subtotal_minor, quote.discount_minor, quote.total_minor,
+          item.catalog_code_snapshot, item.description_snapshot, item.quantity, item.unit_price_minor,
+          conversation.automation_status,
+          (SELECT count(*)::integer FROM quote_events event WHERE event.quote_id = quote.id) AS events,
+          (SELECT count(*)::integer FROM outbox_events outbox
+            WHERE outbox.aggregate_type = 'quote' AND outbox.aggregate_id = quote.id) AS outbox_events
+        FROM quotes quote
+        JOIN quote_items item ON item.tenant_id = quote.tenant_id AND item.quote_id = quote.id
+        JOIN conversations conversation ON conversation.tenant_id = quote.tenant_id AND conversation.id = quote.conversation_id
+        WHERE quote.id = $1
+      `, [readyQuote.id]);
+      assert.deepEqual(quoteEvidence.rows[0], {
+        status: "ACCEPTED", subtotal_minor: "6000", discount_minor: "500", total_minor: "5500",
+        catalog_code_snapshot: "ITEM-B", description_snapshot: "Item B", quantity: 3,
+        unit_price_minor: "2000", automation_status: "HUMAN_QUEUED", events: 4, outbox_events: 2,
+      });
+      await assert.rejects(
+        target.query("UPDATE prices SET amount_minor = 9999 WHERE tenant_id = '50000000-0000-4000-8000-000000000002'"),
+        (error) => error instanceof Error && "code" in error && error.code === "23514"
+          && /PUBLISHED_PRICES_IMMUTABLE/.test(error.message),
+      );
+      await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "price-version-publish-b" },
+        async (client) => {
+          await client.query(`
+            INSERT INTO price_list_versions
+              (id, tenant_id, price_list_id, version, status, effective_at)
+            VALUES ('5b000000-0000-4000-8000-000000000002', current_app_tenant_id(),
+              '58000000-0000-4000-8000-000000000002', 2, 'DRAFT', now() + interval '1 day')
+          `);
+          await client.query(`
+            INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor)
+            VALUES (current_app_tenant_id(), '5b000000-0000-4000-8000-000000000002',
+              '57000000-0000-4000-8000-000000000002', 2500)
+          `);
+          await publishPriceListVersion(client, "5b000000-0000-4000-8000-000000000002");
+        },
+      );
+      const priceSnapshotEvidence = await target.query(`
+        SELECT
+          (SELECT status FROM price_list_versions WHERE id='59000000-0000-4000-8000-000000000002') AS old_status,
+          (SELECT status FROM price_list_versions WHERE id='5b000000-0000-4000-8000-000000000002') AS new_status,
+          (SELECT unit_price_minor FROM quote_items WHERE quote_id=$1) AS snapshot_price,
+          (SELECT amount_minor FROM prices WHERE price_list_version_id='5b000000-0000-4000-8000-000000000002') AS new_price
+      `, [readyQuote.id]);
+      assert.deepEqual(priceSnapshotEvidence.rows[0], {
+        old_status: "RETIRED", new_status: "PUBLISHED", snapshot_price: "2000", new_price: "2500",
+      });
+
+      const reviewQuoteInput = {
+        serviceCaseId: "55000000-0000-4000-8000-000000000002",
+        priceListVersionId: "5b000000-0000-4000-8000-000000000002",
+        items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 1 }],
+        discountMinor: 0n,
+        validUntil: new Date(Date.now() + 172_800_000),
+        idempotencyKey: "quote-review-b",
+        requiresHumanReview: true,
+      };
+      const reviewQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-create-b" },
+        (client) => createReadyQuote(client, reviewQuoteInput),
+      );
+      assert.equal(reviewQuote.status, "REVIEW_REQUIRED");
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-review-replay-mismatch" },
+          (client) => createReadyQuote(client, {
+            ...reviewQuoteInput,
+            items: [{ catalogItemId: "57000000-0000-4000-8000-000000000002", quantity: 2 }],
+          }),
+        ),
+        /IDEMPOTENCY_KEY_REUSED/,
+      );
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "quote-snapshot-forgery" },
+          (client) => client.query(`
+            INSERT INTO quote_items
+              (tenant_id, quote_id, line_number, catalog_item_id, price_list_version_id,
+               catalog_code_snapshot, description_snapshot, quantity, unit_price_minor,
+               line_total_minor, price_effective_at)
+            SELECT current_app_tenant_id(), $1, 2, price.catalog_item_id, price.price_list_version_id,
+              'FORGED', 'FORGED', 1, price.amount_minor, price.amount_minor, version.effective_at
+            FROM prices price JOIN price_list_versions version
+              ON version.tenant_id=price.tenant_id AND version.id=price.price_list_version_id
+            WHERE price.catalog_item_id='57000000-0000-4000-8000-000000000002'
+          `, [reviewQuote.id]),
+        ),
+        /QUOTE_ITEM_SNAPSHOT_MISMATCH/,
+      );
+      const approvedQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-approve-b" },
+        (client) => approveQuoteReview(client, { quoteId: reviewQuote.id, expectedVersion: reviewQuote.version }),
+      );
+      assert.equal(approvedQuote.status, "READY");
+      await assert.rejects(
+        target.query("UPDATE quotes SET subtotal_minor=9999,total_minor=9999 WHERE id=$1", [reviewQuote.id]),
+        /READY_QUOTE_COMMERCIAL_DATA_IMMUTABLE/,
+      );
+      const cancelledQuote = await withTenantTransaction(
+        runtimePool,
+        { ...sendContext, correlationId: "quote-review-cancel-b" },
+        (client) => cancelQuote(client, { quoteId: reviewQuote.id, expectedVersion: approvedQuote.version }),
+      );
+      assert.equal(cancelledQuote.status, "CANCELLED");
+
+      const expiringQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expiring-create-a",
+        },
+        (client) => createReadyQuote(client, {
+          serviceCaseId: "45000000-0000-4000-8000-000000000001",
+          priceListVersionId: "49000000-0000-4000-8000-000000000001",
+          items: [{ catalogItemId: "47000000-0000-4000-8000-000000000001", quantity: 1 }],
+          discountMinor: 0n,
+          validUntil: new Date(Date.now() + 500),
+          idempotencyKey: "quote-expiring-a",
+        }),
+      );
+      const sentExpiringQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expiring-send-a",
+        },
+        (client) => sendQuote(client, { quoteId: expiringQuote.id, expectedVersion: expiringQuote.version }),
+      );
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 650));
+      await assert.rejects(
+        withTenantTransaction(
+          runtimePool,
+          {
+            tenantId: "40000000-0000-4000-8000-000000000001",
+            actorId: actorAId,
+            correlationId: "quote-expired-accept-a",
+          },
+          (client) => acceptQuote(client, {
+            quoteId: expiringQuote.id,
+            expectedVersion: sentExpiringQuote.version,
+          }),
+        ),
+        /QUOTE_TRANSITION_CONFLICT/,
+      );
+      const expiredQuote = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "quote-expire-a",
+        },
+        (client) => expireQuote(client, {
+          quoteId: expiringQuote.id,
+          expectedVersion: sentExpiringQuote.version,
+        }),
+      );
+      assert.equal(expiredQuote.status, "EXPIRED");
+
+      await target.query(`
+        INSERT INTO price_list_versions
+          (id, tenant_id, price_list_id, version, status, effective_at) VALUES
+          ('5e000000-0000-4000-8000-000000000003', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 3, 'DRAFT', now() + interval '2 days'),
+          ('5f000000-0000-4000-8000-000000000004', '50000000-0000-4000-8000-000000000002', '58000000-0000-4000-8000-000000000002', 4, 'DRAFT', now() + interval '3 days');
+        INSERT INTO prices (tenant_id, price_list_version_id, catalog_item_id, amount_minor) VALUES
+          ('50000000-0000-4000-8000-000000000002', '5e000000-0000-4000-8000-000000000003', '57000000-0000-4000-8000-000000000002', 2600),
+          ('50000000-0000-4000-8000-000000000002', '5f000000-0000-4000-8000-000000000004', '57000000-0000-4000-8000-000000000002', 2700);
+      `);
+      const concurrentPublications = await Promise.all([
+        withTenantTransaction(
+          runtimePool,
+          { ...sendContext, correlationId: "price-publish-concurrent-3" },
+          (client) => publishPriceListVersion(client, "5e000000-0000-4000-8000-000000000003"),
+        ),
+        withTenantTransaction(
+          competingRuntimePool,
+          { ...sendContext, correlationId: "price-publish-concurrent-4" },
+          (client) => publishPriceListVersion(client, "5f000000-0000-4000-8000-000000000004"),
+        ),
+      ]);
+      assert.equal(concurrentPublications.length, 2);
+      const publicationEvidence = await target.query(`
+        SELECT status, count(*)::integer AS count
+        FROM price_list_versions
+        WHERE price_list_id='58000000-0000-4000-8000-000000000002'
+        GROUP BY status ORDER BY status
+      `);
+      assert.deepEqual(publicationEvidence.rows, [
+        { status: "PUBLISHED", count: 1 },
+        { status: "RETIRED", count: 3 },
+      ]);
+      await withTenantTransaction(runtimePool,
+        { ...sendContext, correlationId: "price-publish-retired-replay" },
+        (client) => publishPriceListVersion(client, "5e000000-0000-4000-8000-000000000003"));
+
+      await target.query(`
+        INSERT INTO conversations
+          (id, tenant_id, channel_connection_id, contact_id, contact_identity_id, unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001', '42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id, tenant_id, conversation_id, unit_id, kind)
+        VALUES ('65000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000009', (SELECT id FROM units WHERE code='POOL-A'), 'MEDICAL_ORDER');
+        INSERT INTO messages
+          (id, tenant_id, conversation_id, direction, actor, external_message_id, body) VALUES
+          ('66000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+            '64000000-0000-4000-8000-000000000009', 'INBOUND', 'CUSTOMER',
+            'medical-concurrent-first-a', 'Primeiro pedido concorrente'),
+          ('66000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+            '64000000-0000-4000-8000-000000000009', 'INBOUND', 'CUSTOMER',
+            'medical-concurrent-second-a', 'Segundo pedido concorrente');
+        INSERT INTO message_attachments
+          (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256) VALUES
+          ('6c000000-0000-4000-8000-000000000009', '40000000-0000-4000-8000-000000000001',
+            '66000000-0000-4000-8000-000000000009', 'DOCUMENT',
+            'tenant-a/concurrent-first.pdf', 'application/pdf', repeat('9',64)),
+          ('6c000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+            '66000000-0000-4000-8000-00000000000a', 'DOCUMENT',
+            'tenant-a/concurrent-second.pdf', 'application/pdf', repeat('a',64));
+        INSERT INTO users (id, tenant_id, email, display_name)
+        VALUES ('60000000-0000-4000-8000-00000000000a', '40000000-0000-4000-8000-000000000001',
+          'reviewer-a2@example.test', 'Reviewer A2');
+        INSERT INTO user_units (tenant_id, user_id, unit_id, role)
+        SELECT '40000000-0000-4000-8000-000000000001',
+          '60000000-0000-4000-8000-00000000000a', id, 'ATTENDANT'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A';
+      `);
+      const concurrentReceiveInput = {
+        serviceCaseId: "65000000-0000-4000-8000-000000000009",
+        messageId: "66000000-0000-4000-8000-000000000009",
+        attachmentId: "6c000000-0000-4000-8000-000000000009",
+        documentSha256: "9".repeat(64), pageCount: 1, idempotencyKey: "medical-concurrent-receive-a",
+      };
+      const concurrentReceives = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-receive-a-1",
+        }, (client) => receiveMedicalOrder(client, concurrentReceiveInput)),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-receive-a-2",
+        }, (client) => receiveMedicalOrder(client, concurrentReceiveInput)),
+      ]);
+      assert.equal(concurrentReceives.filter((result) => result.status === "fulfilled").length, 2);
+      const concurrentFirstOrder = concurrentReceives[0].value;
+      assert.equal(concurrentReceives[1].value.id, concurrentFirstOrder.id);
+      const concurrentReceiveEvidence = await target.query(`
+        SELECT count(*)::integer AS orders,
+          (SELECT count(*)::integer FROM medical_order_pages page
+            WHERE page.medical_order_id=$1) AS pages
+        FROM medical_orders medical WHERE medical.idempotency_key='medical-concurrent-receive-a'
+      `, [concurrentFirstOrder.id]);
+      assert.deepEqual(concurrentReceiveEvidence.rows[0], { orders: 1, pages: 1 });
+
+      const concurrentSecondOrder = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-concurrent-second-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000009",
+        messageId: "66000000-0000-4000-8000-00000000000a",
+        attachmentId: "6c000000-0000-4000-8000-00000000000a",
+        documentSha256: "a".repeat(64), pageCount: 1, idempotencyKey: "medical-concurrent-second-a",
+      }));
+      const extractionFor = (medicalOrderId, expectedOrderVersion, text, idempotencyKey) => ({
+        medicalOrderId, expectedOrderVersion, expectedCaseVersion: 1,
+        provider: "TEST_OCR", model: "test-model", modelVersion: "1",
+        confidenceThreshold: 0.8, confidencePolicyVersion: "medical-ocr-v1",
+        pages: [{ pageNumber: 1, ocrText: text, confidence: 0.9,
+          items: [{ sequence: 1, rawText: text, confidence: 0.9 }] }], idempotencyKey,
+      });
+      const concurrentExtractions = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-shared-handoff-extract-a-1",
+        }, (client) => applyMedicalOrderExtraction(client,
+          extractionFor(concurrentFirstOrder.id, concurrentFirstOrder.version,
+            "Hemograma concorrente", "medical-shared-handoff-extract-a-1"))),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-shared-handoff-extract-a-2",
+        }, (client) => applyMedicalOrderExtraction(client,
+          extractionFor(concurrentSecondOrder.id, concurrentSecondOrder.version,
+            "Glicose concorrente", "medical-shared-handoff-extract-a-2"))),
+      ]);
+      assert.equal(concurrentExtractions.filter((result) => result.status === "fulfilled").length, 2,
+        concurrentExtractions.map((result) => result.status === "rejected"
+          ? String(result.reason?.message ?? result.reason) : "FULFILLED").join(" | "));
+      const sharedHandoffEvidence = await target.query(`
+        SELECT (SELECT count(*)::integer FROM medical_orders medical
+            WHERE medical.service_case_id='65000000-0000-4000-8000-000000000009'
+              AND medical.status='REVIEW_REQUIRED') AS review_orders,
+          (SELECT count(*)::integer FROM medical_order_items item JOIN medical_orders medical
+            ON medical.id=item.medical_order_id
+            WHERE medical.service_case_id='65000000-0000-4000-8000-000000000009') AS items,
+          (SELECT count(*)::integer FROM human_handoffs handoff
+            WHERE handoff.conversation_id='64000000-0000-4000-8000-000000000009'
+              AND handoff.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+          (SELECT status FROM service_cases WHERE id='65000000-0000-4000-8000-000000000009') AS case_status,
+          (SELECT automation_status FROM conversations
+            WHERE id='64000000-0000-4000-8000-000000000009') AS automation_status
+      `);
+      assert.deepEqual(sharedHandoffEvidence.rows[0], {
+        review_orders: 2, items: 2, open_handoffs: 1,
+        case_status: "WAITING_HUMAN", automation_status: "HUMAN_QUEUED",
+      });
+
+      const concurrentReviewItem = await target.query(
+        "SELECT id FROM medical_order_items WHERE medical_order_id=$1",
+        [concurrentFirstOrder.id],
+      );
+      const concurrentReviewVersion = concurrentExtractions.find((result) =>
+        result.status === "fulfilled" && result.value.id === concurrentFirstOrder.id).value.version;
+      const concurrentReviews = await Promise.allSettled([
+        withTenantTransaction(runtimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+          correlationId: "medical-concurrent-review-a-1",
+        }, (client) => reviewMedicalOrder(client, concurrentFirstOrder.id, concurrentReviewVersion, [{
+          itemId: concurrentReviewItem.rows[0].id, action: "REJECT",
+          reason: "DECISAO_CONCORRENTE_DIVERGENTE",
+        } ])),
+        withTenantTransaction(competingRuntimePool, {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: "60000000-0000-4000-8000-00000000000a",
+          correlationId: "medical-concurrent-review-a-2",
+        }, (client) => reviewMedicalOrder(client, concurrentFirstOrder.id, concurrentReviewVersion, [{
+          itemId: concurrentReviewItem.rows[0].id, action: "CONFIRM",
+          confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+        } ])),
+      ]);
+      assert.equal(concurrentReviews.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(concurrentReviews.filter((result) => result.status === "rejected").length, 1);
+      assert.match(concurrentReviews.find((result) => result.status === "rejected").reason.message,
+        /MEDICAL_ORDER_REVIEW_CONFLICT/);
+      const concurrentReviewEvidence = await target.query(`
+        SELECT medical.status, medical.version, medical.reviewed_by_user_id,
+          item.status AS item_status, item.reviewed_by_user_id AS item_reviewer,
+          (SELECT count(*)::integer FROM medical_order_review_events event
+            WHERE event.medical_order_id=medical.id) AS events
+        FROM medical_orders medical JOIN medical_order_items item
+          ON item.tenant_id=medical.tenant_id AND item.medical_order_id=medical.id
+        WHERE medical.id=$1
+      `, [concurrentFirstOrder.id]);
+      assert.equal(concurrentReviewEvidence.rows[0].status, "REVIEWED");
+      assert.equal(concurrentReviewEvidence.rows[0].version, concurrentReviewVersion + 1);
+      assert.ok(["CONFIRMED", "REJECTED"].includes(concurrentReviewEvidence.rows[0].item_status));
+      assert.equal(concurrentReviewEvidence.rows[0].reviewed_by_user_id,
+        concurrentReviewEvidence.rows[0].item_reviewer);
+      assert.equal(concurrentReviewEvidence.rows[0].events, 2);
+
+      await target.query(`
+        INSERT INTO conversations
+          (id, tenant_id, channel_connection_id, contact_id, contact_identity_id, unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001', '42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001', (SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id, tenant_id, conversation_id, unit_id, kind)
+        VALUES ('65000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006', (SELECT id FROM units WHERE code='POOL-A'), 'MEDICAL_ORDER');
+        INSERT INTO messages
+          (id, tenant_id, conversation_id, direction, actor, external_message_id, body)
+        VALUES ('66000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006', 'INBOUND', 'CUSTOMER', 'medical-runtime-a', 'Pedido médico');
+        INSERT INTO message_attachments
+          (id, tenant_id, message_id, media_type, storage_key, mime_type, sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000006', 'DOCUMENT', 'tenant-a/runtime-order.pdf',
+          'application/pdf', repeat('c',64));
+      `);
+      const receivedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-receive-a",
+        },
+        (client) => receiveMedicalOrder(client, {
+          serviceCaseId: "65000000-0000-4000-8000-000000000006",
+          messageId: "66000000-0000-4000-8000-000000000006",
+          attachmentId: "6c000000-0000-4000-8000-000000000006",
+          documentSha256: "c".repeat(64),
+          pageCount: 1,
+          idempotencyKey: "medical-runtime-a",
+        }),
+      );
+      assert.equal(receivedOrder.status, "PROCESSING");
+      const replayedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-receive-replay-a",
+        },
+        (client) => receiveMedicalOrder(client, {
+          serviceCaseId: "65000000-0000-4000-8000-000000000006",
+          messageId: "66000000-0000-4000-8000-000000000006",
+          attachmentId: "6c000000-0000-4000-8000-000000000006",
+          documentSha256: "c".repeat(64),
+          pageCount: 1,
+          idempotencyKey: "medical-runtime-a",
+        }),
+      );
+      assert.equal(replayedOrder.id, receivedOrder.id);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-receive-mismatch-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000006",
+        messageId: "66000000-0000-4000-8000-000000000006",
+        attachmentId: "6c000000-0000-4000-8000-000000000006", documentSha256: "c".repeat(64),
+        pageCount: 2, idempotencyKey: "medical-runtime-a",
+      })), /IDEMPOTENCY_KEY_REUSED/);
+      const extractedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-extraction-a",
+        },
+        (client) => applyMedicalOrderExtraction(client, {
+          medicalOrderId: receivedOrder.id,
+          expectedOrderVersion: receivedOrder.version,
+          expectedCaseVersion: 1,
+          provider: "TEST_OCR",
+          model: "test-model",
+          modelVersion: "1",
+          confidenceThreshold: 0.8,
+          confidencePolicyVersion: "medical-ocr-v1",
+          pages: [{
+            pageNumber: 1,
+            ocrText: "Hemograma completo",
+            confidence: 0.7,
+            items: [{
+              sequence: 1,
+              rawText: "Hemograma completo",
+              normalizedText: "hemograma completo",
+              suggestedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+              confidence: 0.55,
+            }],
+          }],
+          idempotencyKey: "medical-extraction-a",
+        }),
+      );
+      assert.equal(extractedOrder.status, "REVIEW_REQUIRED");
+      const extractionReplay = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-extraction-replay-a",
+      }, (client) => applyMedicalOrderExtraction(client, {
+        medicalOrderId: receivedOrder.id, expectedOrderVersion: receivedOrder.version, expectedCaseVersion: 1,
+        provider: "TEST_OCR", model: "test-model", modelVersion: "1", confidenceThreshold: 0.8,
+        confidencePolicyVersion: "medical-ocr-v1", pages: [{ pageNumber: 1,
+          ocrText: "Hemograma completo", confidence: 0.7, items: [{ sequence: 1,
+            rawText: "Hemograma completo", normalizedText: "hemograma completo",
+            suggestedCatalogItemId: "47000000-0000-4000-8000-000000000001", confidence: 0.55 }] }],
+        idempotencyKey: "medical-extraction-a",
+      }));
+      assert.equal(extractionReplay.version, extractedOrder.version);
+      const extractedItem = await target.query(
+        "SELECT id FROM medical_order_items WHERE medical_order_id=$1",
+        [receivedOrder.id],
+      );
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-false-event-a",
+      }, (client) => client.query(`INSERT INTO medical_order_review_events
+        (tenant_id,medical_order_id,medical_order_item_id,action,actor_id,correlation_id,idempotency_key)
+        VALUES (current_app_tenant_id(),$1,$2,'CONFIRMED',current_app_actor_id(),
+          current_setting('app.correlation_id'),'false-confirmation-event')`,
+      [receivedOrder.id, extractedItem.rows[0].id])), /MEDICAL_ORDER_REVIEW_EVENT_STATE_INVALID/);
+      const reviewedOrder = await withTenantTransaction(
+        runtimePool,
+        {
+          tenantId: "40000000-0000-4000-8000-000000000001",
+          actorId: actorAId,
+          correlationId: "medical-review-a",
+        },
+        (client) => reviewMedicalOrder(client, receivedOrder.id, extractedOrder.version, [{
+          itemId: extractedItem.rows[0].id,
+          action: "CONFIRM",
+          confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+        }]),
+      );
+      assert.equal(reviewedOrder.status, "REVIEWED");
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-review-duplicate-replay-a",
+      }, (client) => reviewMedicalOrder(client, receivedOrder.id, reviewedOrder.version, [{
+        itemId: extractedItem.rows[0].id, action: "CONFIRM",
+        confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+      }, {
+        itemId: extractedItem.rows[0].id, action: "CONFIRM",
+        confirmedCatalogItemId: "47000000-0000-4000-8000-000000000001",
+      }])), /MEDICAL_ORDER_REVIEW_DUPLICATE_ITEM/);
+      await target.query(`
+        INSERT INTO service_cases (id,tenant_id,conversation_id,unit_id,kind)
+        VALUES ('65000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006',(SELECT id FROM units WHERE code='POOL-A'),'MEDICAL_ORDER');
+        INSERT INTO messages (id,tenant_id,conversation_id,direction,actor,external_message_id,body)
+        VALUES ('66000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000006','INBOUND','CUSTOMER','medical-handoff-conflict-a','Outro pedido');
+        INSERT INTO message_attachments (id,tenant_id,message_id,media_type,storage_key,mime_type,sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000008','40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000008','DOCUMENT','tenant-a/conflict.pdf','application/pdf',repeat('e',64));
+      `);
+      const conflictingReceived = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-handoff-conflict-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000008",
+        messageId: "66000000-0000-4000-8000-000000000008",
+        attachmentId: "6c000000-0000-4000-8000-000000000008", documentSha256: "e".repeat(64),
+        pageCount: 1, idempotencyKey: "medical-handoff-conflict-receive-a",
+      }));
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-handoff-conflict-extract-a",
+      }, (client) => applyMedicalOrderExtraction(client, {
+        medicalOrderId: conflictingReceived.id, expectedOrderVersion: conflictingReceived.version,
+        expectedCaseVersion: 1, provider: "TEST_OCR", model: "test-model", modelVersion: "1",
+        confidenceThreshold: 0.8, confidencePolicyVersion: "medical-ocr-v1",
+        pages: [{ pageNumber: 1, ocrText: "Glicose", confidence: 0.9,
+          items: [{ sequence: 1, rawText: "Glicose", confidence: 0.9 }] }],
+        idempotencyKey: "medical-handoff-conflict-extract-a",
+      })), /HANDOFF_OPEN_FOR_ANOTHER_CASE/);
+      const medicalHandoffRollbackEvidence = await target.query(`SELECT medical.status, page.status AS page_status,
+        (SELECT count(*)::integer FROM medical_order_items item WHERE item.medical_order_id=medical.id) AS items,
+        service_case.status AS case_status FROM medical_orders medical
+        JOIN medical_order_pages page ON page.medical_order_id=medical.id
+        JOIN service_cases service_case ON service_case.id=medical.service_case_id WHERE medical.id=$1`,
+      [conflictingReceived.id]);
+      assert.deepEqual(medicalHandoffRollbackEvidence.rows[0], { status: "PROCESSING", page_status: "PENDING",
+        items: 0, case_status: "COLLECTING" });
+      const medicalEvidence = await target.query(`
+        SELECT medical.status, medical.overall_confidence, item.status AS item_status,
+          item.reviewed_by_user_id, service_case.status AS case_status,
+          conversation.automation_status,
+          (SELECT count(*)::integer FROM human_handoffs handoff
+            WHERE handoff.conversation_id=medical.conversation_id AND handoff.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+          (SELECT count(*)::integer FROM quotes quote WHERE quote.service_case_id=medical.service_case_id) AS quotes
+        FROM medical_orders medical
+        JOIN medical_order_items item ON item.tenant_id=medical.tenant_id AND item.medical_order_id=medical.id
+        JOIN service_cases service_case ON service_case.tenant_id=medical.tenant_id AND service_case.id=medical.service_case_id
+        JOIN conversations conversation ON conversation.tenant_id=medical.tenant_id AND conversation.id=medical.conversation_id
+        WHERE medical.id=$1
+      `, [receivedOrder.id]);
+      assert.deepEqual(medicalEvidence.rows[0], {
+        status: "REVIEWED", overall_confidence: "0.5500", item_status: "CONFIRMED",
+        reviewed_by_user_id: actorAId, case_status: "WAITING_HUMAN",
+        automation_status: "HUMAN_QUEUED", open_handoffs: 1, quotes: 0,
+      });
+      await assert.rejects(
+        target.query("UPDATE medical_order_items SET raw_text='ALTERED' WHERE id=$1", [extractedItem.rows[0].id]),
+        /MEDICAL_ORDER_ITEM_SOURCE_IMMUTABLE/,
+      );
+
+      await target.query(`
+        INSERT INTO conversations (id,tenant_id,channel_connection_id,contact_id,contact_identity_id,unit_id)
+        VALUES ('64000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '41000000-0000-4000-8000-000000000001','42000000-0000-4000-8000-000000000001',
+          '43000000-0000-4000-8000-000000000001',(SELECT id FROM units WHERE code='POOL-A'));
+        INSERT INTO service_cases (id,tenant_id,conversation_id,unit_id,kind)
+        VALUES ('65000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000007',(SELECT id FROM units WHERE code='POOL-A'),'MEDICAL_ORDER');
+        INSERT INTO messages (id,tenant_id,conversation_id,direction,actor,external_message_id,body)
+        VALUES ('66000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '64000000-0000-4000-8000-000000000007','INBOUND','CUSTOMER','medical-unreadable-a','Pedido ilegível');
+        INSERT INTO message_attachments (id,tenant_id,message_id,media_type,storage_key,mime_type,sha256)
+        VALUES ('6c000000-0000-4000-8000-000000000007','40000000-0000-4000-8000-000000000001',
+          '66000000-0000-4000-8000-000000000007','IMAGE','tenant-a/unreadable.jpg','image/jpeg',repeat('d',64));
+      `);
+      const unreadableReceived = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-unreadable-receive-a",
+      }, (client) => receiveMedicalOrder(client, {
+        serviceCaseId: "65000000-0000-4000-8000-000000000007",
+        messageId: "66000000-0000-4000-8000-000000000007",
+        attachmentId: "6c000000-0000-4000-8000-000000000007", documentSha256: "d".repeat(64),
+        pageCount: 1, idempotencyKey: "medical-unreadable-receive-a",
+      }));
+      const actorWithoutUnit = "60000000-0000-4000-8000-000000000009";
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name)
+        VALUES ($1,'40000000-0000-4000-8000-000000000001','no-unit@example.test','No Unit')`,
+      [actorWithoutUnit]);
+      await target.query(`INSERT INTO units (tenant_id,code,name)
+        VALUES ('40000000-0000-4000-8000-000000000001','POOL-A2','Pool A2')`);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+        SELECT '40000000-0000-4000-8000-000000000001',$1,id,'ATTENDANT'
+        FROM units WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
+      [actorWithoutUnit]);
+      const crossUnitCommercialVisibility = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
+        correlationId: "cross-unit-commercial-deny-a",
+      }, async (client) => ({
+        priceLists: Number((await client.query("SELECT count(*)::integer AS count FROM price_lists")).rows[0].count),
+        quotes: Number((await client.query("SELECT count(*)::integer AS count FROM quotes")).rows[0].count),
+        medicalOrders: Number((await client.query("SELECT count(*)::integer AS count FROM medical_orders")).rows[0].count),
+      }));
+      assert.deepEqual(crossUnitCommercialVisibility, { priceLists: 0, quotes: 0, medicalOrders: 0 });
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorWithoutUnit,
+        correlationId: "medical-unreadable-forbidden-a",
+      }, (client) => markMedicalOrderUnreadable(client, unreadableReceived.id,
+        unreadableReceived.version, 1, "FORGED_UNREADABLE")), /MEDICAL_ORDER_UNREADABLE_CONFLICT/);
+      await assert.rejects(withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-processing-evidence-forgery-a",
+      }, (client) => client.query("UPDATE medical_orders SET processing_provider='FORGED' WHERE id=$1",
+        [unreadableReceived.id])), /MEDICAL_ORDER_EXTRACTION_IMMUTABLE/);
+      const unreadable = await withTenantTransaction(runtimePool, {
+        tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
+        correlationId: "medical-unreadable-mark-a",
+      }, (client) => markMedicalOrderUnreadable(client, unreadableReceived.id, unreadableReceived.version, 1,
+        "DOCUMENT_IMAGE_UNREADABLE"));
+      assert.equal(unreadable.status, "UNREADABLE");
+      const unreadableEvidence = await target.query(`SELECT medical.status, medical.failure_code,
+        service_case.status AS case_status, conversation.automation_status,
+        (SELECT count(*)::integer FROM human_handoffs h WHERE h.conversation_id=medical.conversation_id
+          AND h.status IN ('REQUESTED','QUEUED','ACTIVE')) AS open_handoffs,
+        (SELECT count(*)::integer FROM medical_order_review_events e WHERE e.medical_order_id=medical.id
+          AND e.action='MARKED_UNREADABLE') AS events
+        FROM medical_orders medical JOIN service_cases service_case ON service_case.id=medical.service_case_id
+        JOIN conversations conversation ON conversation.id=medical.conversation_id WHERE medical.id=$1`,
+      [unreadableReceived.id]);
+      assert.deepEqual(unreadableEvidence.rows[0], { status: "UNREADABLE",
+        failure_code: "DOCUMENT_IMAGE_UNREADABLE", case_status: "WAITING_HUMAN",
+        automation_status: "HUMAN_QUEUED", open_handoffs: 1, events: 1 });
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, max_attempts) VALUES
+          ('81000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.ack', '{}', 'worker-ack', 3),
+          ('82000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.retry', '{}', 'worker-retry', 3),
+          ('83000000-0000-4000-8000-000000000003', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.dead', '{}', 'worker-dead', 1);
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key,
+           status, attempts, max_attempts, lease_token, leased_at, lease_expires_at) VALUES
+          ('86000000-0000-4000-8000-000000000006', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.sweep', '{}', 'worker-sweep',
+           'PROCESSING', 1, 1, '96000000-0000-4000-8000-000000000006', now() - interval '2 minutes', now() - interval '1 minute'),
+          ('87000000-0000-4000-8000-000000000007', '50000000-0000-4000-8000-000000000002', 'test', '54000000-0000-4000-8000-000000000002', 'worker.tenant-b', '{}', 'worker-tenant-b',
+           'PROCESSING', 1, 3, '97000000-0000-4000-8000-000000000007', now(), now() + interval '5 minutes');
+      `);
+
       const worker = await workerPool.connect();
       try {
         await worker.query("BEGIN");
@@ -506,16 +1491,214 @@ try {
           ["40000000-0000-4000-8000-000000000001", actorAId],
         );
         await worker.query("SELECT assert_app_context_authorized()");
-        const claimed = await worker.query(
-          "UPDATE outbox_events SET attempts = attempts + 1 WHERE idempotency_key = 'outbox-a' RETURNING attempts",
+        const claimed = await worker.query("SELECT * FROM claim_outbox_events(3, 60) ORDER BY id");
+        assert.equal(claimed.rowCount, 3);
+        assert.deepEqual(claimed.rows.map((row) => row.attempts), [1, 1, 1]);
+        assert.equal(new Set(claimed.rows.map((row) => row.lease_token)).size, 3);
+        const [ackEvent, retryEvent, deadEvent] = claimed.rows;
+        const wrongTenantAck = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          ["87000000-0000-4000-8000-000000000007", "97000000-0000-4000-8000-000000000007"],
         );
-        assert.equal(claimed.rows[0].attempts, 1);
+        assert.equal(wrongTenantAck.rows[0].acknowledged, false);
+        const wrongTenantFail = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'CROSS_TENANT', 30) AS status",
+          ["87000000-0000-4000-8000-000000000007", "97000000-0000-4000-8000-000000000007"],
+        );
+        assert.equal(wrongTenantFail.rows[0].status, null);
+        const acknowledged = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [ackEvent.id, ackEvent.lease_token],
+        );
+        assert.equal(acknowledged.rows[0].acknowledged, true);
+        const duplicateAck = await worker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [ackEvent.id, ackEvent.lease_token],
+        );
+        assert.equal(duplicateAck.rows[0].acknowledged, false);
+        const retryStatus = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'TEMPORARY_FAILURE', 30) AS status",
+          [retryEvent.id, retryEvent.lease_token],
+        );
+        assert.equal(retryStatus.rows[0].status, "PENDING");
+        const deadStatus = await worker.query(
+          "SELECT fail_outbox_event($1, $2, 'PERMANENT_FAILURE', 30) AS status",
+          [deadEvent.id, deadEvent.lease_token],
+        );
+        assert.equal(deadStatus.rows[0].status, "DEAD");
         await worker.query("COMMIT");
       } finally {
         worker.release();
       }
 
-      for (const forbiddenSql of ["SELECT * FROM prices", "INSERT INTO messages (tenant_id) VALUES ('40000000-0000-4000-8000-000000000001')"]) {
+      const outboxEvidence = await target.query(`
+        SELECT idempotency_key, status, attempts, lease_token, published_at IS NOT NULL AS published,
+          dead_lettered_at IS NOT NULL AS dead_lettered, available_at > now() AS backoff_scheduled
+        FROM outbox_events WHERE idempotency_key IN ('worker-ack', 'worker-retry', 'worker-dead')
+        ORDER BY idempotency_key
+      `);
+      assert.deepEqual(outboxEvidence.rows, [
+        { idempotency_key: "worker-ack", status: "PUBLISHED", attempts: 1, lease_token: null, published: true, dead_lettered: false, backoff_scheduled: false },
+        { idempotency_key: "worker-dead", status: "DEAD", attempts: 1, lease_token: null, published: false, dead_lettered: true, backoff_scheduled: false },
+        { idempotency_key: "worker-retry", status: "PENDING", attempts: 1, lease_token: null, published: false, dead_lettered: false, backoff_scheduled: true },
+      ]);
+      const deadAudit = await target.query(
+        "SELECT count(*)::integer AS count FROM audit_events WHERE action = 'OUTBOX_DEAD_LETTERED' AND entity_id = '83000000-0000-4000-8000-000000000003'",
+      );
+      assert.equal(deadAudit.rows[0].count, 1);
+      const isolationAndSweep = await target.query(`
+        SELECT idempotency_key, status, lease_token,
+          (SELECT count(*)::integer FROM audit_events audit
+            WHERE audit.action = 'OUTBOX_DEAD_LETTERED' AND audit.entity_id = event.id::text) AS audits
+        FROM outbox_events event
+        WHERE idempotency_key IN ('worker-sweep', 'worker-tenant-b')
+        ORDER BY idempotency_key
+      `);
+      assert.deepEqual(isolationAndSweep.rows, [
+        { idempotency_key: "worker-sweep", status: "DEAD", lease_token: null, audits: 1 },
+        { idempotency_key: "worker-tenant-b", status: "PROCESSING", lease_token: "97000000-0000-4000-8000-000000000007", audits: 0 },
+      ]);
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() - interval '1 second'
+        WHERE idempotency_key = 'worker-retry'
+      `);
+      const reclaimWorker = await workerPool.connect();
+      let firstLease;
+      try {
+        await reclaimWorker.query("BEGIN");
+        await reclaimWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await reclaimWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        const firstReclaim = await reclaimWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(firstReclaim.rows[0].attempts, 2);
+        firstLease = firstReclaim.rows[0].lease_token;
+        await reclaimWorker.query("COMMIT");
+      } finally {
+        reclaimWorker.release();
+      }
+      await target.query(`
+        UPDATE outbox_events SET lease_expires_at = now() - interval '1 second'
+        WHERE idempotency_key = 'worker-retry'
+      `);
+      const expiredLeaseWorker = await workerPool.connect();
+      try {
+        await expiredLeaseWorker.query("BEGIN");
+        await expiredLeaseWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await expiredLeaseWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        const reclaimed = await expiredLeaseWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(reclaimed.rows[0].attempts, 3);
+        assert.notEqual(reclaimed.rows[0].lease_token, firstLease);
+        const staleAck = await expiredLeaseWorker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [reclaimed.rows[0].id, firstLease],
+        );
+        assert.equal(staleAck.rows[0].acknowledged, false);
+        const currentAck = await expiredLeaseWorker.query(
+          "SELECT acknowledge_outbox_event($1, $2) AS acknowledged",
+          [reclaimed.rows[0].id, reclaimed.rows[0].lease_token],
+        );
+        assert.equal(currentAck.rows[0].acknowledged, true);
+        await expiredLeaseWorker.query("COMMIT");
+      } finally {
+        expiredLeaseWorker.release();
+      }
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key) VALUES
+          ('84000000-0000-4000-8000-000000000004', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.concurrent.a', '{}', 'worker-concurrent-a'),
+          ('85000000-0000-4000-8000-000000000005', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.concurrent.b', '{}', 'worker-concurrent-b');
+      `);
+      const claimOne = async (pool) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_worker");
+          await client.query(
+            `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+            ["40000000-0000-4000-8000-000000000001", actorAId],
+          );
+          const result = await client.query("SELECT * FROM claim_outbox_events(1, 60)");
+          await client.query("COMMIT");
+          return result.rows[0];
+        } finally {
+          client.release();
+        }
+      };
+      const concurrentOutboxClaims = await Promise.all([
+        claimOne(workerPool),
+        claimOne(competingWorkerPool),
+      ]);
+      assert.equal(new Set(concurrentOutboxClaims.map((event) => event.id)).size, 2);
+      assert.equal(new Set(concurrentOutboxClaims.map((event) => event.lease_token)).size, 2);
+
+      await target.query(`
+        UPDATE outbox_events SET available_at = now() + interval '1 day'
+        WHERE tenant_id = '40000000-0000-4000-8000-000000000001' AND status = 'PENDING';
+        INSERT INTO outbox_events
+          (id, tenant_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key)
+        VALUES
+          ('88000000-0000-4000-8000-000000000008', '40000000-0000-4000-8000-000000000001', 'test', '44000000-0000-4000-8000-000000000001', 'worker.locked', '{}', 'worker-locked');
+      `);
+      const lockingWorker = await workerPool.connect();
+      const skippingWorker = await competingWorkerPool.connect();
+      try {
+        for (const client of [lockingWorker, skippingWorker]) {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_worker");
+          await client.query(
+            `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+            ["40000000-0000-4000-8000-000000000001", actorAId],
+          );
+        }
+        const lockedClaim = await lockingWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(lockedClaim.rowCount, 1);
+        const skippedClaim = await skippingWorker.query("SELECT * FROM claim_outbox_events(1, 60)");
+        assert.equal(skippedClaim.rowCount, 0);
+        await lockingWorker.query("ROLLBACK");
+        await skippingWorker.query("COMMIT");
+      } finally {
+        await lockingWorker.query("ROLLBACK").catch(() => undefined);
+        await skippingWorker.query("ROLLBACK").catch(() => undefined);
+        lockingWorker.release();
+        skippingWorker.release();
+      }
+      const rollbackEvidence = await target.query(`
+        SELECT status, attempts, lease_token FROM outbox_events
+        WHERE idempotency_key = 'worker-locked'
+      `);
+      assert.deepEqual(rollbackEvidence.rows[0], { status: "PENDING", attempts: 0, lease_token: null });
+
+      const nullInputWorker = await workerPool.connect();
+      try {
+        await nullInputWorker.query("BEGIN");
+        await nullInputWorker.query("SET LOCAL ROLE zap_pronto_worker");
+        await nullInputWorker.query(
+          `SELECT set_config('app.tenant_id', $1, true), set_config('app.actor_id', $2, true)`,
+          ["40000000-0000-4000-8000-000000000001", actorAId],
+        );
+        await assert.rejects(
+          nullInputWorker.query("SELECT * FROM claim_outbox_events(NULL, 60)"),
+          (error) => error instanceof Error && "code" in error && error.code === "22023",
+        );
+      } finally {
+        await nullInputWorker.query("ROLLBACK").catch(() => undefined);
+        nullInputWorker.release();
+      }
+
+      for (const forbiddenSql of [
+        "SELECT * FROM prices",
+        "INSERT INTO messages (tenant_id) VALUES ('40000000-0000-4000-8000-000000000001')",
+        "UPDATE outbox_events SET attempts = attempts + 1 WHERE idempotency_key = 'outbox-a'",
+      ]) {
         const workerCheck = await workerPool.connect();
         try {
           await workerCheck.query("BEGIN");
@@ -534,7 +1717,9 @@ try {
       }
     } finally {
       await runtimePool.end();
+      await competingRuntimePool.end();
       await workerPool.end();
+      await competingWorkerPool.end();
     }
     process.stdout.write("database integration tests passed\n");
   } finally {
