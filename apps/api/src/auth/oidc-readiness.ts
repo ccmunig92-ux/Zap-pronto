@@ -37,7 +37,7 @@ export function loadOidcRuntimeConfig(env: Environment = process.env): OidcRunti
     throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_ORGANIZATION_CLAIM_FORMAT");
   }
   const discoveryUrl = env.OIDC_DISCOVERY_URL?.trim()
-    ?? new URL(`${issuerUrl.pathname.replace(/\/$/, "")}/.well-known/openid-configuration`, issuerUrl.origin).href;
+    || new URL(`${issuerUrl.pathname.replace(/\/$/, "")}/.well-known/openid-configuration`, issuerUrl.origin).href;
   secureUrl(discoveryUrl, "OIDC_DISCOVERY_URL");
   return { issuer, audience, jwksUrl, discoveryUrl, ...(organizationClaim ? { organizationClaim } : {}) };
 }
@@ -70,7 +70,10 @@ export async function probeOidcReadiness(config: OidcRuntimeConfig, options: Pro
     const usableKeys = (jwks as { keys: unknown[] }).keys.filter((key) => {
       if (!key || typeof key !== "object") return false;
       const value = key as Record<string, unknown>;
-      return (value.kty === "RSA" || value.kty === "EC") && value.use !== "enc"
+      const keyOperations = value.key_ops;
+      return value.kty === "RSA" && (value.alg === undefined || value.alg === "RS256")
+        && (value.use === undefined || value.use === "sig")
+        && (keyOperations === undefined || (Array.isArray(keyOperations) && keyOperations.includes("verify")))
         && typeof value.kid === "string" && value.kid.length > 0 && !("d" in value);
     });
     if (usableKeys.length === 0) throw new Error("OIDC_READINESS_FAILED:NO_SIGNING_KEYS");
