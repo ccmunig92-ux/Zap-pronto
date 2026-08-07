@@ -1,9 +1,20 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import pg from "pg";
 
-const connectionString = process.env.DATABASE_URL;
+const directDatabaseUrl = process.env.DATABASE_URL?.trim();
+const databaseUrlFile = process.env.DATABASE_URL_FILE?.trim();
+if (directDatabaseUrl && databaseUrlFile) throw new Error("DATABASE_URL_SOURCE_CONFLICT");
+let connectionString = directDatabaseUrl;
+if (databaseUrlFile) {
+  try {
+    const value = readFileSync(databaseUrlFile,"utf8");
+    if (value.length > 4096) throw new Error("too large");
+    connectionString = value.trim();
+  } catch { throw new Error("DATABASE_URL_FILE_UNREADABLE"); }
+}
 if (!connectionString) throw new Error("DATABASE_URL_REQUIRED");
 
 const migrationsDirectory = resolve("database", "migrations");

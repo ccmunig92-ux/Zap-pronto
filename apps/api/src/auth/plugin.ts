@@ -30,6 +30,8 @@ export interface AuthenticationPluginOptions {
 export const publicEndpointInventory = Object.freeze([
   "GET /health/live",
   "HEAD /health/live",
+  "GET /health/ready",
+  "HEAD /health/ready",
 ] as const);
 const publicEndpointAllowlist = new Set<string>(publicEndpointInventory);
 

@@ -1,0 +1,13 @@
+.git
+.github
+.playwright-results
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/coverage
+**/*.log
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example

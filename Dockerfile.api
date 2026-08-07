@@ -1,0 +1,31 @@
+FROM node:24.13.0-bookworm-slim@sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f AS build
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
+COPY packages/api-client/package.json ./packages/api-client/
+RUN pnpm install --frozen-lockfile
+
+COPY src ./src
+COPY apps/api/src ./apps/api/src
+COPY packages/contracts/src ./packages/contracts/src
+RUN pnpm --filter @zap-pronto/contracts build && pnpm build && pnpm --filter @zap-pronto/api build \
+  && pnpm --offline --filter @zap-pronto/api deploy --prod --legacy /runtime/api
+
+FROM node:24.13.0-bookworm-slim@sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f AS runtime
+ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=3000
+WORKDIR /app
+COPY --from=build --chown=node:node /runtime/api ./
+COPY --chown=node:node scripts/db-migrate.mjs ./scripts/db-migrate.mjs
+COPY --chown=node:node scripts/db-provision-runtime.mjs ./scripts/db-provision-runtime.mjs
+COPY --chown=node:node database/migrations ./database/migrations
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node","-e","fetch('http://127.0.0.1:'+process.env.API_PORT+'/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node","dist/server.js"]

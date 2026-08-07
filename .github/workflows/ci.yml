@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     services:
       postgres:
-        image: postgres:18
+        image: postgres:18.3-alpine@sha256:54451ecb8ab38c24c3ec123f2fd501303a3a1856a5c66e98cecf2460d5e1e9d7
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -28,11 +28,11 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 11.9.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: pnpm
@@ -40,6 +40,21 @@ jobs:
       - run: pnpm typecheck:all
       - run: pnpm test:all
       - run: pnpm build:all
+      - run: node --test deploy/web/default-conf.test.mjs scripts/db-provision-runtime.test.mjs
+      - name: Validate integrated staging manifest
+        run: docker compose --env-file deploy/staging/.env.example -f deploy/staging/compose.yaml config --quiet
+      - name: Build API staging image
+        run: docker build --file Dockerfile.api --tag zap-pronto-api:ci .
+      - name: Build web staging image
+        run: >-
+          docker build --file Dockerfile.web --tag zap-pronto-web:ci
+          --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com
+          --build-arg VITE_OIDC_CLIENT_ID=ci-public-client
+          --build-arg VITE_OIDC_REDIRECT_URI=https://staging.example.com/auth/callback
+          --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://staging.example.com/
+          .
+      - name: Exercise the integrated staging stack
+        run: sh scripts/staging-smoke.sh
       - run: pnpm db:test
         env:
           DATABASE_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
