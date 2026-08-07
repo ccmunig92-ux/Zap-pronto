@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest, FastifySchema, RouteHandlerMethod } from "fastify";
 import { withAuthenticatedTenantTransaction, withVerifiedOidcBootstrapTransaction, type TenantQueryClient,
-  type TenantTransactionPool } from "@zap-pronto/core/database/tenant-transaction";
+  type TenantTransactionPool, type VerifiedOidcPrincipal } from "@zap-pronto/core/database/tenant-transaction";
 import type { Permission } from "../authorization/permissions.js";
 import { AuthorizationDeniedError, requirePermission } from "../authorization/authorize.js";
 import { AuthenticationError } from "../auth/errors.js";
@@ -26,6 +26,7 @@ export interface ProtectedRouteInput {
     | { readonly kind: "preProvisioning" }
     | { readonly kind: "permission"; readonly permission: Permission; readonly scope: ProtectedScope };
   readonly schema?: FastifySchema;
+  readonly beforeTransaction?: (principal: VerifiedOidcPrincipal) => Promise<void>;
   readonly handler: (client: TenantQueryClient, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 }
 
@@ -34,6 +35,9 @@ export function protectedRoute(input: ProtectedRouteInput): {
   schema: FastifySchema;
   handler: RouteHandlerMethod;
 } {
+  if (input.beforeTransaction && input.authorization.kind !== "preProvisioning") {
+    throw new Error("ROUTE_PRETRANSACTION_HOOK_FORBIDDEN");
+  }
   const config = input.authorization.kind === "permission"
     ? { permission: input.authorization.permission, authenticated: true as const }
     : input.authorization.kind === "bootstrap"
@@ -54,6 +58,7 @@ export function protectedRoute(input: ProtectedRouteInput): {
           organizationValue: identity.organization.value } : {}), correlationId: request.id,
       };
       try {
+        if (input.beforeTransaction) await input.beforeTransaction(principal);
         if (authorization.kind === "preProvisioning") {
           return await withVerifiedOidcBootstrapTransaction(input.pool, principal,
             (client) => input.handler(client, request, reply));

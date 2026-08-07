@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AuthenticationRequired, createApiClient, InvalidApiResponse } from "./client.js";
+import { ApiProblem, AuthenticationRequired, createApiClient, InvalidApiResponse } from "./client.js";
 
 test("generated client sends only Bearer authentication to GET /v1/me", async () => {
   let request: Request | undefined;
@@ -109,4 +109,15 @@ test("invitation acceptance sends only bearer, idempotency key and one-time toke
   assert.equal(request?.headers.get("authorization"), "Bearer oidc-token");
   assert.equal(request?.headers.get("idempotency-key"), "accept-command-1");
   assert.deepEqual(await request?.json(), { invitationToken: "a".repeat(43) });
+});
+
+test("invitation acceptance exposes 429 Retry-After without retrying", async () => {
+  let calls = 0;
+  const client = createApiClient({ baseUrl: "https://api.example.test", getAccessToken: async () => "oidc-token",
+    fetch: async () => { calls += 1; return Response.json({ type: "urn:zap-pronto:error:rate-limit-exceeded",
+      title: "Too Many Requests", status: 429, correlationId: "correlation-123" },
+    { status: 429, headers: { "retry-after": "37" } }); } });
+  await assert.rejects(client.acceptUserInvitation("a".repeat(43), "accept-command-1"),
+    (error) => error instanceof ApiProblem && error.problem.status === 429 && error.retryAfterSeconds === 37);
+  assert.equal(calls, 1);
 });

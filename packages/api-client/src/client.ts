@@ -18,7 +18,9 @@ if (!FormatRegistry.Has("date-time")) FormatRegistry.Set("date-time", (value) =>
   && Number.isFinite(Date.parse(value)));
 
 export class ApiProblem extends Error {
-  constructor(readonly problem: ProblemDetails) { super(problem.title); this.name = "ApiProblem"; }
+  constructor(readonly problem: ProblemDetails, readonly retryAfterSeconds?: number) {
+    super(problem.title); this.name = "ApiProblem";
+  }
 }
 export class AuthenticationRequired extends Error {
   constructor() { super("Authentication is required"); this.name = "AuthenticationRequired"; }
@@ -31,10 +33,12 @@ export interface ApiClientOptions {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly fetch?: (request: Request) => Promise<Response>;
 }
-function mapFailure(error: unknown): never {
+function mapFailure(error: unknown, response: Response): never {
   if (Value.Check(ProblemDetailsSchema, error)) {
     if (error.status === 401) throw new AuthenticationRequired();
-    throw new ApiProblem(error);
+    const retryHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryHeader && /^\d+$/.test(retryHeader) ? Number(retryHeader) : undefined;
+    throw new ApiProblem(error, retryAfterSeconds && retryAfterSeconds > 0 ? retryAfterSeconds : undefined);
   }
   throw new InvalidApiResponse();
 }
@@ -47,7 +51,7 @@ export function createApiClient(options: ApiClientOptions) {
       headers: { authorization: `Bearer ${token}`, accept: "application/json" },
     });
     if (!response.ok) {
-      mapFailure(error);
+      mapFailure(error, response);
     }
     if (!Value.Check(CurrentUserSchema, data)) throw new InvalidApiResponse();
     return data;
@@ -57,7 +61,7 @@ export function createApiClient(options: ApiClientOptions) {
     const { data, error, response } = await client.GET("/v1/users/invitations/options", {
       headers: { authorization: `Bearer ${token}`, accept: "application/json" },
     });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(UserInvitationOptionsSchema, data)) throw new InvalidApiResponse();
     return data;
   }, async createUserInvitation(input: CreateUserInvitationRequest, idempotencyKey: string): Promise<CreateUserInvitationResponse> {
@@ -68,20 +72,20 @@ export function createApiClient(options: ApiClientOptions) {
       params: { header: { "idempotency-key": idempotencyKey } },
       body: input,
     });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(CreateUserInvitationResponseSchema, data)) throw new InvalidApiResponse();
     return data;
   }, async listAdministrativeUsers(input: { limit?: number; cursor?: string } = {}): Promise<AdministrativeUsersPage> {
     const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
     const { data, error, response } = await client.GET("/v1/users", { params: { query: input },
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(AdministrativeUsersPageSchema, data)) throw new InvalidApiResponse(); return data;
   }, async listAdministrativeInvitations(input: { limit?: number; cursor?: string } = {}): Promise<AdministrativeInvitationsPage> {
     const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
     const { data, error, response } = await client.GET("/v1/users/invitations", { params: { query: input },
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(AdministrativeInvitationsPageSchema, data)) throw new InvalidApiResponse(); return data;
   }, async changeAdministrativeUserStatus(userId: string, input: ChangeUserStatusRequest,
     idempotencyKey: string): Promise<ChangeUserStatusResponse> {
@@ -89,7 +93,7 @@ export function createApiClient(options: ApiClientOptions) {
     const { data, error, response } = await client.POST("/v1/users/{userId}/status", { params: {
       path: { userId }, header: { "idempotency-key": idempotencyKey } }, body: input,
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(ChangeUserStatusResponseSchema, data)) throw new InvalidApiResponse(); return data;
   }, async revokeUserInvitation(invitationId: string, input: RevokeInvitationRequest,
     idempotencyKey: string): Promise<RevokeInvitationResponse> {
@@ -97,7 +101,7 @@ export function createApiClient(options: ApiClientOptions) {
     const { data, error, response } = await client.POST("/v1/users/invitations/{invitationId}/revoke", { params: {
       path: { invitationId }, header: { "idempotency-key": idempotencyKey } }, body: input,
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(RevokeInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
   }, async reissueUserInvitation(invitationId: string, input: ReissueInvitationRequest,
     idempotencyKey: string): Promise<ReissueInvitationResponse> {
@@ -105,14 +109,14 @@ export function createApiClient(options: ApiClientOptions) {
     const { data, error, response } = await client.POST("/v1/users/invitations/{invitationId}/reissue", { params: {
       path: { invitationId }, header: { "idempotency-key": idempotencyKey } }, body: input,
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(ReissueInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
   }, async acceptUserInvitation(invitationToken: string, idempotencyKey: string): Promise<AcceptUserInvitationResponse> {
     const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
     const { data, error, response } = await client.POST("/v1/auth/invitations/accept", { params: {
       header: { "idempotency-key": idempotencyKey } }, body: { invitationToken },
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
-    if (!response.ok) mapFailure(error);
+    if (!response.ok) mapFailure(error, response);
     if (!Value.Check(AcceptUserInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
   } };
 }

@@ -3,6 +3,7 @@ import { AuthenticationError, IdentityProviderUnavailableError } from "../auth/e
 import { AuthorizationDeniedError } from "../authorization/authorize.js";
 import { AccountNotAssignedError } from "@zap-pronto/core/database/current-user";
 import { InvitationRequestError } from "../routes/user-invitations-errors.js";
+import { RateLimitExceededError } from "./rate-limit.js";
 
 export function registerProblemDetailsHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
@@ -11,6 +12,12 @@ export function registerProblemDetailsHandler(app: FastifyInstance): void {
         type: "urn:zap-pronto:error:invalid-request", title: "Bad Request", status: 400,
         detail: "The request does not match the API contract", correlationId: request.id,
       });
+      return;
+    }
+    if (error instanceof RateLimitExceededError) {
+      void reply.header("retry-after", String(error.retryAfterSeconds)).header("cache-control", "no-store").status(429)
+        .type("application/problem+json").send({ type: "urn:zap-pronto:error:rate-limit-exceeded",
+          title: "Too Many Requests", status: 429, detail: error.message, correlationId: request.id });
       return;
     }
     if (error instanceof AuthenticationError || error instanceof IdentityProviderUnavailableError

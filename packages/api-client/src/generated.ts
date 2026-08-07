@@ -1515,6 +1515,21 @@ export interface operations {
                 };
             };
             /** @description Default Response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
             500: {
                 headers: {
                     [name: string]: unknown;
