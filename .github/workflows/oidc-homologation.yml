@@ -2,12 +2,15 @@ name: OIDC external homologation
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled]
 
 permissions:
   contents: read
 
 jobs:
   homologate:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-oidc-homologation'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: oidc-homologation

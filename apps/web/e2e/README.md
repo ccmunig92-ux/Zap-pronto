@@ -30,3 +30,8 @@ habilita callback silencioso em iframe; não aponte um callback OIDC para uma p�
 
 Não habilite screenshots, trace, vídeo ou reutilização de perfil. Não imprima variáveis de ambiente e
 não copie diretórios de resultados para artefatos do CI.
+
+No GitHub, o workflow `OIDC external homologation` pode ser executado antes do merge aplicando a label
+`run-oidc-homologation` ao PR. Ele usa exclusivamente o environment protegido `oidc-homologation` e
+falha fechado se variáveis, secrets, implantação HTTPS ou contas não estiverem preparados. Após o
+workflow existir na branch padrão, `workflow_dispatch` continua disponível para novas homologações.
