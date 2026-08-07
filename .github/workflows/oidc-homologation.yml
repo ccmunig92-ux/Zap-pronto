@@ -1,0 +1,55 @@
+name: OIDC external homologation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homologate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: oidc-homologation
+    env:
+      OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+      OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
+      OIDC_DISCOVERY_URL: ${{ vars.OIDC_DISCOVERY_URL }}
+      OIDC_ORGANIZATION_CLAIM: ${{ vars.OIDC_ORGANIZATION_CLAIM }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate canonical contracts and harnesses
+        run: |
+          pnpm typecheck:all
+          pnpm test:all
+      - name: Probe external OIDC discovery and signing keys
+        run: pnpm --filter @zap-pronto/api oidc:probe
+      - name: Install isolated browser runtime
+        run: pnpm --filter @zap-pronto/web exec playwright install --with-deps chromium
+      - name: Exercise real administrator and attendant browser journeys
+        env:
+          E2E_OIDC_ENABLED: "true"
+          E2E_REQUIRE_RENEWAL: "true"
+          E2E_REQUIRE_BLOCK_REVOCATION: "true"
+          E2E_BASE_URL: ${{ vars.OIDC_E2E_WEB_URL }}
+          E2E_RENEW_WAIT_SECONDS: ${{ vars.E2E_RENEW_WAIT_SECONDS }}
+          E2E_OIDC_USERNAME_SELECTOR: ${{ vars.E2E_OIDC_USERNAME_SELECTOR }}
+          E2E_OIDC_PASSWORD_SELECTOR: ${{ vars.E2E_OIDC_PASSWORD_SELECTOR }}
+          E2E_OIDC_SUBMIT_SELECTOR: ${{ vars.E2E_OIDC_SUBMIT_SELECTOR }}
+          E2E_ADMIN_USERNAME: ${{ secrets.E2E_ADMIN_USERNAME }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          E2E_ADMIN_EXPECTED_TENANT: ${{ secrets.E2E_ADMIN_EXPECTED_TENANT }}
+          E2E_ATTENDANT_USERNAME: ${{ secrets.E2E_ATTENDANT_USERNAME }}
+          E2E_ATTENDANT_PASSWORD: ${{ secrets.E2E_ATTENDANT_PASSWORD }}
+          E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
+          E2E_ATTENDANT_ADMIN_LIST_MATCH: ${{ secrets.E2E_ATTENDANT_ADMIN_LIST_MATCH }}
+        run: pnpm --filter @zap-pronto/web test:e2e:oidc

@@ -106,6 +106,10 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Gate que bloqueia o primeiro endpoint da Fase 4: executar em navegador a jornada com um IdP OIDC
   externo homologado, usando ao menos um administrador e um atendente reais, e provar login, `/v1/me`,
   expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não substituem esse gate.
+- Pré-check operacional desse gate: preencher `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` e, quando
+  aplicável, `OIDC_ORGANIZATION_CLAIM`, e executar `pnpm --filter @zap-pronto/api oidc:probe`. O comando
+  falha fechado para configuração insegura, discovery divergente, redirect, timeout, JSON inválido ou JWKS
+  sem chave pública de assinatura. Ele não recebe tokens e não substitui as duas jornadas reais no navegador.
 
 ## Premissas
 

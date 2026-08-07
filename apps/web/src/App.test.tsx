@@ -64,4 +64,13 @@ describe("authenticated shell", () => {
     await waitFor(() => expect(screen.queryByText("Administração de acesso")).toBeNull());
     expect(screen.getByText("Clínica")).toBeTruthy();
   });
+  it("ends the local shell session through the canonical logout action", async () => {
+    render(<App client={{ async getCurrentUser() { return {
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "agent@example.test", displayName: "Agente" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Clínica" }, memberships: [], grants: [],
+    }; } }}/>);
+    fireEvent.click(await screen.findByRole("button", { name: "Sair" }));
+    expect(await screen.findByRole("button", { name: "Entrar" })).toBeTruthy();
+    expect(screen.queryByText("Agente")).toBeNull();
+  });
 });
