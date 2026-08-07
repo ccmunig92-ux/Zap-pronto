@@ -18,6 +18,7 @@ declare module "fastify" {
     permission?: Permission;
     authenticated?: boolean;
     bootstrap?: boolean;
+    preProvisioning?: boolean;
   }
 }
 
@@ -60,6 +61,9 @@ export function registerAuthenticationBoundary(
     }
     if (route.config?.bootstrap === true && route.url !== "/v1/me") {
       throw new Error(`ROUTE_BOOTSTRAP_POLICY_FORBIDDEN:${route.method}:${route.url}`);
+    }
+    if (route.config?.preProvisioning === true && route.url !== "/v1/auth/invitations/accept") {
+      throw new Error(`ROUTE_PREPROVISIONING_POLICY_FORBIDDEN:${route.method}:${route.url}`);
     }
   });
   app.addHook("onRequest", async (request) => {

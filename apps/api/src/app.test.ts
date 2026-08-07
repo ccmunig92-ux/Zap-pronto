@@ -40,6 +40,7 @@ function currentUserPool(options: { assigned?: boolean } = {}): TenantTransactio
   return { async connect() {
     return {
       async query(sql) {
+        if (sql.includes("accept_user_invitation_oidc")) return { rowCount: 1, rows: [{ replayed: false }] };
         if (sql.includes("resolve_oidc_principal")) return { rows: [{
           tenant_id: "11111111-1111-4111-8111-111111111111",
           user_id: "22222222-2222-4222-8222-222222222222",
@@ -179,6 +180,21 @@ test("GET /v1/me returns only the server-derived current user and disables cachi
       unitName: "Centro", role: "ATTENDANT" }],
     grants: [{ permission: "handoff.read", scope: "UNIT", unitId: "33333333-3333-4333-8333-333333333333" }],
   });
+  await app.close();
+});
+
+test("invitation acceptance uses verified OIDC email and never accepts tenant or actor input", async () => {
+  const app = await buildApp({ pool: currentUserPool(), identityVerifier: { async verifyBearer() {
+    return { issuer: "https://issuer.example", audience: "zap-pronto", subject: "new-subject",
+      verifiedEmail: "agent@example.test" };
+  } } });
+  const response = await app.inject({ method: "POST", url: "/v1/auth/invitations/accept?tenantId=forged",
+    headers: { authorization: "Bearer accepted", "idempotency-key": "accept-command-1" },
+    payload: { invitationToken: "a".repeat(43) } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.json().currentUser.tenant.id, "11111111-1111-4111-8111-111111111111");
+  assert.equal(response.json().replayed, false);
   await app.close();
 });
 

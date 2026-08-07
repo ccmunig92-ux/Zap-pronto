@@ -78,6 +78,15 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   direto nas tabelas protegidas. Paginação usa cursor validado e limite máximo de 100.
 - Prova local do lifecycle administrativo: migrations 0001–0014 e upgrade legado aprovados no PostgreSQL
   real; core com 22 testes, API 14, cliente 7 e frontend 14 aprovados; OpenAPI sem drift.
+- Aceite OIDC 3B concluído localmente: rota pré-provisionamento exige Bearer assinado e email verificado;
+  o body contém somente o token. Tenant, provedor, usuário, unidades e permissões são derivados no banco.
+  A migration `0015` cria conta, vínculos, identidade, aceite, comando, auditoria e outbox atomicamente.
+- Token bruto permanece apenas no estado transitório do frontend e nunca entra em URL, storage, log ou SQL;
+  concorrência produz um vencedor e replay só é permitido para o mesmo comando e principal verificado.
+- Prova local do aceite: migrations 0001–0015 e upgrade aprovados; core 25, API 15, cliente 8 e frontend
+  17 testes aprovados. Issuer/audience/org/email divergentes, convite vencido e cross-tenant falham fechados.
+- **Veto de exposição pública:** ainda não existe rate limiter distribuído no repositório. A rota de aceite
+  só pode ser liberada após rate limit no gateway/Redis (ou equivalente) com teste multi-instância.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
@@ -225,8 +234,8 @@ Critérios de aceite:
 1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
    runner remoto não produzir evidência.
 2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Implementar o aceite/provisionamento OIDC do convite, reutilizando o lifecycle transacional das
-   migrations `0012`–`0014`, sem permitir criação de sessão antes da ativação atômica.
+3. Implementar rate limiting distribuído para autenticação/aceite e concluir a matriz HTTP/PostgreSQL
+   de IDOR e revogação antes de retirar o PR do estado draft.
 4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 

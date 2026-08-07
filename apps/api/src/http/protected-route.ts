@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest, FastifySchema, RouteHandlerMethod } from "fastify";
-import { withAuthenticatedTenantTransaction, type TenantQueryClient,
+import { withAuthenticatedTenantTransaction, withVerifiedOidcBootstrapTransaction, type TenantQueryClient,
   type TenantTransactionPool } from "@zap-pronto/core/database/tenant-transaction";
 import type { Permission } from "../authorization/permissions.js";
 import { AuthorizationDeniedError, requirePermission } from "../authorization/authorize.js";
@@ -23,48 +23,50 @@ export interface ProtectedRouteInput {
   readonly pool: TenantTransactionPool;
   readonly authorization:
     | { readonly kind: "bootstrap" }
+    | { readonly kind: "preProvisioning" }
     | { readonly kind: "permission"; readonly permission: Permission; readonly scope: ProtectedScope };
   readonly schema?: FastifySchema;
   readonly handler: (client: TenantQueryClient, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 }
 
 export function protectedRoute(input: ProtectedRouteInput): {
-  config: { permission?: Permission; authenticated: true; bootstrap?: true };
+  config: { permission?: Permission; authenticated: true; bootstrap?: true; preProvisioning?: true };
   schema: FastifySchema;
   handler: RouteHandlerMethod;
 } {
   const config = input.authorization.kind === "permission"
     ? { permission: input.authorization.permission, authenticated: true as const }
-    : { authenticated: true as const, bootstrap: true as const };
+    : input.authorization.kind === "bootstrap"
+      ? { authenticated: true as const, bootstrap: true as const }
+      : { authenticated: true as const, preProvisioning: true as const };
   protectedRouteConfigurations.add(config);
   return {
     config,
     ...(input.schema ? { schema: { ...input.schema, security: [{ bearerAuth: [] }] } }
       : { schema: { security: [{ bearerAuth: [] }] } }),
     handler: async (request, reply) => {
+      const authorization = input.authorization;
       const identity = request.externalIdentity;
       if (!identity) throw AuthenticationError.rejected();
+      const principal = {
+        issuer: identity.issuer, audience: identity.audience, subject: identity.subject,
+        ...(identity.organization ? { organizationClaim: identity.organization.claim,
+          organizationValue: identity.organization.value } : {}), correlationId: request.id,
+      };
       try {
-        return await withAuthenticatedTenantTransaction(input.pool, {
-          issuer: identity.issuer,
-          audience: identity.audience,
-          subject: identity.subject,
-          ...(identity.organization ? {
-            organizationClaim: identity.organization.claim,
-            organizationValue: identity.organization.value,
-          } : {}),
-          correlationId: request.id,
-        }, async (client) => {
-          if (input.authorization.kind === "bootstrap") {
-            return input.handler(client, request, reply);
-          }
-          const unitId = input.authorization.scope.kind === "unit"
-            ? await input.authorization.scope.resolveUnitId(client, request)
+        if (authorization.kind === "preProvisioning") {
+          return await withVerifiedOidcBootstrapTransaction(input.pool, principal,
+            (client) => input.handler(client, request, reply));
+        }
+        return await withAuthenticatedTenantTransaction(input.pool, principal, async (client) => {
+          if (authorization.kind === "bootstrap") return input.handler(client, request, reply);
+          const unitId = authorization.scope.kind === "unit"
+            ? await authorization.scope.resolveUnitId(client, request)
             : undefined;
-          if (input.authorization.scope.kind === "unit" && !uuidPattern.test(unitId ?? "")) {
+          if (authorization.scope.kind === "unit" && !uuidPattern.test(unitId ?? "")) {
             throw new AuthorizationDeniedError();
           }
-          await requirePermission(client, input.authorization.permission, unitId);
+          await requirePermission(client, authorization.permission, unitId);
           return input.handler(client, request, reply);
         });
       } catch (error) {

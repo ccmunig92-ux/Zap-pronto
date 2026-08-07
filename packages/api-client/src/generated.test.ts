@@ -96,3 +96,17 @@ test("administration client uses generated lifecycle paths and explicit idempote
   assert.deepEqual(requests.slice(2).map((request) => request.headers.get("idempotency-key")),
     ["status-command-1", "revoke-command-1", "reissue-command-1"]);
 });
+
+test("invitation acceptance sends only bearer, idempotency key and one-time token", async () => {
+  let request: Request | undefined;
+  const client = createApiClient({ baseUrl: "https://api.example.test", getAccessToken: async () => "oidc-token",
+    fetch: async (input) => { request = input; return Response.json({ currentUser: {
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "user@example.test", displayName: "User" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Tenant" }, memberships: [], grants: [],
+    }, replayed: false }); } });
+  await client.acceptUserInvitation("a".repeat(43), "accept-command-1");
+  assert.equal(request?.url, "https://api.example.test/v1/auth/invitations/accept");
+  assert.equal(request?.headers.get("authorization"), "Bearer oidc-token");
+  assert.equal(request?.headers.get("idempotency-key"), "accept-command-1");
+  assert.deepEqual(await request?.json(), { invitationToken: "a".repeat(43) });
+});

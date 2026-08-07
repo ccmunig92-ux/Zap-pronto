@@ -156,3 +156,23 @@ export async function withAuthenticatedTenantTransaction<T>(
     operation,
   );
 }
+
+/**
+ * Executa o bootstrap de uma identidade OIDC ainda não provisionada. Não instala
+ * tenant nem ator: a função SQL estreita deve derivá-los da identidade verificada
+ * e do convite, dentro da mesma transação.
+ */
+export async function withVerifiedOidcBootstrapTransaction<T>(
+  pool: TenantTransactionPool,
+  principal: VerifiedOidcPrincipal,
+  operation: (client: TenantQueryClient) => Promise<T>,
+): Promise<T> {
+  assertOidcPrincipal(principal);
+  return executeTransaction(
+    pool,
+    async (client) => {
+      await client.query("SELECT set_config('app.correlation_id', $1, true)", [principal.correlationId]);
+    },
+    operation,
+  );
+}

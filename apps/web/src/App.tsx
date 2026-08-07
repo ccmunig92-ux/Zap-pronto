@@ -5,6 +5,7 @@ import { apiClient } from "./api.js";
 import { isAuthConfigured, signIn } from "./auth.js";
 import { InvitationPanel, type InvitationClient } from "./InvitationPanel.js";
 import { AdministrationPanel, type AdministrationClient } from "./AdministrationPanel.js";
+import { AcceptInvitationPanel, type AcceptanceClient } from "./AcceptInvitationPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -13,9 +14,11 @@ type SessionState =
   | { status: "error"; message: string; correlationId?: string };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
-export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient }: {
+export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
+  acceptanceClient = apiClient }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
+  readonly acceptanceClient?: AcceptanceClient;
 }) {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [loginError, setLoginError] = useState<string>();
@@ -34,11 +37,14 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   }, [client]);
 
   if (session.status === "loading") return <main><p>Carregando sessão…</p></main>;
+  const configured = isAuthConfigured();
   if (session.status === "authentication-required") return <main><h1>Zap Pronto</h1>
-    <p>{isAuthConfigured() ? "Autenticação necessária." : "OIDC não configurado neste ambiente."}</p>
-    <button type="button" disabled={!isAuthConfigured()} onClick={() => {
+    <p>{configured ? "Autenticação necessária." : "OIDC não configurado neste ambiente."}</p>
+    <button type="button" disabled={!configured} onClick={() => {
       void signIn().catch(() => setLoginError("Não foi possível iniciar a autenticação."));
-    }}>Entrar</button>{loginError && <p>{loginError}</p>}</main>;
+    }}>Entrar</button>{loginError && <p>{loginError}</p>}
+    {configured && <AcceptInvitationPanel client={acceptanceClient}
+      onAccepted={(currentUser) => setSession({ status: "ready", currentUser })}/>}</main>;
   if (session.status === "error") return <main><h1>Falha ao carregar a sessão</h1><p>{session.message}</p>
     {session.correlationId && <small>Correlação: {session.correlationId}</small>}</main>;
 

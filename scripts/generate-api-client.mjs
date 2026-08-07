@@ -22,6 +22,9 @@ if (document.paths?.["/v1/users"]?.get?.operationId !== "listAdministrativeUsers
   || document.paths?.["/v1/users/invitations/{invitationId}/reissue"]?.post?.operationId !== "reissueUserInvitation") {
   throw new Error("OPENAPI_USER_ADMINISTRATION_MISSING");
 }
+if (document.paths?.["/v1/auth/invitations/accept"]?.post?.operationId !== "acceptUserInvitation") {
+  throw new Error("OPENAPI_INVITATION_ACCEPTANCE_MISSING");
+}
 const source = `// Generated from the canonical OpenAPI document. Do not edit manually.\n${astToString(await openapiTS(document))}`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8").catch(() => "");

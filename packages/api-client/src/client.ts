@@ -1,11 +1,11 @@
 import createClient from "openapi-fetch";
 import { FormatRegistry } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import { AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusResponseSchema,
+import { AcceptUserInvitationResponseSchema, AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusResponseSchema,
   CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema, ReissueInvitationResponseSchema,
   RevokeInvitationResponseSchema,
   UserInvitationOptionsSchema, type CreateUserInvitationRequest, type CreateUserInvitationResponse,
-  type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
+  type AcceptUserInvitationResponse, type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
   type ChangeUserStatusResponse, type CurrentUser, type ProblemDetails, type ReissueInvitationRequest,
   type ReissueInvitationResponse, type RevokeInvitationRequest, type RevokeInvitationResponse,
   type UserInvitationOptions } from "@zap-pronto/contracts";
@@ -107,5 +107,12 @@ export function createApiClient(options: ApiClientOptions) {
       headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
     if (!response.ok) mapFailure(error);
     if (!Value.Check(ReissueInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
+  }, async acceptUserInvitation(invitationToken: string, idempotencyKey: string): Promise<AcceptUserInvitationResponse> {
+    const token = await options.getAccessToken(); if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.POST("/v1/auth/invitations/accept", { params: {
+      header: { "idempotency-key": idempotencyKey } }, body: { invitationToken },
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+    if (!response.ok) mapFailure(error);
+    if (!Value.Check(AcceptUserInvitationResponseSchema, data)) throw new InvalidApiResponse(); return data;
   } };
 }
