@@ -64,6 +64,12 @@ async function ensureMedicalOrderHandoff(
   input: { serviceCaseId: string; conversationId: string; expectedCaseVersion: number;
     reason: string; priority: "NORMAL" | "HIGH"; idempotencyKey: string },
 ): Promise<void> {
+  // Serializa a decisão "reutilizar ou criar" pelo caso, antes da leitura feita pela função SQL.
+  // request_handoff_command usa a mesma chave; advisory locks são reentrantes na transação corrente.
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended(current_app_tenant_id()::text || ':handoff-case:' || $1, 0))",
+    [input.serviceCaseId],
+  );
   await client.query("SELECT ensure_medical_order_handoff_command($1,$2,$3,$4,$5)",
     [input.serviceCaseId,input.expectedCaseVersion,input.reason,input.priority,input.idempotencyKey]);
 }

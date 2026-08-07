@@ -258,6 +258,12 @@ fingerprint completo, replay, locks, permissão unitária, auditoria/outbox e re
 diretos de `human_handoffs` e de `INSERT`/`UPDATE` em conversas e casos pelo papel da API. O reaproveitamento
 de handoff por pedidos médicos usa a mesma fronteira e também produz evidência transacional.
 
+O gate remoto revelou e o corte corrigiu uma corrida na decisão de reutilizar/criar handoff para duas
+extrações médicas do mesmo caso: o lock por caso agora antecede a leitura tanto no domínio quanto na função
+SQL. Duas execuções locais consecutivas comprovam duas extrações concluídas e exatamente um handoff, sem
+retry de teste. Replay de request também revalida conta, unidade e permissão atuais; bloqueio, revogação ou
+unidade inativa negam o replay sem novos efeitos. O worker perdeu o `SELECT` residual de `human_handoffs`.
+
 Escopo mínimo, sem frontend neste primeiro commit:
 
 1. `GET /v1/inbox/handoffs?unitId=<uuid>&limit=<1..100>&cursor=<opaco>` com permissão

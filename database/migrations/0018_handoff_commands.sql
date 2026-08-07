@@ -26,7 +26,8 @@ SET search_path=pg_catalog,public SET row_security=off
 AS $$
 DECLARE
   tenant_value uuid := public.current_app_tenant_id(); actor_value uuid := public.current_app_actor_id();
-  fingerprint bytea; existing public.handoff_request_commands%ROWTYPE; sc record; conv record; h record; result_value jsonb;
+  fingerprint bytea; existing public.handoff_request_commands%ROWTYPE; replay_unit_id uuid;
+  sc record; conv record; h record; result_value jsonb;
 BEGIN
   IF target_case_id IS NULL OR target_expected_version IS NULL OR target_expected_version<1
     OR target_reason IS NULL OR length(btrim(target_reason)) NOT BETWEEN 1 AND 200
@@ -41,6 +42,12 @@ BEGIN
     WHERE tenant_id=tenant_value AND idempotency_key=target_key;
   IF FOUND THEN
     IF existing.request_fingerprint<>fingerprint THEN RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED' USING ERRCODE='23505'; END IF;
+    SELECT replay_case.unit_id INTO replay_unit_id
+    FROM public.service_cases replay_case
+    WHERE replay_case.tenant_id=tenant_value AND replay_case.id=existing.service_case_id;
+    IF replay_unit_id IS NULL OR NOT public.current_actor_has_permission('handoff.claim',replay_unit_id) THEN
+      RAISE EXCEPTION 'AUTHORIZATION_DENIED' USING ERRCODE='42501';
+    END IF;
     RETURN existing.result;
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(tenant_value::text||':handoff-case:'||target_case_id,0));
@@ -110,6 +117,9 @@ CREATE FUNCTION ensure_medical_order_handoff_command(target_case_id uuid,target_
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off AS $$
 DECLARE tenant_value uuid:=public.current_app_tenant_id(); existing record; sc record;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    tenant_value::text||':handoff-case:'||target_case_id,0
+  ));
   SELECT h.id,h.service_case_id INTO existing FROM public.human_handoffs h JOIN public.service_cases s
     ON s.tenant_id=h.tenant_id AND s.conversation_id=h.conversation_id
     WHERE h.tenant_id=tenant_value AND s.id=target_case_id AND h.status IN ('REQUESTED','QUEUED','ACTIVE')
@@ -134,6 +144,7 @@ END $$;
 
 REVOKE INSERT,UPDATE ON human_handoffs,conversations,service_cases FROM zap_pronto_api;
 REVOKE SELECT ON human_handoffs FROM zap_pronto_api;
+REVOKE SELECT ON human_handoffs FROM zap_pronto_worker;
 REVOKE EXECUTE ON FUNCTION get_handoff_claim_replay(text,uuid,integer),store_handoff_claim_result(text,uuid,integer,jsonb)
   FROM zap_pronto_api;
 ALTER FUNCTION reject_hermes_during_human_takeover() SECURITY INVOKER;

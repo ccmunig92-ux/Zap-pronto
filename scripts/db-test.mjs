@@ -219,7 +219,7 @@ try {
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units", "contacts",
       "contact_identities", "conversations", "service_cases", "messages", "message_attachments",
-      "human_handoffs", "outbox_events",
+      "outbox_events",
     ]);
 
     for (const table of allProtectedTables) {
@@ -1358,14 +1358,15 @@ try {
         await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
           SELECT tenant_id,$1,id,'ATTENDANT' FROM units WHERE code='POOL-A'`, [deniedActorId]);
       }
-      const directHandoffCommand = async (actorId, sql, values, correlationId) => {
+      const directHandoffCommand = async (actorId, sql, values, correlationId,
+        tenantId = "40000000-0000-4000-8000-000000000001") => {
         const client = await runtimePool.connect();
         try {
           await client.query("BEGIN");
           await client.query("SET LOCAL ROLE zap_pronto_api");
           await client.query(`SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),
             set_config('app.correlation_id',$3,true)`,
-          ["40000000-0000-4000-8000-000000000001", actorId, correlationId]);
+          [tenantId, actorId, correlationId]);
           return await client.query(sql, values);
         } finally {
           await client.query("ROLLBACK").catch(() => undefined);
@@ -1581,6 +1582,48 @@ try {
         outbox_events: 1,
         audit_events: 1,
       });
+
+      const requestReplayAuthorizationEvidence = () => target.query(`SELECT
+        (SELECT jsonb_build_array(status::text,version,assigned_user_id) FROM human_handoffs WHERE id=$1) AS handoff,
+        (SELECT jsonb_build_array(status::text,version) FROM service_cases
+          WHERE id='55000000-0000-4000-8000-000000000002') AS service_case,
+        (SELECT jsonb_build_array(automation_status::text,version,assigned_user_id) FROM conversations
+          WHERE id='54000000-0000-4000-8000-000000000002') AS conversation,
+        (SELECT count(*)::integer FROM handoff_request_commands
+          WHERE idempotency_key='handoff-request-b') AS commands,
+        (SELECT count(*)::integer FROM audit_events
+          WHERE action='HANDOFF_REQUESTED' AND entity_id=$1::text) AS audits,
+        (SELECT count(*)::integer FROM outbox_events
+          WHERE idempotency_key='handoff.queued:'||$1::text) AS outbox,
+        (SELECT count(*)::integer FROM workflow_transitions
+          WHERE correlation_id IN ('request-handoff-b','request-handoff-b-replay')) AS transitions`,
+      [requestedHandoff.id]);
+      const authorizedReplayBaseline = (await requestReplayAuthorizationEvidence()).rows[0];
+      const replayRequestSql = "SELECT request_handoff_command($1,$2,$3,$4,$5,$6)";
+      const replayRequestValues = [concurrentHandoffRequest.serviceCaseId,
+        concurrentHandoffRequest.expectedCaseVersion, concurrentHandoffRequest.reason,
+        concurrentHandoffRequest.priority, concurrentHandoffRequest.idempotencyKey, null];
+      const tenantBId = "50000000-0000-4000-8000-000000000002";
+      await target.query("UPDATE users SET status='BLOCKED',blocked_at=now(),revoked_at=NULL WHERE id=$1", [actorBId]);
+      await assert.rejects(directHandoffCommand(actorBId,replayRequestSql,replayRequestValues,
+        "request-replay-blocked",tenantBId),
+      (error) => error instanceof Error && "code" in error && error.code === "42501");
+      await target.query("UPDATE users SET status='ACTIVE',blocked_at=NULL,revoked_at=NULL WHERE id=$1", [actorBId]);
+      await target.query("UPDATE users SET status='REVOKED',blocked_at=NULL,revoked_at=now() WHERE id=$1", [actorBId]);
+      await assert.rejects(directHandoffCommand(actorBId,replayRequestSql,replayRequestValues,
+        "request-replay-revoked",tenantBId),
+      (error) => error instanceof Error && "code" in error && error.code === "42501");
+      await target.query("UPDATE users SET status='ACTIVE',blocked_at=NULL,revoked_at=NULL WHERE id=$1", [actorBId]);
+      await target.query("UPDATE units SET active=false WHERE tenant_id=$1 AND code='POOL-B'", [tenantBId]);
+      try {
+        await assert.rejects(directHandoffCommand(actorBId,replayRequestSql,replayRequestValues,
+          "request-replay-inactive-unit",tenantBId),
+        (error) => error instanceof Error && "code" in error && error.code === "42501");
+      } finally {
+        await target.query("UPDATE units SET active=true WHERE tenant_id=$1 AND code='POOL-B'", [tenantBId]);
+      }
+      assert.deepEqual((await requestReplayAuthorizationEvidence()).rows[0], authorizedReplayBaseline,
+        "DENIED_REQUEST_REPLAY_CREATED_SIDE_EFFECTS");
 
       const readyQuote = await withTenantTransaction(
         runtimePool,
