@@ -186,3 +186,14 @@ export const ReissueInvitationResponseSchema = Type.Union([
     { additionalProperties: false })], { additionalProperties: false }),
 ], { $id: "ReissueInvitationResponse" });
 export type ReissueInvitationResponse = Static<typeof ReissueInvitationResponseSchema>;
+
+export const AcceptUserInvitationRequestSchema = Type.Object({
+  invitationToken: Type.String({ minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" }),
+}, { $id: "AcceptUserInvitationRequest", additionalProperties: false });
+export type AcceptUserInvitationRequest = Static<typeof AcceptUserInvitationRequestSchema>;
+
+export const AcceptUserInvitationResponseSchema = Type.Object({
+  currentUser: CurrentUserSchema,
+  replayed: Type.Boolean(),
+}, { $id: "AcceptUserInvitationResponse", additionalProperties: false });
+export type AcceptUserInvitationResponse = Static<typeof AcceptUserInvitationResponseSchema>;

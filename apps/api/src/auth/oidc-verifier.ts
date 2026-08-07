@@ -20,14 +20,18 @@ export function createOidcIdentityVerifier(options: OidcVerifierOptions): Identi
       if (typeof payload.sub !== "string" || payload.sub.length === 0 || typeof payload.exp !== "number") {
         throw new IdentityTokenRejectedError();
       }
+      const verifiedEmail = typeof payload.email === "string" && payload.email_verified === true
+        ? payload.email.trim().toLowerCase() : undefined;
       if (!options.organizationClaim) return {
         issuer: options.issuer, audience: options.audience, subject: payload.sub,
+        ...(verifiedEmail ? { verifiedEmail } : {}),
       };
       const organizationValue = payload[options.organizationClaim];
       if (typeof organizationValue !== "string" || organizationValue.length === 0) {
         throw new IdentityTokenRejectedError();
       }
       return { issuer: options.issuer, audience: options.audience, subject: payload.sub,
+        ...(verifiedEmail ? { verifiedEmail } : {}),
         organization: { claim: options.organizationClaim, value: organizationValue } };
     } catch (error) {
       if (error instanceof IdentityTokenRejectedError) throw error;

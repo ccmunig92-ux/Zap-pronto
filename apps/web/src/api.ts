@@ -40,4 +40,7 @@ export const apiClient = {
   reissueUserInvitation(...parameters: Parameters<typeof transportClient.reissueUserInvitation>) {
     return transportClient.reissueUserInvitation(...parameters);
   },
+  acceptUserInvitation(...parameters: Parameters<typeof transportClient.acceptUserInvitation>) {
+    return transportClient.acceptUserInvitation(...parameters);
+  },
 };

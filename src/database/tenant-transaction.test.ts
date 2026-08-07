@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
   withAuthenticatedTenantTransaction,
   withTenantTransaction,
+  withVerifiedOidcBootstrapTransaction,
   type TenantTransactionPool,
 } from "./tenant-transaction.js";
 
@@ -195,5 +196,24 @@ describe("withAuthenticatedTenantTransaction", () => {
     );
 
     assert.deepEqual(log.slice(-2), ["ROLLBACK", "RELEASE"]);
+  });
+});
+
+describe("withVerifiedOidcBootstrapTransaction", () => {
+  test("verifica o formato do principal mas não instala tenant ou ator antes do bootstrap", async () => {
+    const log: string[] = [];
+    const result = await withVerifiedOidcBootstrapTransaction(fakePool(log), {
+      issuer: "https://issuer.example", audience: "zap-pronto", subject: "new-subject",
+      correlationId: "bootstrap-request-12345678",
+    }, async (client) => {
+      await client.query("SELECT bootstrap_invitation()");
+      return "accepted";
+    });
+    assert.equal(result, "accepted");
+    assert.deepEqual(log, ["BEGIN", "SET LOCAL ROLE zap_pronto_api",
+      "SELECT set_config('app.correlation_id', $1, true)", "SELECT bootstrap_invitation()", "COMMIT", "RELEASE"]);
+    assert.equal(log.at(-1), "RELEASE");
+    assert.ok(!log.some((query) => query.includes("app.tenant_id") || query.includes("app.actor_id")
+      || query.includes("resolve_oidc_principal")));
   });
 });

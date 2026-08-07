@@ -58,6 +58,7 @@ try {
       "0012_user_lifecycle.sql",
       "0013_admin_invitations.sql",
       "0014_invitation_user_lifecycle.sql",
+      "0015_oidc_invitation_acceptance.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -657,7 +658,94 @@ try {
         id: "69000000-0000-4000-8000-000000000001", email: "cross-unit-invite@test.local",
         digest: Buffer.alloc(32, 0xe3), assignments: JSON.stringify([
           { unitId: tenantBUnit.rows[0].id, role: "ATTENDANT" },
-        ]) }), (error) => error instanceof Error && "code" in error && error.code === "P0002");
+      ]) }), (error) => error instanceof Error && "code" in error && error.code === "P0002");
+
+      const acceptanceDigest = Buffer.alloc(32, 0xe4);
+      await createInvitation({ key: "admin-invite-acceptance", fingerprint: Buffer.alloc(32, 0xd6),
+        id: "6d000000-0000-4000-8000-000000000001", email: "accepted-invite@test.local",
+        digest: acceptanceDigest });
+      const acceptInvitation = async (pool, overrides = {}) => {
+        const values = { key: "accept-invitation-security", fingerprint: Buffer.alloc(32, 0xe6),
+          digest: acceptanceDigest, userId: "6f000000-0000-4000-8000-000000000001",
+          issuer: "https://identity.test", audience: "zap-pronto", subject: "accepted-subject",
+          organizationClaim: "org_id", organizationValue: "tenant-a",
+          email: "accepted-invite@test.local", emailVerified: true,
+          correlationId: "accept-invitation-security", ...overrides };
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE zap_pronto_api");
+          const accepted = await client.query(
+            "SELECT * FROM accept_user_invitation_oidc($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            [values.key, values.fingerprint, values.digest, values.userId, values.issuer, values.audience,
+              values.subject, values.organizationClaim, values.organizationValue, values.email,
+              values.emailVerified, values.correlationId],
+          );
+          const context = await client.query(`SELECT current_app_tenant_id() AS tenant_id,
+            current_app_actor_id() AS actor_id`);
+          await client.query("COMMIT");
+          return { accepted, context: context.rows[0] };
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally { client.release(); }
+      };
+      await assert.rejects(acceptInvitation(runtimePool, { email: "wrong-email@test.local" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { organizationValue: "tenant-b" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { digest: Buffer.alloc(32, 0xbb),
+        email: "invite-b@test.local", organizationValue: "tenant-a" }),
+      (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { digest: Buffer.alloc(32, 0xf1),
+        email: "security-invite@test.local" }),
+        (error) => error instanceof Error && "code" in error && error.code === "28000");
+      await assert.rejects(acceptInvitation(runtimePool, { emailVerified: false }),
+        (error) => error instanceof Error && "code" in error && error.code === "22023");
+      const acceptedInvitation = await acceptInvitation(runtimePool);
+      assert.deepEqual(acceptedInvitation.accepted.rows.map((row) => ({
+        tenant_id: row.tenant_id, user_id: row.user_id, invitation_id: row.invitation_id,
+        replayed: row.replayed,
+      })), [{ tenant_id: "40000000-0000-4000-8000-000000000001",
+        user_id: "6f000000-0000-4000-8000-000000000001",
+        invitation_id: "6d000000-0000-4000-8000-000000000001", replayed: false }]);
+      assert.deepEqual(acceptedInvitation.context, {
+        tenant_id: "40000000-0000-4000-8000-000000000001",
+        actor_id: "6f000000-0000-4000-8000-000000000001",
+      });
+      const acceptedReplay = await acceptInvitation(runtimePool, {
+        userId: "6f000000-0000-4000-8000-000000000099",
+      });
+      assert.equal(acceptedReplay.accepted.rows[0].user_id, "6f000000-0000-4000-8000-000000000001");
+      assert.equal(acceptedReplay.accepted.rows[0].replayed, true);
+      await assert.rejects(acceptInvitation(runtimePool, { key: "accept-invitation-other-key",
+        fingerprint: Buffer.alloc(32, 0xe7) }),
+      (error) => error instanceof Error && "code" in error && error.code === "28000");
+
+      const concurrentAcceptanceDigest = Buffer.alloc(32, 0xe5);
+      await createInvitation({ key: "admin-invite-accept-concurrent", fingerprint: Buffer.alloc(32, 0xd7),
+        id: "6e000000-0000-4000-8000-000000000001", email: "accepted-concurrent@test.local",
+        digest: concurrentAcceptanceDigest });
+      const concurrentAcceptances = await Promise.allSettled([
+        acceptInvitation(runtimePool, { key: "accept-concurrent-first", fingerprint: Buffer.alloc(32, 0xe8),
+          digest: concurrentAcceptanceDigest, userId: "6f000000-0000-4000-8000-000000000002",
+          subject: "accepted-concurrent-first", email: "accepted-concurrent@test.local" }),
+        acceptInvitation(competingRuntimePool, { key: "accept-concurrent-second", fingerprint: Buffer.alloc(32, 0xe9),
+          digest: concurrentAcceptanceDigest, userId: "6f000000-0000-4000-8000-000000000003",
+          subject: "accepted-concurrent-second", email: "accepted-concurrent@test.local" }),
+      ]);
+      assert.equal(concurrentAcceptances.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(concurrentAcceptances.filter((result) => result.status === "rejected").length, 1);
+      const acceptanceEvidence = await target.query(`SELECT
+        (SELECT count(*)::integer FROM users WHERE email_normalized='accepted-concurrent@test.local') AS concurrent_users,
+        (SELECT count(*)::integer FROM user_oidc_identities WHERE subject LIKE 'accepted-concurrent-%') AS concurrent_identities,
+        (SELECT count(*)::integer FROM audit_events WHERE action='USER_INVITATION_ACCEPTED'
+          AND entity_id IN ('6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')) AS audits,
+        (SELECT count(*)::integer FROM outbox_events WHERE event_type='user.invitation.accepted'
+          AND aggregate_id IN ('6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')) AS outbox`);
+      assert.deepEqual(acceptanceEvidence.rows[0], {
+        concurrent_users: 1, concurrent_identities: 1, audits: 2, outbox: 2,
+      });
       const invitationEvidence = await target.query(`SELECT
         (SELECT status::text FROM user_invitations WHERE id='67000000-0000-4000-8000-000000000001') AS old_status,
         (SELECT count(*)::integer FROM user_invitations WHERE id='66000000-0000-4000-8000-000000000001') AS invitations,
@@ -729,14 +817,25 @@ try {
       });
       await target.query(`DELETE FROM audit_events WHERE entity_id IN
         ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
-         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001')`);
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
       await target.query(`DELETE FROM outbox_events WHERE aggregate_id IN
         ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
-         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001')`);
-      await target.query("DELETE FROM user_lifecycle_commands WHERE idempotency_key LIKE 'admin-%security%'");
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
+      await target.query(`DELETE FROM user_lifecycle_commands WHERE idempotency_key LIKE 'admin-%security%'
+        OR idempotency_key LIKE 'admin-invite-accept%' OR idempotency_key LIKE 'accept-%'`);
       await target.query(`DELETE FROM user_invitations WHERE id IN
         ('66000000-0000-4000-8000-000000000001','67000000-0000-4000-8000-000000000001',
-         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001')`);
+         '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
+         '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
+      await target.query("DELETE FROM user_oidc_identities WHERE subject LIKE 'accepted-%'");
+      await target.query(`DELETE FROM user_units WHERE user_id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
+      await target.query(`DELETE FROM users WHERE id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
 
       const changeStatus = (status, version, reason, overrides = {}) => withTenantTransaction(runtimePool, {
         tenantId: "40000000-0000-4000-8000-000000000001", actorId: actorAId,
@@ -796,6 +895,9 @@ try {
         has_function_privilege('zap_pronto_api','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS api_reissue_invite_execute,
         has_function_privilege('zap_pronto_worker','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS worker_reissue_invite_execute,
         has_function_privilege('zap_pronto_app','admin_reissue_user_invitation(text,bytea,uuid,uuid,timestamptz,bytea,text)','EXECUTE') AS app_reissue_invite_execute,
+        has_function_privilege('zap_pronto_api','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS api_accept_invite_execute,
+        has_function_privilege('zap_pronto_worker','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS worker_accept_invite_execute,
+        has_function_privilege('zap_pronto_app','accept_user_invitation_oidc(text,bytea,bytea,uuid,text,text,text,text,text,text,boolean,text)','EXECUTE') AS app_accept_invite_execute,
         has_function_privilege('zap_pronto_api','admin_list_user_invitations(uuid,integer)','EXECUTE') AS api_list_invite_execute,
         has_function_privilege('zap_pronto_worker','admin_list_user_invitations(uuid,integer)','EXECUTE') AS worker_list_invite_execute,
         has_function_privilege('zap_pronto_app','admin_list_user_invitations(uuid,integer)','EXECUTE') AS app_list_invite_execute,
@@ -808,6 +910,7 @@ try {
         api_invite_execute: true, worker_invite_execute: false, app_invite_execute: false,
         api_revoke_invite_execute: true, worker_revoke_invite_execute: false, app_revoke_invite_execute: false,
         api_reissue_invite_execute: true, worker_reissue_invite_execute: false, app_reissue_invite_execute: false,
+        api_accept_invite_execute: true, worker_accept_invite_execute: false, app_accept_invite_execute: false,
         api_list_invite_execute: true, worker_list_invite_execute: false, app_list_invite_execute: false,
         api_select_invitations: false,
         api_insert_user: false, api_update_user: false, api_update_membership: false,

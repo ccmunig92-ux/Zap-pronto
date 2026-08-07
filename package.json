@@ -36,6 +36,7 @@
     ,"./database/current-user": { "types": "./src/database/current-user.ts", "default": "./dist/database/current-user.js" }
       ,"./domain/user-invitations": { "types": "./src/domain/user-invitations.ts", "default": "./dist/domain/user-invitations.js" }
       ,"./domain/user-administration": { "types": "./src/domain/user-administration.ts", "default": "./dist/domain/user-administration.js" }
+      ,"./domain/user-invitation-acceptance": { "types": "./src/domain/user-invitation-acceptance.ts", "default": "./dist/domain/user-invitation-acceptance.js" }
   },
   "types": "./src/index.ts"
 }

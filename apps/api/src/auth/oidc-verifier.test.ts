@@ -19,9 +19,11 @@ test("OIDC verifier validates signature, issuer, audience, subject and organizat
     const issuer = "https://identity.example.test";
     const verifier = createOidcIdentityVerifier({ issuer, audience: "zap-pronto",
       jwksUrl: `http://127.0.0.1:${address.port}/jwks`, organizationClaim: "org_id" });
-    const token = await new SignJWT({ org_id: "tenant-a" }).setProtectedHeader({ alg: "RS256", kid: "test-key" })
+    const token = await new SignJWT({ org_id: "tenant-a", email: "Person@Example.Test", email_verified: true })
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
       .setIssuer(issuer).setAudience("zap-pronto").setSubject("subject-1").setExpirationTime("5m").sign(privateKey);
     assert.deepEqual(await verifier.verifyBearer(token), { issuer, audience: "zap-pronto", subject: "subject-1",
+      verifiedEmail: "person@example.test",
       organization: { claim: "org_id", value: "tenant-a" } });
     const wrongAudience = await new SignJWT({ org_id: "tenant-a" })
       .setProtectedHeader({ alg: "RS256", kid: "test-key" }).setIssuer(issuer).setAudience("other")
