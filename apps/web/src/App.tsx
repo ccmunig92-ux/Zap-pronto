@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CurrentUser } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import { apiClient } from "./api.js";
-import { clearAuthSession, isAuthConfigured, signIn } from "./auth.js";
+import { clearAuthSession, isAuthConfigured, signIn, signOut } from "./auth.js";
 import { InvitationPanel, type InvitationClient } from "./InvitationPanel.js";
 import { AdministrationPanel, type AdministrationClient } from "./AdministrationPanel.js";
 import { AcceptInvitationPanel, type AcceptanceClient } from "./AcceptInvitationPanel.js";
@@ -22,6 +22,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
 }) {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [loginError, setLoginError] = useState<string>();
+  const [logoutError, setLogoutError] = useState<string>();
   function invalidateAuthentication(): void {
     setSession({ status: "authentication-required" });
     void clearAuthSession();
@@ -62,7 +63,13 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const { currentUser } = session;
   return <main>
     <header><div><span>Zap Pronto</span><h1>{currentUser.tenant.name}</h1></div>
-      <p>{currentUser.user.displayName}<br/><small>{currentUser.user.email}</small></p></header>
+      <div><p>{currentUser.user.displayName}<br/><small>{currentUser.user.email}</small></p>
+        <button type="button" onClick={() => { setLogoutError(undefined); void signOut()
+          .then(() => setSession({ status: "authentication-required" }))
+          .catch(() => { setSession({ status: "authentication-required" });
+            setLogoutError("Sessão local encerrada; não foi possível concluir o logout no provedor."); });
+        }}>Sair</button></div></header>
+    {logoutError && <p role="alert">{logoutError}</p>}
     <section><h2>Unidades vinculadas</h2><ul>{currentUser.memberships.map((membership) =>
       <li key={membership.unitId}><strong>{membership.unitName}</strong> <span>{membership.role}</span></li>)}</ul></section>
     {currentUser.grants.some((grant) => grant.permission === "tenant.users.manage" && grant.scope === "TENANT")
