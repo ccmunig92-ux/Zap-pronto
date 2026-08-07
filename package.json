@@ -14,7 +14,7 @@
     "db:test": "pnpm build:all && node scripts/db-test.mjs",
     "db:test:upgrade": "node scripts/db-upgrade-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test dist",
+    "test": "pnpm build && node scripts/run-built-tests.mjs dist",
     "test:all": "pnpm build:all && pnpm test && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/api-client --filter @zap-pronto/web test",
     "typecheck:all": "pnpm typecheck && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/api-client --filter @zap-pronto/web typecheck",
     "api:generate": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^20.17.0",
     "@types/pg": "^8.20.4",
+    "jose": "6.1.0",
     "openapi-typescript": "^7.10.1",
     "typescript": "^5.9.0"
   },

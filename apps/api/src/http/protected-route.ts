@@ -31,7 +31,8 @@ export interface ProtectedRouteInput {
 }
 
 export function protectedRoute(input: ProtectedRouteInput): {
-  config: { permission?: Permission; authenticated: true; bootstrap?: true; preProvisioning?: true };
+  config: { permission?: Permission; authenticated: true; bootstrap?: true; preProvisioning?: true;
+    authorizationScope?: "tenant" | "unit" };
   schema: FastifySchema;
   handler: RouteHandlerMethod;
 } {
@@ -39,7 +40,8 @@ export function protectedRoute(input: ProtectedRouteInput): {
     throw new Error("ROUTE_PRETRANSACTION_HOOK_FORBIDDEN");
   }
   const config = input.authorization.kind === "permission"
-    ? { permission: input.authorization.permission, authenticated: true as const }
+    ? { permission: input.authorization.permission, authenticated: true as const,
+      authorizationScope: input.authorization.scope.kind }
     : input.authorization.kind === "bootstrap"
       ? { authenticated: true as const, bootstrap: true as const }
       : { authenticated: true as const, preProvisioning: true as const };

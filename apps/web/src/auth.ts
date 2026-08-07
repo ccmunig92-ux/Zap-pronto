@@ -20,3 +20,6 @@ export async function signIn(): Promise<void> {
   if (!manager) throw new Error("OIDC_CONFIGURATION_REQUIRED");
   await manager.signinRedirect();
 }
+export async function clearAuthSession(): Promise<void> {
+  await manager?.removeUser();
+}

@@ -12,8 +12,9 @@ function retryDelay(seconds: number): string {
   return `${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
 }
 
-export function AcceptInvitationPanel({ client, onAccepted }: {
+export function AcceptInvitationPanel({ client, onAccepted, onAuthenticationRequired = () => undefined }: {
   readonly client: AcceptanceClient; readonly onAccepted: (currentUser: CurrentUser) => void;
+  readonly onAuthenticationRequired?: () => void;
 }) {
   const [token, setToken] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState<string>();
@@ -33,6 +34,7 @@ export function AcceptInvitationPanel({ client, onAccepted }: {
       setToken(""); setIdempotencyKey(undefined); onAccepted(response.currentUser);
     } catch (cause) {
       if (cause instanceof AuthenticationRequired) {
+        onAuthenticationRequired();
         setError({ message: "Entre com sua conta OIDC antes de aceitar o convite." });
       } else if (cause instanceof ApiProblem) {
         if (cause.problem.status === 429) {

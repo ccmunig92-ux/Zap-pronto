@@ -18,7 +18,7 @@ export class InvitationRequestError extends Error {
     const message = error instanceof Error ? error.message : "";
     const code = [...badRequest, ...conflict, ...notFound, ...forbidden].find((candidate) => message.includes(candidate));
     if (!code) return error;
-    return new InvitationRequestError(code, badRequest.has(code) ? 400
+    return new InvitationRequestError(notFound.has(code) ? "RESOURCE_NOT_FOUND" : code, badRequest.has(code) ? 400
       : forbidden.has(code) ? 403 : notFound.has(code) ? 404 : 409);
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ApiProblem } from "@zap-pronto/api-client";
+import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type {
   CreateUserInvitationRequest,
   CreateUserInvitationResponse,
@@ -23,7 +23,9 @@ function defaultExpiry(): string {
   return date.toISOString().slice(0, 16);
 }
 
-export function InvitationPanel({ client }: { readonly client: InvitationClient }) {
+export function InvitationPanel({ client, onAuthenticationRequired = () => undefined,
+  onAuthorizationChanged = () => undefined }: { readonly client: InvitationClient;
+  readonly onAuthenticationRequired?: () => void; readonly onAuthorizationChanged?: () => void }) {
   const [options, setOptions] = useState<UserInvitationOptions>();
   const [loadError, setLoadError] = useState<string>();
   const [email, setEmail] = useState("");
@@ -44,7 +46,11 @@ export function InvitationPanel({ client }: { readonly client: InvitationClient 
       if (!active) return;
       setOptions(value);
       setProviderCode(value.providers[0]?.code ?? "");
-    }).catch(() => { if (active) setLoadError("Não foi possível carregar as opções de convite."); });
+    }).catch((cause: unknown) => { if (!active) return;
+      if (cause instanceof AuthenticationRequired) onAuthenticationRequired();
+      else if (cause instanceof ApiProblem && cause.problem.status === 403) onAuthorizationChanged();
+      else setLoadError("Não foi possível carregar as opções de convite.");
+    });
     return () => { active = false; };
   }, [client]);
 
@@ -83,7 +89,11 @@ export function InvitationPanel({ client }: { readonly client: InvitationClient 
       }, key);
       setResult(response);
     } catch (error) {
-      if (error instanceof ApiProblem) {
+      if (error instanceof AuthenticationRequired) {
+        onAuthenticationRequired();
+      } else if (error instanceof ApiProblem && error.problem.status === 403) {
+        onAuthorizationChanged();
+      } else if (error instanceof ApiProblem) {
         setSubmitError({ message: error.problem.title, correlationId: error.problem.correlationId });
       } else {
         setSubmitError({ message: "Não foi possível criar o convite." });

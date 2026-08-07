@@ -90,6 +90,14 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   15 minutos e máximo de 10 tentativas. A 11ª retorna 429 e `Retry-After`, sem retry automático na UI.
 - Prova do limiter: duas conexões concorrentes produziram dez permissões e duas recusas; o consumo
   permanece após rollback posterior, tabela não tem grants diretos e cleanup é limitado com `SKIP LOCKED`.
+- Matriz final local de RBAC/IDOR concluída: JWT RS256 assinado, JWKS HTTP, API e PostgreSQL reais
+  exercitam dois tenants, duas unidades e os cinco papéis. IDOR cross-tenant retorna 404 genérico,
+  versão obsoleta retorna 409 e contas bloqueadas/revogadas perdem acesso na requisição seguinte.
+- O frontend desmonta imediatamente estado administrativo e token transitório após 401; após 403,
+  consulta `/v1/me` novamente e deixa os grants atuais decidirem a remontagem. O cache de sessão não
+  reutiliza grants antigos depois da conclusão da requisição pendente.
+- O executor de testes compilados agora enumera `*.test.js` deterministicamente. Isso corrige a falha
+  Linux/Node 24 em que `node --test dist` não encontrava a API e reportava falso positivo no cliente.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
 - Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
@@ -234,12 +242,9 @@ Critérios de aceite:
 
 ## Sequência imediata
 
-1. Desbloquear a execução dos jobs já despachados no GitHub Actions e manter os PRs draft enquanto o
-   runner remoto não produzir evidência.
-2. Completar a matriz HTTP/PostgreSQL de IDOR e revogação para dois tenants, usuários e unidades.
-3. Concluir a matriz HTTP/PostgreSQL de IDOR e revogação e executar jornada E2E autenticada antes de
-   retirar o PR do estado draft.
-4. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
+1. Confirmar no GitHub Actions o executor determinístico e manter o PR draft até todos os jobs verdes.
+2. Executar jornada de navegador com um IdP OIDC externo homologado e contas reais de dois papéis.
+3. Expor o primeiro fluxo vertical da inbox somente depois desses gates, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

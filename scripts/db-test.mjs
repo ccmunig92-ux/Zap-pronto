@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { withTenantTransaction } from "../dist/database/tenant-transaction.js";
 import { claimHandoff, requestHandoff } from "../dist/domain/handoffs.js";
 import { acceptQuote, approveQuoteReview, cancelQuote, createReadyQuote, expireQuote, publishPriceListVersion, sendQuote } from "../dist/domain/quotes.js";
 import { applyMedicalOrderExtraction, markMedicalOrderUnreadable, receiveMedicalOrder, reviewMedicalOrder } from "../dist/domain/medical-orders.js";
 import { listAdministrativeInvitations, listAdministrativeUsers } from "../dist/domain/user-administration.js";
 import { buildApp } from "../apps/api/dist/app.js";
+import { createOidcIdentityVerifier } from "../apps/api/dist/auth/oidc-verifier.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -2163,6 +2166,16 @@ try {
         pool_a_claim: true, pool_a2_claim: true, tenant_users_manage: true,
         unknown_permission: false, cross_tenant_unit: false,
       });
+      for (const [roleCode, canClaim] of [
+        ["UNIT_MANAGER", true], ["SUPERVISOR", true], ["ATTENDANT", true], ["AUDITOR", false],
+      ]) {
+        await target.query("UPDATE user_units SET role=$1 WHERE user_id=$2", [roleCode, actorWithoutUnit]);
+        assert.deepEqual(await permissionMatrix(actorWithoutUnit), {
+          pool_a_claim: false, pool_a2_claim: canClaim, tenant_users_manage: false,
+          unknown_permission: false, cross_tenant_unit: false,
+        }, `RBAC_MATRIX_${roleCode}`);
+      }
+      await target.query("UPDATE user_units SET role='ATTENDANT' WHERE user_id=$1", [actorWithoutUnit]);
       await target.query(`UPDATE units SET active=false
         WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`);
       assert.deepEqual(await permissionMatrix(tenantAdminId), {
@@ -2443,6 +2456,115 @@ try {
       } finally {
         await nullInputWorker.query("ROLLBACK").catch(() => undefined);
         nullInputWorker.release();
+      }
+
+      const httpLifecycleTargetId = "6a000000-0000-4000-8000-000000000010";
+      const httpBlockedUserId = "6a000000-0000-4000-8000-000000000011";
+      await target.query("UPDATE user_units SET role='TENANT_ADMIN' WHERE user_id=$1", [actorBId]);
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name) VALUES
+          ($1,'40000000-0000-4000-8000-000000000001','http-target@test.local','HTTP Target')`,
+      [httpLifecycleTargetId]);
+      await target.query(`INSERT INTO users (id,tenant_id,email,display_name,status,blocked_at) VALUES
+          ($1,'40000000-0000-4000-8000-000000000001','http-blocked@test.local','HTTP Blocked','BLOCKED',now())`,
+      [httpBlockedUserId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+          SELECT tenant_id,$1,id,'ATTENDANT' FROM units
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+      [httpLifecycleTargetId]);
+      await target.query(`INSERT INTO user_units (tenant_id,user_id,unit_id,role)
+          SELECT tenant_id,$1,id,'AUDITOR' FROM units
+          WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A2'`,
+      [httpBlockedUserId]);
+      await target.query(`INSERT INTO user_oidc_identities (tenant_id,user_id,oidc_provider_id,subject) VALUES
+          ('40000000-0000-4000-8000-000000000001',$1,'61000000-0000-4000-8000-000000000001','http-target-subject'),
+          ('40000000-0000-4000-8000-000000000001',$2,'61000000-0000-4000-8000-000000000001','http-blocked-subject'),
+          ('40000000-0000-4000-8000-000000000001',$3,'61000000-0000-4000-8000-000000000001','http-admin-subject')
+      `, [httpLifecycleTargetId, httpBlockedUserId, tenantAdminId]);
+
+      const { privateKey: httpPrivateKey, publicKey: httpPublicKey } = await generateKeyPair("RS256");
+      const httpPublicJwk = await exportJWK(httpPublicKey);
+      const jwksServer = createServer((_request, response) => {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ keys: [{ ...httpPublicJwk, kid: "db-http-key", use: "sig", alg: "RS256" }] }));
+      });
+      await new Promise((resolve) => jwksServer.listen(0, "127.0.0.1", resolve));
+      try {
+        const jwksAddress = jwksServer.address();
+        assert.ok(jwksAddress && typeof jwksAddress === "object");
+        const signedToken = (subject, organization, email) => new SignJWT({
+          org_id: organization, email, email_verified: true,
+        }).setProtectedHeader({ alg: "RS256", kid: "db-http-key" })
+          .setIssuer("https://identity.test").setAudience("zap-pronto").setSubject(subject)
+          .setExpirationTime("5m").sign(httpPrivateKey);
+        const [adminToken, tenantBToken, targetToken, blockedToken] = await Promise.all([
+          signedToken("http-admin-subject", "tenant-a", "tenant-admin-a@test.local"),
+          signedToken("shared-subject", "tenant-b", "actor-b@test.local"),
+          signedToken("http-target-subject", "tenant-a", "http-target@test.local"),
+          signedToken("http-blocked-subject", "tenant-a", "http-blocked@test.local"),
+        ]);
+        const signedHttpApp = await buildApp({ pool: runtimePool, identityVerifier: createOidcIdentityVerifier({
+          issuer: "https://identity.test", audience: "zap-pronto",
+          jwksUrl: `http://127.0.0.1:${jwksAddress.port}/jwks`, organizationClaim: "org_id",
+        }) });
+        try {
+          const auth = (token) => ({ authorization: `Bearer ${token}` });
+          const adminList = await signedHttpApp.inject({ method: "GET", url: "/v1/users", headers: auth(adminToken) });
+          assert.equal(adminList.statusCode, 200);
+          assert.ok(adminList.json().items.every((item) => item.id !== actorBId), "HTTP_CROSS_TENANT_LIST_LEAK");
+          const injectedUnitScope = await signedHttpApp.inject({ method: "GET", url: "/v1/users?unitId="
+            + crossTenantUnitId, headers: auth(adminToken) });
+          assert.equal(injectedUnitScope.statusCode, 200);
+          assert.ok(injectedUnitScope.json().items.every((item) => item.id !== actorBId),
+            "HTTP_CLIENT_SCOPE_INJECTION_LEAK");
+          const tenantBAdminAttempt = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(tenantBToken),
+              "idempotency-key": "http-cross-tenant-status" },
+            payload: { action: "BLOCK", expectedVersion: 1, reason: "Cross tenant attempt" } });
+          assert.equal(tenantBAdminAttempt.statusCode, 404);
+          const staleStatus = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(adminToken),
+              "idempotency-key": "http-stale-version" },
+            payload: { action: "BLOCK", expectedVersion: 99, reason: "Stale version attempt" } });
+          assert.equal(staleStatus.statusCode, 409);
+          const revokedStatus = await signedHttpApp.inject({ method: "POST",
+            url: `/v1/users/${httpLifecycleTargetId}/status`, headers: { ...auth(adminToken),
+              "idempotency-key": "http-revoke-target" },
+            payload: { action: "REVOKE", expectedVersion: 1, reason: "Security revocation" } });
+          assert.equal(revokedStatus.statusCode, 200);
+          const revokedMe = await signedHttpApp.inject({ method: "GET", url: "/v1/me", headers: auth(targetToken) });
+          assert.equal(revokedMe.statusCode, 401);
+          const blockedMe = await signedHttpApp.inject({ method: "GET", url: "/v1/me", headers: auth(blockedToken) });
+          assert.equal(blockedMe.statusCode, 401);
+          const revocationEvidence = await target.query(`SELECT account.status,identity.status AS identity_status
+            FROM users account JOIN user_oidc_identities identity
+              ON identity.tenant_id=account.tenant_id AND identity.user_id=account.id WHERE account.id=$1`,
+          [httpLifecycleTargetId]);
+          assert.deepEqual(revocationEvidence.rows[0], { status: "REVOKED", identity_status: "REVOKED" });
+
+          const preProvisioningToken = "r".repeat(43);
+          const preProvisioningDigest = createHash("sha256").update(preProvisioningToken).digest();
+          const preProvisioningInvitationId = "6a000000-0000-4000-8000-000000000012";
+          await target.query(`INSERT INTO user_invitations
+            (id,tenant_id,oidc_provider_id,email_normalized,display_name,token_digest,expires_at,created_by_user_id)
+            VALUES ($1,'40000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001',
+              'http-target@test.local','No resurrection',$2,now()+interval '1 hour',$3)`,
+          [preProvisioningInvitationId, preProvisioningDigest, tenantAdminId]);
+          await target.query(`INSERT INTO user_invitation_units (tenant_id,invitation_id,unit_id,role)
+            SELECT tenant_id,$1,id,'ATTENDANT' FROM units
+            WHERE tenant_id='40000000-0000-4000-8000-000000000001' AND code='POOL-A'`,
+          [preProvisioningInvitationId]);
+          const revokedPreProvisioning = await signedHttpApp.inject({ method: "POST",
+            url: "/v1/auth/invitations/accept", headers: { ...auth(targetToken),
+              "idempotency-key": "http-revoked-preprovision" },
+            payload: { invitationToken: preProvisioningToken } });
+          assert.equal(revokedPreProvisioning.statusCode, 403);
+          const noResurrection = await target.query("SELECT status FROM users WHERE id=$1", [httpLifecycleTargetId]);
+          assert.equal(noResurrection.rows[0].status, "REVOKED");
+        } finally {
+          await signedHttpApp.close();
+        }
+      } finally {
+        await new Promise((resolve, reject) => jwksServer.close((error) => error ? reject(error) : resolve()));
       }
 
       for (const forbiddenSql of [

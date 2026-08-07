@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type { AdministrativeInvitation, AdministrativeUser } from "@zap-pronto/contracts";
 import { AdministrationPanel, type AdministrationClient } from "./AdministrationPanel.js";
 
@@ -86,5 +87,30 @@ describe("administrative lifecycle", () => {
     expect(await screen.findByText("Segundo")).toBeTruthy();
     expect(list).toHaveBeenLastCalledWith({ limit: 25, cursor: "opaque-cursor" });
     expect(screen.queryByRole("button", { name: "Carregar mais usuários" })).toBeNull();
+  });
+
+  it("notifies the shell when the account is blocked or revoked during the session", async () => {
+    const onAuthenticationRequired = vi.fn();
+    render(<AdministrationPanel client={client({
+      async listAdministrativeUsers() { throw new AuthenticationRequired(); },
+    })} onAuthenticationRequired={onAuthenticationRequired}/>);
+    await vi.waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Agente")).toBeNull();
+  });
+
+  it("refreshes grants after a 403 instead of retaining an administrative error state", async () => {
+    const onAuthorizationChanged = vi.fn();
+    const change = vi.fn<AdministrationClient["changeAdministrativeUserStatus"]>(async () => {
+      throw new ApiProblem({ type: "urn:test:forbidden", title: "Forbidden", status: 403,
+        correlationId: "correlation-403" });
+    });
+    render(<AdministrationPanel client={client({ changeAdministrativeUserStatus: change })}
+      onAuthorizationChanged={onAuthorizationChanged}/>);
+    await screen.findByText("Agente");
+    fireEvent.click(screen.getByRole("button", { name: "Bloquear" }));
+    fireEvent.change(screen.getByLabelText("Motivo"), { target: { value: "Permissão alterada" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar bloquear" }));
+    await vi.waitFor(() => expect(onAuthorizationChanged).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Forbidden")).toBeNull();
   });
 });
