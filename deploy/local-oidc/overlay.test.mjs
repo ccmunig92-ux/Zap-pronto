@@ -47,3 +47,10 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   const seed = await readFile(new URL("seed.sql", directory), "utf8");
   assert.match(seed, /status='ACTIVE',[\s\S]*blocked_at=NULL,revoked_at=NULL/);
 });
+
+test("controlador isola volumes pelo project name local fixo", async () => {
+  const controller = await readFile(new URL("local-oidc.ps1", directory), "utf8");
+  assert.match(controller, /\$projectName = 'zap-pronto-local-oidc'/);
+  assert.match(controller, /'compose','--project-name',\$projectName/);
+  assert.doesNotMatch(controller, /system\s+prune|volume\s+prune/);
+});
