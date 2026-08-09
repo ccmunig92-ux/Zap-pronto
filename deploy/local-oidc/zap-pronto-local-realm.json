@@ -2,6 +2,9 @@
   "realm": "zap-pronto-local",
   "enabled": true,
   "sslRequired": "external",
+  "accessTokenLifespan": 30,
+  "ssoSessionIdleTimeout": 600,
+  "ssoSessionMaxLifespan": 1800,
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "clients": [{

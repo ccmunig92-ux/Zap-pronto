@@ -9,6 +9,8 @@ test("realm local usa SPA publica com PKCE e redirects exatos", async () => {
   const client = realm.clients.find((candidate) => candidate.clientId === "zap-pronto-local");
 
   assert.ok(client);
+  assert.equal(realm.accessTokenLifespan, 30);
+  assert.ok(realm.ssoSessionIdleTimeout > realm.accessTokenLifespan);
   assert.equal(client.publicClient, true);
   assert.equal(client.standardFlowEnabled, true);
   assert.equal(client.implicitFlowEnabled, false);
@@ -32,7 +34,7 @@ test("edge preserva variaveis nginx e nunca registra query OAuth", async () => {
   ]);
 
   assert.match(compose, /NGINX_ENVSUBST_FILTER: "\^\(LOCAL_OIDC_HOST\)\$"/);
-  assert.match(compose, /127\.0\.0\.1:\$\{LOCAL_HTTPS_PORT:-18443\}:8443/);
+  assert.match(compose, /127\.0\.0\.1:\$\{LOCAL_HTTPS_PORT:-18443\}:18443/);
   assert.match(compose, /GET \/health\/ready HTTP\/1\.1/);
   assert.match(compose, /\/dev\/tcp\/127\.0\.0\.1\/9000/);
   assert.match(edge, /log_format zap_local_safe/);
