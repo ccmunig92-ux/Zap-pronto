@@ -15,12 +15,19 @@ type SessionState =
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  acceptanceClient = apiClient }: {
+  acceptanceClient = apiClient, initialAuthInitializationFailed = false,
+  retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
   readonly acceptanceClient?: AcceptanceClient;
+  readonly initialAuthInitializationFailed?: boolean;
+  readonly retryAuthInitialization?: () => Promise<
+    { status: "ready" | "error" | "redirecting" | "blocked" }
+  >;
 }) {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
+  const [authInitializationFailed, setAuthInitializationFailed] = useState(initialAuthInitializationFailed);
+  const [authRetrying, setAuthRetrying] = useState(false);
   const [loginError, setLoginError] = useState<string>();
   const [logoutError, setLogoutError] = useState<string>();
   function invalidateAuthentication(): void {
@@ -35,6 +42,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     });
   }
   useEffect(() => {
+    if (authInitializationFailed) return;
     let active = true;
     client.getCurrentUser().then((currentUser) => {
       if (active) setSession({ status: "ready", currentUser });
@@ -46,7 +54,17 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       else setSession({ status: "error", message: "Não foi possível carregar a sessão." });
     });
     return () => { active = false; };
-  }, [client]);
+  }, [authInitializationFailed, client]);
+
+  if (authInitializationFailed) return <main><h1>Falha ao iniciar a autenticação</h1>
+    <p>Não foi possível concluir o retorno seguro do provedor de identidade.</p>
+    <button type="button" disabled={authRetrying || !retryAuthInitialization} onClick={() => {
+      if (!retryAuthInitialization) return;
+      setAuthRetrying(true);
+      void retryAuthInitialization().then((result) => {
+        if (result.status === "ready") setAuthInitializationFailed(false);
+      }).catch(() => undefined).finally(() => setAuthRetrying(false));
+    }}>{authRetrying ? "Tentando novamente…" : "Tentar novamente"}</button></main>;
 
   if (session.status === "loading") return <main><p>Carregando sessão…</p></main>;
   const configured = isAuthConfigured();

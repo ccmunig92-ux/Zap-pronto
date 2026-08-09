@@ -14,6 +14,7 @@ COPY apps/web apps/web
 COPY packages/api-client packages/api-client
 COPY packages/contracts packages/contracts
 COPY deploy/web/validate-build.mjs deploy/web/validate-build.mjs
+COPY deploy/web/10-validate-runtime.sh /workspace/10-validate-runtime.sh
 
 ARG VITE_OIDC_AUTHORITY
 ARG VITE_OIDC_CLIENT_ID
@@ -28,6 +29,7 @@ ENV VITE_OIDC_AUTHORITY=${VITE_OIDC_AUTHORITY} \
     VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${VITE_OIDC_POST_LOGOUT_REDIRECT_URI} \
     VITE_OIDC_AUTOMATIC_SILENT_RENEW=${VITE_OIDC_AUTOMATIC_SILENT_RENEW}
 RUN node deploy/web/validate-build.mjs \
+ && sed -i 's/\r$//' /workspace/10-validate-runtime.sh \
  && pnpm --filter @zap-pronto/contracts build \
  && pnpm --filter @zap-pronto/api-client build \
  && pnpm --filter @zap-pronto/web build
@@ -41,7 +43,7 @@ COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
 COPY --from=build /workspace/oidc-authority-origin /etc/zap-pronto/oidc-authority-origin
 COPY deploy/web/security-headers.conf /etc/nginx/security-headers.conf
 COPY deploy/web/default.conf.template /etc/nginx/templates/default.conf.template
-COPY --chmod=755 deploy/web/10-validate-runtime.sh /docker-entrypoint.d/10-validate-runtime.sh
+COPY --from=build --chmod=755 /workspace/10-validate-runtime.sh /docker-entrypoint.d/10-validate-runtime.sh
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

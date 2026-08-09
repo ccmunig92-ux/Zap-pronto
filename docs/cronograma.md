@@ -125,6 +125,17 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   imagens/secrets/recursos/topologia, publicação GHCR desabilitada até proteção administrativa e depois
   condicionada a scan/SBOM/provenance, backup/restore adversarial, verificação pós-deploy e rollback com
   digest e attestation. O CI final da `main` passou no run `31181220736`.
+- Hardening local adicional do bootstrap OIDC concluído: falhas de configuração, storage e callback
+  deixam a aplicação fechada; query e fragmento do callback são removidos antes do processamento;
+  falha dupla na limpeza produz estado `blocked` sem montar React; retry é single-flight e não libera
+  a API antes de `ready`. O build recusa callback/logout fora da mesma origin HTTPS ou com query/hash.
+- Checkpoint local integrado concluído no Windows: 33 testes web, 3 testes do validador OIDC,
+  `test:all`, `typecheck:all`, `api:check`, builds Docker de API/web, smoke completo
+  PostgreSQL→migrations→provisionamento→API→web com reinício/persistência, `db:test` e
+  `db:test:upgrade` passaram. O Dockerfile web normaliza o entrypoint para LF e `.gitattributes`
+  fixa scripts POSIX em LF para impedir regressão CRLF entre Windows e Linux.
+- Esse checkpoint permanece exclusivamente local e não substitui o gate externo: nenhum login,
+  renovação, revogação ou RBAC foi homologado contra IdP HTTPS real nesta etapa.
 
 ## Premissas
 

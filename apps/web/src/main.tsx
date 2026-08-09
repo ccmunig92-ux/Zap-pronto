@@ -2,7 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { App } from "./App.js";
-import { initializeAuth } from "./auth.js";
+import { initializeAuth, retryAuthInitialization, shouldMountAfterAuthInitialization } from "./auth.js";
 
-await initializeAuth();
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+const authInitialization = await initializeAuth().catch(() => ({ status: "error" as const }));
+if (shouldMountAfterAuthInitialization(authInitialization)) {
+  createRoot(document.getElementById("root")!).render(<StrictMode><App
+    initialAuthInitializationFailed={authInitialization.status === "error"}
+    retryAuthInitialization={retryAuthInitialization}/></StrictMode>);
+}
