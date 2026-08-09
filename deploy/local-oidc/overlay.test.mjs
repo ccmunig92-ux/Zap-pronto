@@ -33,6 +33,8 @@ test("edge preserva variaveis nginx e nunca registra query OAuth", async () => {
 
   assert.match(compose, /NGINX_ENVSUBST_FILTER: "\^\(LOCAL_OIDC_HOST\)\$"/);
   assert.match(compose, /127\.0\.0\.1:\$\{LOCAL_HTTPS_PORT:-18443\}:8443/);
+  assert.match(compose, /GET \/health\/ready HTTP\/1\.1/);
+  assert.match(compose, /\/dev\/tcp\/127\.0\.0\.1\/9000/);
   assert.match(edge, /log_format zap_local_safe/);
   assert.match(edge, /\$request_method \$uri \$server_protocol/);
   assert.doesNotMatch(edge, /\$request(?:\s|')|\$request_uri|\$args|\$http_referer/);
