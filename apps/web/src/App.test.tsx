@@ -7,6 +7,32 @@ import type { AdministrationClient } from "./AdministrationPanel.js";
 
 afterEach(cleanup);
 describe("authenticated shell", () => {
+  it("fails closed when OIDC initialization fails and recovers only after an explicit retry", async () => {
+    const getCurrentUser = vi.fn().mockResolvedValue({
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "agent@example.test", displayName: "Agente" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Clínica" }, memberships: [], grants: [],
+    });
+    const retryAuthInitialization = vi.fn().mockResolvedValue({ status: "ready" as const });
+    render(<App client={{ getCurrentUser }} initialAuthInitializationFailed
+      retryAuthInitialization={retryAuthInitialization}/>);
+    expect(screen.getByRole("heading", { name: "Falha ao iniciar a autenticação" })).toBeTruthy();
+    expect(getCurrentUser).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    await waitFor(() => expect(retryAuthInitialization).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Clínica")).toBeTruthy();
+    expect(getCurrentUser).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the API blocked when an explicit OIDC retry also fails", async () => {
+    const getCurrentUser = vi.fn();
+    const retryAuthInitialization = vi.fn().mockResolvedValue({ status: "error" as const });
+    render(<App client={{ getCurrentUser }} initialAuthInitializationFailed
+      retryAuthInitialization={retryAuthInitialization}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    await waitFor(() => expect(retryAuthInitialization).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("heading", { name: "Falha ao iniciar a autenticação" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy();
+    expect(getCurrentUser).not.toHaveBeenCalled();
+  });
   it("renders the server-derived tenant and active memberships", async () => {
     render(<App client={{ async getCurrentUser() { return {
       user: { id: "22222222-2222-4222-8222-222222222222", email: "agent@example.test", displayName: "Agente" },
