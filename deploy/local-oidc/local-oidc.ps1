@@ -9,6 +9,7 @@ $envFile = Join-Path $runtimeRoot 'local.env'
 $markerFile = Join-Path $tlsRoot 'trust-marker.json'
 $hostname = 'zap-pronto.127.0.0.1.nip.io'
 $origin = 'https://' + $hostname + ':18443'
+$projectName = 'zap-pronto-local-oidc'
 $composeFiles = @('-f',(Join-Path $repoRoot 'deploy\staging\compose.yaml'),'-f',(Join-Path $repoRoot 'deploy\local-oidc\compose.yaml'))
 
 function Invoke-Checked([string]$Command,[string[]]$Arguments) {
@@ -37,7 +38,7 @@ function Read-LocalEnvironment {
   $values
 }
 function Compose([string[]]$Arguments) {
-  Invoke-Checked 'docker' (@('compose','--env-file',$envFile)+$composeFiles+$Arguments)
+  Invoke-Checked 'docker' (@('compose','--project-name',$projectName,'--env-file',$envFile)+$composeFiles+$Arguments)
 }
 function Setup {
   Assert-ExternalRoot $runtimeRoot; Assert-ExternalRoot $tlsRoot
