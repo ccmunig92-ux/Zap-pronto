@@ -317,17 +317,16 @@ Gate automatizado do corte:
 
 ## Sequência imediata
 
-Checkpoint local concluído em 2026-08-08: o overlay canônico subiu Postgres, migração,
+Checkpoint local concluído em 2026-08-09: o overlay canônico subiu Postgres, migração,
 provisionamento, seed sintético, Keycloak, API, web e edge TLS somente em loopback. Discovery/JWKS,
 PKCE, login administrador e atendente, RBAC, renovação após expiração, logout e
 bloqueio/reativação passaram na suíte Playwright existente (4/4). Essa evidência é local e não
 substitui o gate OIDC externo anterior à Fase 4.
 
-1. Concluir localmente o overlay OIDC integrado ao Compose canônico: Keycloak com realm sintético,
-   edge TLS somente em loopback, seed determinístico de tenant/unidade/perfis, descoberta/JWKS,
-   login PKCE, callback, RBAC, renovação, logout, restart e cleanup. O overlay não cria uma segunda
-   API, frontend ou banco da aplicação e não substitui a homologação externa.
-2. Somente depois do checkpoint local, publicar o mesmo artefato imutável em staging e preparar o
+1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
+   vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
+   e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
+2. Publicar o mesmo artefato imutável em staging e preparar o
    environment `oidc-homologation` com reviewer obrigatório, política restrita à `main`, domínio HTTPS,
    IdP real, segredos escopados e duas contas sintéticas exclusivas; executar a jornada real de navegador
    e registrar SHA e execução como evidência.
