@@ -317,10 +317,15 @@ Gate automatizado do corte:
 
 ## Sequência imediata
 
-1. Preparar o environment `oidc-homologation` com reviewer obrigatório, política restrita à `main`, domínio HTTPS, IdP real,
-   segredos escopados ao environment e duas contas sintéticas exclusivas; então executar a jornada real
-   de navegador e registrar o SHA e a execução como evidência.
-2. Expor o primeiro fluxo vertical da inbox somente depois desse gate, reutilizando contratos,
+1. Concluir localmente o overlay OIDC integrado ao Compose canônico: Keycloak com realm sintético,
+   edge TLS somente em loopback, seed determinístico de tenant/unidade/perfis, descoberta/JWKS,
+   login PKCE, callback, RBAC, renovação, logout, restart e cleanup. O overlay não cria uma segunda
+   API, frontend ou banco da aplicação e não substitui a homologação externa.
+2. Somente depois do checkpoint local, publicar o mesmo artefato imutável em staging e preparar o
+   environment `oidc-homologation` com reviewer obrigatório, política restrita à `main`, domínio HTTPS,
+   IdP real, segredos escopados e duas contas sintéticas exclusivas; executar a jornada real de navegador
+   e registrar SHA e execução como evidência.
+3. Expor o primeiro fluxo vertical da inbox somente depois do gate externo, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
 Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.

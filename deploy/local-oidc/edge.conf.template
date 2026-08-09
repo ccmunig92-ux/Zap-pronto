@@ -1,0 +1,26 @@
+log_format zap_local_safe '$remote_addr - $remote_user [$time_local] '
+                          '"$request_method $uri $server_protocol" $status $body_bytes_sent';
+
+server {
+  listen 8443 ssl;
+  server_name ${LOCAL_OIDC_HOST};
+  ssl_certificate /run/secrets/local_tls_cert;
+  ssl_certificate_key /run/secrets/local_tls_key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  access_log /var/log/nginx/access.log zap_local_safe;
+
+  location ~ ^/(realms|resources)/ {
+    proxy_pass http://keycloak:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Port 8443;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+  location / {
+    proxy_pass http://web:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+}

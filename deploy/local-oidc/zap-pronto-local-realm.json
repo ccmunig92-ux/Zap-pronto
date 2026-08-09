@@ -1,0 +1,53 @@
+{
+  "realm": "zap-pronto-local",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "clients": [{
+    "clientId": "zap-pronto-local",
+    "enabled": true,
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "implicitFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "serviceAccountsEnabled": false,
+    "redirectUris": ["${LOCAL_OIDC_ORIGIN}/"],
+    "webOrigins": ["${LOCAL_OIDC_ORIGIN}"],
+    "attributes": {
+      "pkce.code.challenge.method": "S256",
+      "post.logout.redirect.uris": "${LOCAL_OIDC_ORIGIN}/"
+    },
+    "protocolMappers": [
+      {
+        "name": "api-audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "config": {"included.client.audience": "zap-pronto-local", "access.token.claim": "true"}
+      },
+      {
+        "name": "organization",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-hardcoded-claim-mapper",
+        "config": {
+          "claim.name": "org_id", "claim.value": "local-tenant", "jsonType.label": "String",
+          "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"
+        }
+      }
+    ]
+  }],
+  "users": [
+    {
+      "id": "91000000-0000-4000-8000-000000000001",
+      "username": "admin.local", "email": "admin.local@example.test", "emailVerified": true,
+      "enabled": true, "firstName": "Admin", "lastName": "Local",
+      "credentials": [{"type": "password", "value": "${LOCAL_OIDC_ADMIN_PASSWORD}", "temporary": false}]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000002",
+      "username": "attendant.local", "email": "attendant.local@example.test", "emailVerified": true,
+      "enabled": true, "firstName": "Atendente", "lastName": "Local",
+      "credentials": [{"type": "password", "value": "${LOCAL_OIDC_ATTENDANT_PASSWORD}", "temporary": false}]
+    }
+  ]
+}
