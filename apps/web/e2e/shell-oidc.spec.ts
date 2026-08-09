@@ -87,7 +87,15 @@ async function userRow(page: Page, privateIdentifier: string) {
 }
 
 async function reactivateAttendant(page: Page, privateIdentifier: string): Promise<void> {
+  const users = page.waitForResponse((response) => new URL(response.url()).pathname === "/v1/users"
+    && response.request().method() === "GET");
+  const invitations = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/v1/users/invitations"
+    && response.request().method() === "GET");
   await page.goto("/");
+  const [usersResponse, invitationsResponse] = await Promise.all([users, invitations]);
+  expect(usersResponse.status(), "A recuperação precisa recarregar usuários administrativos").toBe(200);
+  expect(invitationsResponse.status(), "A recuperação precisa recarregar convites administrativos").toBe(200);
   await expect(page.getByRole("heading", { name: "Administração de acesso" })).toBeVisible();
   const row = await userRow(page, privateIdentifier);
   const reactivate = row.getByRole("button", { name: "Reativar" });
