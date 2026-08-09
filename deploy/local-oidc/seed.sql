@@ -7,7 +7,8 @@ ON CONFLICT (tenant_id,code) DO UPDATE SET name=EXCLUDED.name,active=true;
 INSERT INTO users (id,tenant_id,email,display_name,status) VALUES
 ('90000000-0000-4000-8000-000000000010','90000000-0000-4000-8000-000000000001','admin.local@example.test','Admin Local','ACTIVE'),
 ('90000000-0000-4000-8000-000000000011','90000000-0000-4000-8000-000000000001','attendant.local@example.test','Atendente Local','ACTIVE')
-ON CONFLICT (tenant_id,email) DO UPDATE SET display_name=EXCLUDED.display_name,status='ACTIVE';
+ON CONFLICT (tenant_id,email) DO UPDATE SET display_name=EXCLUDED.display_name,status='ACTIVE',
+blocked_at=NULL,revoked_at=NULL,status_changed_at=clock_timestamp();
 INSERT INTO user_units (tenant_id,user_id,unit_id,role) VALUES
 ('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000010','90000000-0000-4000-8000-000000000002','TENANT_ADMIN'),
 ('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000011','90000000-0000-4000-8000-000000000002','ATTENDANT')

@@ -42,3 +42,8 @@ test("edge preserva variaveis nginx e nunca registra query OAuth", async () => {
   assert.doesNotMatch(edge, /\$request(?:\s|')|\$request_uri|\$args|\$http_referer/);
   assert.match(edge, /proxy_set_header Host \$host/);
 });
+
+test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", async () => {
+  const seed = await readFile(new URL("seed.sql", directory), "utf8");
+  assert.match(seed, /status='ACTIVE',[\s\S]*blocked_at=NULL,revoked_at=NULL/);
+});
