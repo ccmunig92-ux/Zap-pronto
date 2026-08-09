@@ -320,7 +320,7 @@ Gate automatizado do corte:
 Checkpoint local concluído em 2026-08-09: o overlay canônico subiu Postgres, migração,
 provisionamento, seed sintético, Keycloak, API, web e edge TLS somente em loopback. Discovery/JWKS,
 PKCE, login administrador e atendente, RBAC, renovação após expiração, logout e
-bloqueio/reativação passaram na suíte Playwright existente (4/4). Essa evidência é local e não
+bloqueio/reativação passaram na suíte Playwright existente (4/4), em duas execuções consecutivas após bootstrap isolado e restart. Essa evidência é local e não
 substitui o gate OIDC externo anterior à Fase 4.
 
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
