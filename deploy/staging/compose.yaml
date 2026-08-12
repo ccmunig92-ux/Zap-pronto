@@ -157,7 +157,11 @@ services:
       provision-runtime:
         condition: service_completed_successfully
     healthcheck:
-      disable: true
+      test: ["CMD", "node", "-e", "process.kill(1, 0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
