@@ -28,6 +28,8 @@ printf '%s' 'postgresql://zap_pronto_owner:owner-backup-smoke@postgres:5432/zap_
   > "$secret_dir/database-migration-url"
 printf '%s' 'postgresql://zap_pronto_runtime:runtime-backup-smoke@postgres:5432/zap_pronto' \
   > "$secret_dir/database-runtime-url"
+printf '%s' 'postgresql://zap_pronto_worker_runtime:worker-backup-smoke@postgres:5432/zap_pronto' \
+  > "$secret_dir/database-worker-url"
 chmod 644 "$secret_dir"/*
 
 export ZAP_API_IMAGE=${ZAP_API_IMAGE:-zap-pronto-api:ci}
@@ -35,6 +37,7 @@ export ZAP_WEB_IMAGE=${ZAP_WEB_IMAGE:-zap-pronto-web:ci}
 export POSTGRES_PASSWORD_FILE="$secret_dir/postgres-password"
 export DATABASE_MIGRATION_URL_FILE="$secret_dir/database-migration-url"
 export DATABASE_RUNTIME_URL_FILE="$secret_dir/database-runtime-url"
+export DATABASE_WORKER_URL_FILE="$secret_dir/database-worker-url"
 export STAGING_HTTP_PORT=${STAGING_HTTP_PORT:-18081}
 export STAGING_COMPOSE_PROJECT="$project"
 export STAGING_COMPOSE_FILE="$compose_file"
