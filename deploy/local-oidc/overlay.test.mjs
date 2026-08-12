@@ -112,6 +112,7 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/--grep','gestor assume atendimento supervisionado'/);
   assert.match(controller,/handoff_takeover_commands[\s\S]*HANDOFF_TAKEN_OVER[\s\S]*handoff\.taken_over[\s\S]*SUPERVISOR_TAKEOVER[\s\S]*LOCAL_OIDC_HANDOFF_TAKEOVER_STATE_INVALID/);
   assert.match(controller,/E2E_MANAGER_USERNAME='attendant\.two\.local'/);
+  assert.match(controller,/E2E_OIDC_TARGET='local'/);
   assert.match(controller,/E2E_MANAGER_PASSWORD=\$v\.LOCAL_OIDC_ATTENDANT_TWO_PASSWORD/);
   assert.match(controller,/Compose @\('run','--rm','local-seed'\)[\s\S]*--grep','gestor administra vínculos da unidade'/);
   assert.match(controller,/LOCAL_OIDC_SYNTHETIC_MANAGER_MEMBERSHIP_INVALID/);

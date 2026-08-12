@@ -7,6 +7,7 @@ não persistir dados pessoais ou tokens.
 Defina as variáveis somente no ambiente do processo, nunca em arquivo versionado:
 
 - `E2E_OIDC_ENABLED=true`
+- `E2E_OIDC_TARGET=local` para o overlay controlado ou `external` para homologação HTTPS real
 - `E2E_BASE_URL=https://...`
 - `E2E_ADMIN_USERNAME`, `E2E_ADMIN_PASSWORD`, `E2E_ADMIN_EXPECTED_TENANT`
 - `E2E_ATTENDANT_USERNAME`, `E2E_ATTENDANT_PASSWORD`, `E2E_ATTENDANT_EXPECTED_TENANT`
@@ -29,6 +30,14 @@ Gates opcionais fail-closed:
   comprovar a perda de `/v1/me` em uma sessão já emitida e reativá-la obrigatoriamente no `finally`.
   Nunca use conta operacional ou compartilhada nesse gate. Se o username não for o e-mail mostrado na
   lista administrativa, forneça `E2E_ATTENDANT_ADMIN_LIST_MATCH` pelo mesmo cofre de segredos.
+
+O modo `local` exige o origin, nonce, autorização destrutiva e identidades sintéticas fixadas pelo
+controlador do overlay. O modo `external` rejeita essas flags locais e origins loopback; o workflow
+externo executa somente login/RBAC de administrador e atendente, renovação e bloqueio reversível. As
+jornadas de Inbox, routing, histórico, transferência, takeover, webhook sintético e lifecycle unitário
+dependem do seed local e não são executadas contra staging externo. Para permitir o bloqueio reversível
+externo, o environment protegido deve definir `E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED=true` e usar uma conta
+exclusiva, nunca operacional.
 
 Execute `pnpm --filter @zap-pronto/web exec playwright install chromium` uma vez no host de teste e,
 depois, `pnpm --filter @zap-pronto/web test:e2e:oidc`. Use contas exclusivas de homologação sem MFA
