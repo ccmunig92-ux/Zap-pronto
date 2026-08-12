@@ -33,7 +33,7 @@ do fechamento `0050`:
 
 | Migration | SHA-256 |
 | --- | --- |
-| `0006_outbox_worker.sql` | `0d438019d70f9bdd09027b4ef681a53cc8b2a1f85c658a791115bc9b7d59bf87` |
+| `0006_outbox_worker.sql` (LF canônico) | `00c385c3b1a1a051d24e763268db530b9585ecefbd4873cda83211510d7cbde8` |
 | `0049_handoff_reopen.sql` | `a8b81201c1c10960156c4b990aa36c81aa6a8ad7bb3cb0b7e5c8212ca512ef92` |
 | `0050_handoff_reopen_latest_episode.sql` | `db810578003dfe112b571e37e03555c5f0a5d8ca6a6447362302cf8b125a0f65` |
 
