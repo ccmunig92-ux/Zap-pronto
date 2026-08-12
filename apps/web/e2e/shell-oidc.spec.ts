@@ -5,24 +5,36 @@ const enabled = process.env.E2E_OIDC_ENABLED === "true";
 const requireRenewal = process.env.E2E_REQUIRE_RENEWAL === "true";
 const requireBlockRevocation = process.env.E2E_REQUIRE_BLOCK_REVOCATION === "true";
 const optional = (name: string): string | undefined => process.env[name]?.trim() || undefined;
+const target = optional("E2E_OIDC_TARGET");
+const localMode = target === "local";
+const externalMode = target === "external";
 const testTimeoutMs = Number(optional("E2E_OIDC_TEST_TIMEOUT_MS") ?? 90_000);
 const usernameSelector = optional("E2E_OIDC_USERNAME_SELECTOR") ?? 'input[name="username"]';
 const passwordSelector = optional("E2E_OIDC_PASSWORD_SELECTOR") ?? 'input[name="password"]';
 const submitSelector = optional("E2E_OIDC_SUBMIT_SELECTOR") ?? 'button[type="submit"]';
 
 if (enabled) {
+  if (!localMode && !externalMode) throw new Error("E2E_OIDC_TARGET_LOCAL_OR_EXTERNAL_REQUIRED");
   const baseUrl = optional("E2E_BASE_URL");
   let parsed: URL;
   try { parsed = new URL(baseUrl ?? ""); } catch { throw new Error("E2E_BASE_URL_VALID_HTTPS_REQUIRED"); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     throw new Error("E2E_BASE_URL_VALID_HTTPS_REQUIRED");
   }
-  if(process.env.E2E_LOCAL_DESTRUCTIVE_ALLOWED!=="true"||parsed.origin!=="https://zap-pronto.127.0.0.1.nip.io:18443"
+  if(localMode&&(process.env.E2E_LOCAL_DESTRUCTIVE_ALLOWED!=="true"||parsed.origin!=="https://zap-pronto.127.0.0.1.nip.io:18443"
     ||!process.env.E2E_LOCAL_INSTANCE_NONCE?.match(/^[A-Za-z0-9_-]{32,128}$/)
     ||process.env.E2E_ADMIN_USERNAME!=="admin.local"||process.env.E2E_ATTENDANT_USERNAME!=="attendant.local"
     ||process.env.E2E_ATTENDANT_TWO_USERNAME!=="attendant.two.local"
-    ||process.env.E2E_MANAGER_USERNAME!=="attendant.two.local"){
+    ||process.env.E2E_MANAGER_USERNAME!=="attendant.two.local")){
     throw new Error("E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED");
+  }
+  if(externalMode&&(process.env.E2E_LOCAL_DESTRUCTIVE_ALLOWED==="true"
+    ||parsed.origin==="https://zap-pronto.127.0.0.1.nip.io:18443"
+    ||parsed.hostname==="localhost"||parsed.hostname==="127.0.0.1"||parsed.hostname==="::1")){
+    throw new Error("E2E_EXTERNAL_HARNESS_PUBLIC_ORIGIN_REQUIRED");
+  }
+  if(externalMode&&requireBlockRevocation&&process.env.E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED!=="true"){
+    throw new Error("E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED_REQUIRED");
   }
 }
 

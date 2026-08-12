@@ -39,8 +39,10 @@ jobs:
       - name: Exercise real administrator and attendant browser journeys
         env:
           E2E_OIDC_ENABLED: "true"
+          E2E_OIDC_TARGET: "external"
           E2E_REQUIRE_RENEWAL: "true"
           E2E_REQUIRE_BLOCK_REVOCATION: "true"
+          E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED: "true"
           E2E_BASE_URL: ${{ vars.OIDC_E2E_WEB_URL }}
           E2E_RENEW_WAIT_SECONDS: ${{ vars.E2E_RENEW_WAIT_SECONDS }}
           E2E_OIDC_TEST_TIMEOUT_MS: ${{ vars.E2E_OIDC_TEST_TIMEOUT_MS }}
@@ -54,4 +56,6 @@ jobs:
           E2E_ATTENDANT_PASSWORD: ${{ secrets.E2E_ATTENDANT_PASSWORD }}
           E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
           E2E_ATTENDANT_ADMIN_LIST_MATCH: ${{ secrets.E2E_ATTENDANT_ADMIN_LIST_MATCH }}
-        run: pnpm --filter @zap-pronto/web test:e2e:oidc
+        run: >-
+          pnpm --filter @zap-pronto/web test:e2e:oidc -- --grep
+          "administrador autentica|atendente autentica|renovação mantém|bloqueio invalida"

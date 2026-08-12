@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../.github/workflows/staging-images.yml", import.meta.url), "utf8");
+const oidcSource = await readFile(new URL("../.github/workflows/oidc-homologation.yml", import.meta.url), "utf8");
 
 test("publication is manual, default-branch-only and environment-scoped", () => {
   assert.match(source, /workflow_dispatch:/);
@@ -10,6 +11,15 @@ test("publication is manual, default-branch-only and environment-scoped", () => 
   assert.match(source, /vars\.STAGING_RELEASE_ENABLED == 'true'/);
   assert.match(source, /environment: oidc-homologation/);
   assert.doesNotMatch(source, /^  (?:pull_request|push):/m);
+});
+
+test("external OIDC uses the canonical harness in restricted external mode", () => {
+  assert.match(oidcSource, /workflow_dispatch:/);
+  assert.match(oidcSource, /environment: oidc-homologation/);
+  assert.match(oidcSource, /E2E_OIDC_TARGET: "external"/);
+  assert.match(oidcSource, /E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED: "true"/);
+  assert.match(oidcSource, /--grep/);
+  assert.doesNotMatch(oidcSource, /^  (?:pull_request|push):/m);
 });
 
 test("both candidates are scanned before any registry publication", () => {
