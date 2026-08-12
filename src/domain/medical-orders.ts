@@ -304,7 +304,7 @@ export async function reviewMedicalOrder(
     SELECT medical.status, medical.version FROM medical_orders medical
     WHERE medical.id=$1 AND EXISTS (SELECT 1 FROM user_units membership
       WHERE membership.tenant_id=medical.tenant_id AND membership.unit_id=medical.unit_id
-        AND membership.user_id=current_app_actor_id()) FOR UPDATE
+        AND membership.user_id=current_app_actor_id() AND membership.status='ACTIVE') FOR UPDATE
   `, [medicalOrderId]);
   if (order.rowCount === 1 && order.rows[0]!.status === "REVIEWED") {
     if (decisions.length < 1) throw new Error("MEDICAL_ORDER_REVIEW_EMPTY");
@@ -384,7 +384,7 @@ export async function markMedicalOrderUnreadable(
     SELECT medical.service_case_id, medical.conversation_id, medical.status, medical.version, medical.failure_code
     FROM medical_orders medical WHERE medical.id=$1 AND EXISTS (SELECT 1 FROM user_units membership
       WHERE membership.tenant_id=medical.tenant_id AND membership.unit_id=medical.unit_id
-        AND membership.user_id=current_app_actor_id()) FOR UPDATE
+        AND membership.user_id=current_app_actor_id() AND membership.status='ACTIVE') FOR UPDATE
   `, [medicalOrderId]);
   if (order.rowCount === 1 && order.rows[0]!.status === "UNREADABLE") {
     if (order.rows[0]!.failure_code !== failureCode) throw new Error("MEDICAL_ORDER_UNREADABLE_CONFLICT");

@@ -4,6 +4,9 @@ import { AuthorizationDeniedError } from "../authorization/authorize.js";
 import { AccountNotAssignedError } from "@zap-pronto/core/database/current-user";
 import { InvitationRequestError } from "../routes/user-invitations-errors.js";
 import { RateLimitExceededError } from "./rate-limit.js";
+import { InboxHandoffRequestError } from "../routes/inbox-handoffs-errors.js";
+import { InboxRoutingRequiredError } from "../routes/inbox-routing-required-errors.js";
+import { InboxConversationRequestError } from "../routes/inbox-conversations-errors.js";
 
 export function registerProblemDetailsHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
@@ -22,14 +25,16 @@ export function registerProblemDetailsHandler(app: FastifyInstance): void {
     }
     if (error instanceof AuthenticationError || error instanceof IdentityProviderUnavailableError
       || error instanceof AuthorizationDeniedError || error instanceof AccountNotAssignedError
-      || error instanceof InvitationRequestError) {
+      || error instanceof InvitationRequestError || error instanceof InboxHandoffRequestError
+      || error instanceof InboxRoutingRequiredError || error instanceof InboxConversationRequestError) {
       void reply.status(error.statusCode).type("application/problem+json").send({
         type: `urn:zap-pronto:error:${error.code.toLowerCase().replaceAll("_", "-")}`,
         title: error.statusCode === 401 ? "Unauthorized"
           : error.statusCode === 403 ? "Forbidden"
             : error.statusCode === 404 ? "Not Found"
               : error.statusCode === 409 ? "Conflict"
-                : error.statusCode === 400 ? "Bad Request" : "Service Unavailable",
+                : error.statusCode === 422 ? "Unprocessable Content"
+                  : error.statusCode === 400 ? "Bad Request" : "Service Unavailable",
         status: error.statusCode,
         detail: error.message,
         correlationId: request.id,

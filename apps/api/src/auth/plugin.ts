@@ -32,6 +32,8 @@ export const publicEndpointInventory = Object.freeze([
   "HEAD /health/live",
   "GET /health/ready",
   "HEAD /health/ready",
+  "GET /v1/webhooks/meta",
+  "POST /v1/webhooks/meta",
 ] as const);
 const publicEndpointAllowlist = new Set<string>(publicEndpointInventory);
 

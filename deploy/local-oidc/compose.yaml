@@ -1,4 +1,7 @@
 services:
+  worker:
+    profiles: ["local-worker-disabled"]
+
   local-seed:
     image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
     restart: "no"
@@ -6,7 +9,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-zap_pronto}
       POSTGRES_USER: ${POSTGRES_USER:-zap_pronto_owner}
       LOCAL_OIDC_ISSUER: ${LOCAL_OIDC_ORIGIN:?LOCAL_OIDC_ORIGIN is required}/realms/zap-pronto-local
-    command: ["/bin/sh", "-ec", "export PGPASSWORD=\"$$(cat /run/secrets/postgres_password)\"; psql --host postgres --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\" --set ON_ERROR_STOP=1 --set oidc_issuer=\"$$LOCAL_OIDC_ISSUER\" --file /local-seed/seed.sql"]
+      LOCAL_HARNESS_NONCE: ${LOCAL_HARNESS_NONCE:?LOCAL_HARNESS_NONCE is required}
+      LOCAL_SEED_META_STATUS: ${LOCAL_SEED_META_STATUS:-false}
+    command: ["/bin/sh", "-ec", "export PGPASSWORD=\"$$(cat /run/secrets/postgres_password)\"; psql --host postgres --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\" --set ON_ERROR_STOP=1 --set oidc_issuer=\"$$LOCAL_OIDC_ISSUER\" --set harness_nonce=\"$$LOCAL_HARNESS_NONCE\" --set harness_project=\"zap-pronto-local-oidc\" --set harness_origin=\"${LOCAL_OIDC_ORIGIN}\" --set seed_meta_status=\"$$LOCAL_SEED_META_STATUS\" --file /local-seed/seed.sql"]
     secrets: [postgres_password]
     volumes: ["../local-oidc/seed.sql:/local-seed/seed.sql:ro"]
     networks: [data]
@@ -23,6 +28,7 @@ services:
       LOCAL_OIDC_ORIGIN: ${LOCAL_OIDC_ORIGIN:?required}
       LOCAL_OIDC_ADMIN_PASSWORD: ${LOCAL_OIDC_ADMIN_PASSWORD:?required}
       LOCAL_OIDC_ATTENDANT_PASSWORD: ${LOCAL_OIDC_ATTENDANT_PASSWORD:?required}
+      LOCAL_OIDC_ATTENDANT_TWO_PASSWORD: ${LOCAL_OIDC_ATTENDANT_TWO_PASSWORD:?required}
       JAVA_OPTS_KC_HEAP: -XX:MaxRAMPercentage=65
     volumes:
       - keycloak_data:/opt/keycloak/data
@@ -54,6 +60,10 @@ services:
       OIDC_JWKS_URL: ${LOCAL_OIDC_ORIGIN}/realms/zap-pronto-local/protocol/openid-connect/certs
       OIDC_DISCOVERY_URL: ${LOCAL_OIDC_ORIGIN}/realms/zap-pronto-local/.well-known/openid-configuration
       OIDC_ORGANIZATION_CLAIM: org_id
+      META_WEBHOOK_ENABLED: "true"
+      META_APP_SECRET: local-e2e-public-hmac-vector-v1
+      META_VERIFY_TOKEN: local-e2e-public-verify-vector-v1
+      META_WEBHOOK_MAX_BODY_BYTES: "65536"
     secrets: [local_tls_ca]
     depends_on:
       local-seed: { condition: service_completed_successfully }

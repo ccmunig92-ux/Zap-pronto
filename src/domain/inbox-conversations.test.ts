@@ -1,0 +1,24 @@
+import assert from"node:assert/strict";import test from"node:test";import{getConversation,listConversationMessages,normalizeHumanTextBody,sendHumanTextMessage,cancelHumanTextMessage}from"./inbox-conversations.js";
+const conversationId="10000000-0000-4000-8000-000000000001",messageId="20000000-0000-4000-8000-000000000001";
+test("conversation history uses only narrow functions and canonical cursor",async()=>{const calls:{text:string;values:unknown[]}[]=[];const client={async query(text:string,values:unknown[]){calls.push({text,values});
+  if(text.includes("get_inbox"))return{rows:[{conversationId,unitId:"30000000-0000-4000-8000-000000000001"}]};return{rows:[{id:messageId,kind:"TEXT",createdAt:new Date("2026-08-10T10:00:00.000Z")},{id:"20000000-0000-4000-8000-000000000002",kind:"AUDIO",createdAt:new Date("2026-08-10T09:00:00.000Z")}]};}};
+  await getConversation(client as never,conversationId);assert.match(calls[0]!.text,/get_inbox_conversation_claim_target/);assert.match(calls[0]!.text,/get_inbox_conversation_takeover_target/);const first=await listConversationMessages(client as never,{conversationId,limit:1});assert.equal(first.items.length,1);assert.ok(first.nextCursor);
+  await listConversationMessages(client as never,{conversationId,limit:1,cursor:first.nextCursor});assert.match(calls[2]!.text,/list_inbox_conversation_messages/);assert.equal(calls[2]!.values[3],messageId);
+  assert.equal(calls[2]!.values[4],null);
+  assert.ok(calls.every(call=>!call.text.includes("payload")));});
+test("conversation cursor rejects another conversation and malformed input",async()=>{const client={query:async()=>({rows:[]})};await assert.rejects(
+  listConversationMessages(client as never,{conversationId:"10000000-0000-4000-8000-000000000002",cursor:Buffer.from(JSON.stringify({v:1,conversationId,createdAt:"2026-08-10T10:00:00.000Z",id:messageId})).toString("base64url")}),/INVALID_PAGE_CURSOR/);
+  await assert.rejects(getConversation(client as never,"bad"),/INVALID_CONVERSATION_ID/);});
+test("historical message cutoff is applied in SQL and bound to every cursor page",async()=>{const calls:{text:string;values:unknown[]}[]=[];const before="2026-08-10T10:00:00.000Z";
+  const client={async query(text:string,values:unknown[]){calls.push({text,values});return{rows:[{id:messageId,kind:"TEXT",createdAt:new Date(before)},{id:"20000000-0000-4000-8000-000000000002",kind:"TEXT",createdAt:new Date("2026-08-10T09:00:00.000Z")}]}}};
+  const first=await listConversationMessages(client as never,{conversationId,limit:1,before});assert.ok(first.nextCursor);assert.match(calls[0]!.text,/list_inbox_conversation_messages_v4\(\$1,\$2,\$3,\$4,\$5\)/);assert.doesNotMatch(calls[0]!.text,/WHERE/);assert.equal(calls[0]!.values[4],before);
+  await listConversationMessages(client as never,{conversationId,limit:1,before,cursor:first.nextCursor});
+  await assert.rejects(listConversationMessages(client as never,{conversationId,limit:1,before:"2026-08-10T11:00:00.000Z",cursor:first.nextCursor}),/INVALID_PAGE_CURSOR/);
+  await assert.rejects(listConversationMessages(client as never,{conversationId,before:"not-an-instant"}),/INVALID_MESSAGE_BEFORE/);});
+test("human text normalizes once and calls only the narrow command",async()=>{const calls:{text:string;values:unknown[]}[]=[];const client={async query(text:string,values:unknown[]){calls.push({text,values});return{rows:[{messageId,conversationVersion:8,deliveryStatus:"QUEUED",replayed:false}]}}};
+  const result=await sendHumanTextMessage(client as never,{conversationId,expectedConversationVersion:7,body:"  Olá\n  ",idempotencyKey:"  stable-send-key  "});assert.equal(result.deliveryStatus,"QUEUED");
+  assert.match(calls[0]!.text,/send_human_text_message/);assert.deepEqual(calls[0]!.values,[conversationId,7,"Olá","stable-send-key"]);
+  assert.throws(()=>normalizeHumanTextBody("bad\u0000body"),/INVALID_MESSAGE_BODY/);assert.throws(()=>normalizeHumanTextBody(" \t\n "),/INVALID_MESSAGE_BODY/);});
+test("human text cancellation calls only the narrow command with normalized key",async()=>{const calls:{text:string;values:unknown[]}[]=[];const client={async query(text:string,values:unknown[]){calls.push({text,values});return{rows:[{messageId,conversationVersion:9,deliveryStatus:"CANCELLED",replayed:false}]}}};
+  const result=await cancelHumanTextMessage(client as never,{conversationId,messageId,expectedConversationVersion:8,idempotencyKey:"  stable-cancel-key  "});assert.equal(result.deliveryStatus,"CANCELLED");
+  assert.match(calls[0]!.text,/cancel_human_text_message/);assert.deepEqual(calls[0]!.values,[conversationId,messageId,8,"stable-cancel-key"]);});

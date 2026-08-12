@@ -71,10 +71,12 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/database_migration_url
       DATABASE_RUNTIME_URL_FILE: /run/secrets/database_runtime_url
+      DATABASE_WORKER_URL_FILE: /run/secrets/database_worker_url
     command: ["node", "scripts/db-provision-runtime.mjs"]
     secrets:
       - database_migration_url
       - database_runtime_url
+      - database_worker_url
     networks:
       - data
     depends_on:
@@ -136,6 +138,40 @@ services:
         reservations:
           memory: 192M
 
+  worker:
+    image: ${ZAP_API_IMAGE:?ZAP_API_IMAGE must reference an immutable staging API image}
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    environment:
+      DATABASE_WORKER_URL_FILE: /run/secrets/database_worker_url
+      INBOUND_WORKER_BATCH_SIZE: "10"
+      INBOUND_WORKER_LEASE_SECONDS: "60"
+      INBOUND_WORKER_POLL_INTERVAL_MS: "1000"
+      INBOUND_WORKER_SHUTDOWN_TIMEOUT_MS: "10000"
+      OUTBOUND_WORKER_ENABLED: "false"
+    secrets:
+      - database_worker_url
+    networks:
+      - data
+    depends_on:
+      provision-runtime:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 384M
+
   web:
     image: ${ZAP_WEB_IMAGE:?ZAP_WEB_IMAGE must reference an immutable staging web image}
     restart: unless-stopped
@@ -187,3 +223,5 @@ secrets:
     file: ${DATABASE_MIGRATION_URL_FILE:?DATABASE_MIGRATION_URL_FILE must be outside the repository}
   database_runtime_url:
     file: ${DATABASE_RUNTIME_URL_FILE:?DATABASE_RUNTIME_URL_FILE must be outside the repository}
+  database_worker_url:
+    file: ${DATABASE_WORKER_URL_FILE:?DATABASE_WORKER_URL_FILE must be outside the repository}

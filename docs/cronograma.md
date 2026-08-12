@@ -309,19 +309,294 @@ Gate automatizado do corte:
 
 ## Fases 5 a 9
 
+Checkpoint local inbound: webhook Meta assinado, recibo idempotente, roteamento explícito,
+materialização transacional e runner canônico foram implementados sem Hermes ou download de mídia.
+O runner usa claim SQL allowlisted apenas para `channel.inbound.received`, credencial PostgreSQL
+exclusiva, lease/retry/dead-letter existentes e ACK atômico dentro do materializador.
+`channel.inbound.routing_required` nunca é materializado pelo worker e é encerrado somente pelo fluxo
+administrativo explícito descrito abaixo. A existência deste corte local não substitui homologação OIDC/Meta externa.
+
+Checkpoint local de roteamento administrativo: fila protegida e paginada de receipts `UNROUTED`,
+projeção sem PII, seleção explícita entre mappings ativos e comando idempotente/concorrente foram
+integrados à Inbox canônica. A resolução encerra o `routing_required`, publica exatamente um
+`channel.inbound.received` e deixa o worker existente materializar a mensagem. As permissões
+`inbound.routing.read/resolve` são concedidas inicialmente somente a `TENANT_ADMIN`; não há grant
+individual de atendente no modelo atual. Nenhum canal Meta externo ou deploy foi ativado.
+
+Checkpoint local de leitura da Inbox: a fila de handoffs existente passou a abrir o detalhe da conversa
+e o histórico paginado em funções SQL estreitas. `conversation.read` é unit-scoped e
+`conversation.supervise` separa a leitura de uma conversa `HUMAN_ACTIVE` pelo responsável daquela
+feita por supervisão. Texto inbound permanece `UNTRUSTED`; mídia é exibida somente como marcador
+sem payload, locator ou download. O corte é estritamente read-only: não envia mensagem, não publica
+outbox, não chama Hermes e ainda não representa homologação funcional externa.
+O mesmo painel agora inclui `Meus atendimentos ativos`, derivado exclusivamente de handoffs `ACTIVE`
+e conversas `HUMAN_ACTIVE` atribuídos ao ator autenticado, com paginação keyset por `claimed_at,id`.
+O claim humano também foi conectado ao comando canônico da Inbox: a projeção server-side fornece
+`handoffId+expectedVersion`, a UI reutiliza uma chave idempotente por intenção, refaz fila, ativos e
+detalhe após o commit e não mantém estado otimista. O E2E local prova um único POST, persistência após
+reload, exatamente um `handoff.claimed` e ausência de mensagem outbound ou Hermes durante o claim;
+o composer só aparece depois que a conversa passa a `HUMAN_ACTIVE` para o responsável.
+
+Checkpoint local de resposta humana TEXT: o responsável por uma conversa `HUMAN_ACTIVE` pode usar
+`message.send` para registrar texto simples no comando transacional canônico. A intenção valida a versão
+da conversa, ownership, handoff/caso, unidade e conexão, reutiliza a mesma chave idempotente em retry e
+grava exatamente uma mensagem `OUTBOUND/HUMAN` com estado `QUEUED` e um
+`channel.outbound.requested` sem conteúdo ou identificadores externos. A Inbox mostra “Pendente de
+envio” e não afirma entrega. O E2E local prova claim, um único POST, persistência após reload e ausência
+de Hermes ou tráfego externo. Não existe envio Meta, reconciliação de status nem rate limit distribuído
+adequado para este comando; body limitado e idempotência reduzem abuso, mas proteção edge/DB continua
+pendente antes de exposição real.
+
+Checkpoint local de cancelamento outbound: enquanto a intenção TEXT permanece `PENDING`, com zero
+tentativas, sem lease, publicação ou identificador externo, o mesmo responsável pode executar
+`QUEUED -> CANCELLED`. A mensagem não é apagada e a timeline mostra “Envio cancelado”. O comando
+idempotente incrementa a versão da conversa, cancela o outbox e audita apenas IDs internos; qualquer
+evidência de claim/tentativa falha com conflito e não simula cancelamento no provedor. Este corte não
+adiciona runner outbound, adapter Meta, status `SENT` nem chamada externa.
+
+Checkpoint local de reconciliação Meta: callbacks de status que atravessam o webhook assinado são
+persistidos como recibos append-only e aplicados monotonicamente a mensagens outbound correlacionadas
+por conta/conexão e identificador externo. O harness local usa uma mensagem sintética explicitamente
+seedada como `SENT`; portanto prova somente `DELIVERED`/`READ`, replay e regressão locais, não envio,
+aceite do provedor nem homologação Meta. Intenções `QUEUED` sem identificador externo permanecem
+`UNMATCHED` até existir um envio real.
+
+Hardening incremental: eventos Meta com `occurred_at` além de dez minutos no futuro continuam como
+evidência append-only, mas recebem `IGNORED_INVALID_TIMESTAMP` e não alteram mensagem nem timestamps.
+O mesmo resultado fail-closed é aplicado quando um callback correlacionado antecede a criação da
+mensagem em mais de dez minutos; a aplicação referencia a mensagem para auditoria interna, preserva o
+estado anterior e permite que um callback cronologicamente válido posterior seja reconciliado.
+A Inbox apresenta os estados outbound locais `QUEUED`, `SENT`, `DELIVERED`, `READ`, `FAILED` e
+`CANCELLED`; isso é apresentação de evidência recebida, não comprovação de envio ou homologação Meta.
+
+Checkpoint local de encerramento humano: somente o atendente dono de um handoff `ACTIVE` pode usar a
+ação server-side `RESOLVE_HANDOFF`. O comando idempotente encerra handoff, caso e conversa na mesma
+transação, suspende a automação e publica apenas `handoff.resolved`; não envia mensagem, não reativa o
+Hermes e não cria integração externa.
+
 - Gateway: webhook rápido, envelope canônico, worker, ordem por conversa, storage privado, antivírus e estados de entrega.
 - Hermes: ferramentas estreitas para consulta, coleta e handoff; guardrails clínicos; prompts versionados e avaliações adversariais.
 - Meta: WhatsApp Cloud API primeiro; Instagram e Messenger reutilizam o envelope. Assinatura, janela, templates, mídia, status, token e App Review são obrigatórios.
 - Integrações: capacidades `DISABLED`, `READ_ONLY` e `HUMAN_CONFIRMED_WRITE`, sempre com timeout, circuit breaker, idempotência e reconciliação.
 - Hardening: métricas, logs, traces, SLOs, backup/restore, carga, segurança, LGPD, runbooks, staging isolado e rollback.
 
+Referências públicas estudadas para os padrões da Fase 5: OpenBSP (envelope e adaptadores),
+Hiberius/whatsapp-receptionist (handoff, outbox e áudio), Chatwoot (UX), exemplos oficiais da Meta
+(comportamento de eventos) e `@kapso/whatsapp-cloud-api` (tipos e assinatura). O corte canônico apenas
+aplica os padrões compatíveis à arquitetura existente; nenhum código, SDK, serviço ou estrutura desses
+projetos foi copiado ou incorporado.
+
 ## Sequência imediata
 
 Checkpoint local concluído em 2026-08-09: o overlay canônico subiu Postgres, migração,
 provisionamento, seed sintético, Keycloak, API, web e edge TLS somente em loopback. Discovery/JWKS,
 PKCE, login administrador e atendente, RBAC, renovação após expiração, logout e
-bloqueio/reativação passaram na suíte Playwright existente (4/4), em duas execuções consecutivas após bootstrap isolado e restart. Essa evidência é local e não
+bloqueio/reativação e claim humano na Inbox passaram na suíte Playwright existente (5/5). Essa evidência é local e não
 substitui o gate OIDC externo anterior à Fase 4.
+
+Checkpoint local incremental em 2026-08-10: a Inbox passou a serializar claim, envio, cancelamento e
+encerramento por um único lock síncrono com proprietário exclusivo, e as listas de fila e atendimentos
+ativos receberam paginação independente com single-flight, deduplicação e descarte de respostas de
+unidade/contexto antigos. A migration append-only `0028` adicionou fingerprint SHA-256 canônico à
+solicitação de handoff, preservando replay legado por comparação dos quatro campos e serializando
+tenant+chave antes do caso. Passaram 17 testes direcionados da Inbox, 58 testes core, 52 da API,
+16 do cliente e 53 do frontend, além de typecheck, OpenAPI sem drift, build, banco limpo, upgrade
+legado, overlay e 9 jornadas Playwright OIDC locais. Nenhuma conta Meta foi conectada e essa prova
+sintética local não constitui homologação Meta nem OIDC externa.
+
+Checkpoint local incremental em 2026-08-10, migration `0029`: o mesmo processo de worker recebeu a
+fundação outbound especializada sobre o outbox canônico, com claim `SKIP LOCKED`, lease fencing,
+retry/dead-letter e finalização atômica `SENT`+`PUBLISHED` permitida somente após um identificador
+externo válido retornado por transporte explicitamente injetado. O runtime permanece com
+`OUTBOUND_WORKER_ENABLED=false`; não há transporte HTTP, credencial Meta ou fallback mock/no-op, e
+habilitar a flag sem implementação de transporte falha no startup. Envio e cancelamento também passam
+a serializar tenant+operação+chave antes dos locks de conversa; testes concorrentes em conversas
+distintas retornam conflito de domínio sem `23505`. Passaram 57 testes da API, 58 core, 16 do cliente,
+53 do frontend, banco limpo, upgrade legado, typecheck, OpenAPI sem drift, build, overlay e 9 jornadas
+Playwright OIDC locais. As mensagens continuam `QUEUED` localmente por desenho e nenhuma chamada ou
+homologação Meta externa foi realizada.
+
+Checkpoint local incremental em 2026-08-11: a Inbox manteve atualização exclusivamente explícita,
+sem polling, endpoint ou serviço novo. O refresh lê fila e atendimentos ativos e, quando há seleção,
+detalhe e primeira página de mensagens; o snapshot só é publicado depois de todas as leituras
+válidas. Locks síncronos impedem cruzamento no mesmo tick entre refresh, mutações e paginação;
+respostas antigas são descartadas por unidade e geração. `401`/`403` purgam o contexto sensível,
+`404` do detalhe reconcilia as listas e limpa a seleção, e uma conversa autorizada aberta por
+paginação permanece selecionada mesmo fora da primeira página. Draft e intenção idempotente coerente
+são preservados na mesma unidade/conversa. Passaram 19 testes direcionados da Inbox, 58 testes core,
+57 da API, 16 do cliente e 55 do frontend, além de typecheck, OpenAPI sem drift, build, banco limpo,
+upgrade legado, overlay/Verify e 9 jornadas Playwright OIDC locais. Nenhuma chamada Meta, commit,
+push, deploy ou homologação externa foi realizada.
+
+Checkpoint local incremental em 2026-08-11, abertura da Inbox: detalhe e primeira página de
+mensagens passam a ser publicados atomicamente sob um lock operacional síncrono compartilhado com
+refresh e paginações e consultado pelas mutações. `404` em qualquer leitura da conversa purga
+seleção, detalhe, mensagens, draft e intenções idempotentes, reconcilia fila e atendimentos ativos e
+exibe somente aviso neutro. `401`/`403` invalidam a geração e purgam o contexto antes dos callbacks;
+falha `5xx` remove loading e dados da conversa e mantém apenas erro sanitizado. Unidade e geração
+impedem respostas tardias de publicar estado. Passaram 26 testes direcionados da Inbox, 58 testes
+core, 57 da API, 16 do cliente e 62 do frontend, além de typecheck, OpenAPI sem drift, build, banco
+limpo, upgrade legado, overlay/Verify e 9 jornadas Playwright OIDC locais. Nenhuma migration, API,
+polling, transporte Meta, conta externa, commit, push ou deploy foi alterado ou executado neste corte.
+
+Checkpoint local incremental em 2026-08-11, migration `0030`: o atendente proprietário pode devolver
+um handoff `ACTIVE` à fila pelo comando idempotente `handoff.requeue`. A transação retorna handoff,
+caso e conversa a `QUEUED`, `WAITING_HUMAN` e `HUMAN_QUEUED`, limpa os dois owners e mantém Hermes
+bloqueado. A função estreita exige permissão unitária, ownership, versão esperada, unidade ativa,
+agregados coerentes e ausência de outbound humano `QUEUED`; replay e concorrência produzem somente
+três transições, um audit e um outbox local. Claims recorrentes passaram a usar snapshot estável,
+advisory lock por tenant+chave e evento versionado. Contrato, rota, cliente e Inbox foram integrados,
+sem mensagem, transporte ou chamada Meta. Passaram 59 testes core, 58 da API, 17 do cliente e 63 do
+frontend, banco limpo, upgrade legado, typecheck, OpenAPI sem drift, build, overlay/Verify e 9 jornadas
+Playwright OIDC locais, incluindo claim, devolução, reload e retorno à fila. Transferência direta para
+outro atendente permanece no próximo corte porque requer catálogo estreito de candidatos elegíveis e
+um segundo contexto OIDC; nenhuma API administrativa foi reutilizada. Não houve commit, push ou deploy.
+
+Checkpoint local incremental em 2026-08-11, migration `0031`: transferência direta altera somente o
+owner e a versão do handoff `ACTIVE` e da conversa `HUMAN_ACTIVE`; o caso permanece `IN_REVIEW` sem
+versionamento. O catálogo dedicado retorna apenas `id` e `displayName`, exige owner atual e permissão
+unitária `handoff.transfer`, e exclui o próprio ator, `AUDITOR`, usuário bloqueado/revogado, vínculo
+ausente, outra unidade/tenant e unidade inativa. O comando usa fingerprint SHA-256 completo, advisory
+lock tenant+chave, locks dos agregados e `FOR SHARE` sobre usuário/vínculo/unidade de destino;
+replay retorna snapshot estável e concorrência não duplica transições, audit ou outbox. A Inbox oferece
+seleção e confirmação, lock síncrono e retry com a mesma chave, removendo o atendimento do owner antigo
+após sucesso. Passaram 61 testes core, 59 da API, 18 do cliente e 64 do frontend, banco limpo com matriz
+concorrente de 10 chamadas, upgrade legado, typecheck, OpenAPI sem drift, build, overlay/Verify e 9
+jornadas Playwright OIDC locais. O happy path browser entre dois atendentes não foi executado porque o
+overlay possui somente um principal `ATTENDANT`; a integração foi provada em DB/API e não houve
+mensagem, Hermes, transporte Meta, commit, push ou deploy.
+
+Checkpoint local incremental em 2026-08-11, migration `0032`: a fila da Inbox deriva SLA no servidor
+com um único instante congelado no cursor v2 (`OVERDUE`, `DUE_SOON` em até 15 minutos e `ON_TRACK`),
+mantendo ausência de prazo como `null`. A ordenação keyset combina prioridade, presença/data do SLA,
+data de entrada e id; o cursor vincula unidade, filtros e relógio e rejeita versões antigas ou âncoras
+incompatíveis. A rota existente ganhou filtros fechados de prioridade/SLA e a UI ganhou filtros e badges
+textuais, sem endpoint, cron, polling ou escrita operacional adicional. Passaram 62 testes core, 59 da
+API, 18 do cliente e 65 do frontend (204), banco limpo, upgrade legado, typecheck, OpenAPI sem drift,
+build, overlay/Verify e 9 jornadas Playwright OIDC locais. O E2E detectou e a implementação corrigiu a
+projeção SLA ausente na resposta do claim antes do verde final. As migrations `0001`-`0031` tiveram 31
+checksums SHA-256 conferidos; `0031` permaneceu `B3D1713A23FE121C614A5E978E9ECA8EFB8E7AE0272BDA3D2656B9F182F02B23`.
+Não houve Hermes, transporte Meta real, commit, push ou deploy.
+
+Checkpoint local consolidado em 2026-08-12, migrations `0033`-`0037`: a supervisão passou a listar
+atendimentos ativos da unidade por projeção estreita, paginação keyset e permissão explícita, e o
+takeover idempotente transfere o ownership ao supervisor sem alterar os estados `ACTIVE`,
+`HUMAN_ACTIVE` e `IN_REVIEW`. O lifecycle de memberships ganhou revogação e reativação versionadas,
+auditadas e fail-closed; catálogos operacionais retornam somente os campos necessários e respeitam
+tenant, unidade, usuário ativo, vínculo ativo e papel elegível. A RLS dos pedidos médicos foi alinhada
+ao vínculo ativo, e a migration `0037` corrigiu a projeção tipada da lista supervisionada no PostgreSQL
+real. Esses cortes permaneceram no backend, cliente e mesma Inbox canônicos, sem novo serviço ou
+transporte externo.
+
+Checkpoint local consolidado em 2026-08-12, migrations `0038`-`0039`: a transferência revalida
+membership `ACTIVE` dentro da transação e exige coerência entre unidade, conversa aberta, caso e
+handoff antes de alterar ownership. `ASSIGNEE_NOT_ELIGIBLE` passou a produzir conflito operacional
+sanitizado, sem erro interno. O replay da transferência também revalida contexto autenticado,
+permissão `handoff.transfer` e vínculo ativo, sem permitir que usuário bloqueado ou revogado recupere
+snapshot por uma chave antiga. A jornada OIDC local comprovou takeover supervisionado com exatamente
+um comando por intenção e sem mensagem, Hermes ou outbound.
+
+Checkpoint local consolidado em 2026-08-12, migration `0040`: transferência direta passou a exigir
+motivo operacional fechado (`SHIFT_CHANGE`, `LOAD_BALANCING`, `SPECIALIZED_SUPPORT` ou
+`OPERATIONAL_CONTINUITY`). O motivo integra fingerprint e idempotência, aparece em workflow, audit e
+outbox, e texto livre é rejeitado. Replay idêntico preserva o snapshot; mesma chave com motivo
+divergente retorna conflito. A mesma Inbox exige candidato, motivo e confirmação, preserva a chave no
+retry e invalida a intenção quando candidato, motivo ou versão mudam.
+
+Checkpoint local consolidado em 2026-08-12, migration `0041`: atribuição humana e lifecycle de
+membership passaram a usar serialização compatível. Se a revogação vencer, claim, transfer ou
+takeover são rejeitados; se a atribuição vencer, a revogação falha enquanto existir trabalho ativo.
+Assim, o estado final não pode manter atendimento `ACTIVE/HUMAN_ACTIVE` atribuído a membership
+`REVOKED`. Replays legados sem motivo não podem atravessar o contrato moderno. A Inbox também
+reconcilia atomicamente fila, ativos próprios e supervisionados após transferência/devolução e purga
+seleção, draft e intenções em conflitos ou recursos desaparecidos.
+
+Checkpoint local consolidado em 2026-08-12, migration `0042`: encerramento humano passou a exigir
+confirmação e disposição fechada (`RESOLVED`, `DUPLICATE`, `CUSTOMER_WITHDREW` ou
+`EXTERNAL_REFERRAL`). A disposição integra fingerprint, comando, workflow, audit e outbox; texto livre
+e replay legado sem disposição são rejeitados pelo contrato moderno. Cancelar a confirmação não gera
+mutação, retry idêntico conserva a chave, e divergência de disposição produz conflito. O encerramento
+continua suspendendo a automação e não envia mensagem nem aciona Hermes ou Meta.
+
+Checkpoint local consolidado em 2026-08-12, migration `0043`: os comandos de encerramento e
+devolução persistem a unidade operacional e revalidam `handoff.resolve` ou `handoff.requeue` antes
+de qualquer replay. Revogação de membership ou perda do grant torna a chave antiga invisível, sem
+novo command, workflow, audit ou outbox. Na Inbox, a confirmação do POST agora é separada da
+reconciliação de leitura: uma falha parcial após commit remove imediatamente intenção e ações stale,
+exibe aviso neutro e não oferece retry que duplicaria uma operação já concluída.
+
+Prova verde consolidada até a migration `0043`: 273/273 testes automatizados e 15/15 jornadas E2E
+OIDC locais. Passaram banco limpo, upgrade legado, `typecheck:all`, verificação OpenAPI/cliente,
+`build:all`, overlay Verify e `git diff --check`. Essa evidência é exclusivamente local; não houve
+integração ou homologação Meta real, commit, push ou deploy.
+
+Checkpoint local consolidado em 2026-08-12, migrations `0044`-`0045`: gestores e supervisores com
+`handoff.history.read` podem descobrir atendimentos encerrados da própria unidade em uma projeção
+estreita, paginada e read-only. A timeline histórica usa cutoff SQL no instante do encerramento antes
+do `ORDER BY/LIMIT`, e detalhe, mensagens, draft e ações são defensivamente desativados na UI. A
+`0045` corrige de forma append-only o join do resolvedor depois que o checksum da `0044` já havia sido
+registrado pelo overlay. Prova verde: 281/281 testes automatizados, 16/16 jornadas E2E OIDC locais,
+banco limpo, upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e
+`git diff --check`. A consulta histórica não alterou handoff, conversa, mensagens, audit ou outbox e
+não acionou Hermes, host externo ou Meta.
+
+Checkpoint local consolidado em 2026-08-12, migration `0046`: detalhe e timeline de conversas
+`CLOSED` agora exigem `handoff.history.read` na própria unidade, fechando a descoberta por UUID por
+atendentes ou auditores sem acesso ao histórico. Conversas `OPEN` preservam o fluxo operacional
+anterior. A prova adversarial no PostgreSQL cobre gestor e supervisor autorizados, atendente, auditor
+e membership revogada negados, isolamento tenant/unidade, ordenação e paginação keyset, disposição
+legada, resolvedor, cutoff anterior ao `LIMIT` e ausência de efeitos em audit, workflow, mensagens e
+outbox. O fingerprint de encerramento também normaliza UUID para lowercase. Prova verde: 282/282
+testes automatizados, 16/16 jornadas E2E OIDC locais, banco limpo, upgrade legado,
+`typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
+
+Checkpoint local consolidado em 2026-08-12, migration `0047`: o histórico encerrado aceita filtros
+opcionais e combináveis por prioridade, disposição e intervalo temporal semiaberto (`>= início` e
+`< fim`) no endpoint canônico. O cursor v2 vincula unidade e todos os filtros, rejeitando cursor
+legado, adulterado ou reutilizado em outra consulta. A função SQL revalida a âncora sob os mesmos
+predicados, limita a janela a 366 dias, preserva RBAC/tenant e permanece read-only; um índice dedicado
+evita varredura dos commands de encerramento. Na Inbox, filtros têm labels PT-BR, aplicação explícita,
+single-flight, generation guard e preservação em refresh, paginação e reconciliação. Prova verde:
+290/290 testes automatizados, 16/16 jornadas E2E OIDC no overlay reconstruído, banco limpo,
+upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
+
+Checkpoint local consolidado em 2026-08-12, migration `0048`: o cutoff da timeline encerrada deixou
+de depender do cliente. Para conversas `CLOSED`, o PostgreSQL limita toda consulta ao menor valor
+entre `before` e `closed_at`, usa o mesmo limite na validação do cursor e rejeita agregados encerrados
+sem timestamp terminal. A função histórica legada perdeu `EXECUTE` da API; a v2 filtrada permanece
+canônica. A Inbox valida 366 dias antes da rede, preserva o snapshot em erro, sinaliza filtros não
+aplicados, oferece limpeza explícita, mostra disposição/motivo e expõe seleção/detalhe acessíveis.
+Prova verde: 292/292 testes automatizados, 16/16 jornadas E2E OIDC no overlay reconstruído, banco
+limpo, upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e
+`git diff --check`.
+
+Checkpoint local consolidado em 2026-08-12, shell modular: a aplicação monta somente o módulo
+selecionado entre Inbox, Roteamento, Acessos, Vínculos e Visão geral, sempre derivado dos grants
+atuais e sem persistir seleção em URL ou storage. Módulos inativos não executam leituras nem mantêm
+PII no DOM; perda de grant aplica fallback fail-closed. Navegação é bloqueada durante mutações,
+diálogos e token de convite, e exige confirmação antes de descartar draft ou intenção idempotente.
+Logout desmonta os dados sensíveis no mesmo tick e conclui o IdP em best effort. Prova verde:
+288/288 testes automatizados, 16/16 jornadas E2E OIDC no overlay reconstruído, banco limpo,
+upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
+
+Checkpoint local consolidado em 2026-08-12, migration `0049`: gestores e supervisores podem
+reabrir um atendimento encerrado sem alterar o episódio histórico. O comando idempotente preserva
+o handoff fonte `RESOLVED`, cria um novo episódio `QUEUED`, reabre caso e conversa em fila humana e
+mantém Hermes bloqueado. Autorização unitária e histórica é revalidada inclusive no replay; locks,
+fingerprint, versão esperada e concorrência garantem um vencedor. A ação não é oferecida quando há
+outbound humano pendente e nenhum caminho cria mensagem, envio, Hermes ou chamada Meta. Prova verde:
+299/299 testes automatizados, 17/17 jornadas E2E OIDC no overlay reconstruído, banco limpo, upgrade
+legado, `typecheck:all`, OpenAPI/cliente gerado, `build:all`, overlay Verify e `git diff --check`.
+
+Checkpoint local consolidado em 2026-08-12, migration `0050`: a reabertura só aceita o episódio
+`RESOLVED` mais recente da conversa. Episódios ancestrais continuam consultáveis no histórico, mas
+não recebem `reopenTarget` e não podem restaurar prioridade, motivo ou SLA obsoletos. O resolvedor
+de escopo reconhece a mesma chave do mesmo ator antes de comparar o payload, permitindo que replay
+divergente chegue ao comando e retorne `409` sem revelar escopo. A matriz adversarial cobre
+401/403/404/409/5xx, purge, reconciliação, retry com a mesma chave, exclusão mútua, unmount e falha
+pós-commit; o navegador confirma reload e replay divergente. Prova verde: 306/306 testes
+automatizados, 17/17 jornadas E2E OIDC, banco limpo, upgrade legado, `typecheck:all`, OpenAPI/cliente,
+`build:all`, overlay Verify e `git diff --check`.
 
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
@@ -333,4 +608,6 @@ substitui o gate OIDC externo anterior à Fase 4.
 3. Expor o primeiro fluxo vertical da inbox somente depois do gate externo, reutilizando contratos,
    API e domínio canônicos; a UI continuará sem acesso direto ao banco.
 
-Não iniciar interface, Hermes ou Meta antes do gate completo da Fase 3.
+Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da
+fase correspondente. A interface local e a Inbox já estão implementadas e permanecem restritas ao
+overlay sintético até homologação externa.

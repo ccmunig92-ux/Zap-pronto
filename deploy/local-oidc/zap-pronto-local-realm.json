@@ -51,6 +51,12 @@
       "username": "attendant.local", "email": "attendant.local@example.test", "emailVerified": true,
       "enabled": true, "firstName": "Atendente", "lastName": "Local",
       "credentials": [{"type": "password", "value": "${LOCAL_OIDC_ATTENDANT_PASSWORD}", "temporary": false}]
+    },
+    {
+      "id": "91000000-0000-4000-8000-000000000003",
+      "username": "attendant.two.local", "email": "attendant.two.local@example.test", "emailVerified": true,
+      "enabled": true, "firstName": "Atendente", "lastName": "Local 2",
+      "credentials": [{"type": "password", "value": "${LOCAL_OIDC_ATTENDANT_TWO_PASSWORD}", "temporary": false}]
     }
   ]
 }

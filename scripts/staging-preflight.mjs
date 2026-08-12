@@ -4,15 +4,17 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const IMAGE = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/;
-const SECRET_NAMES = ["POSTGRES_PASSWORD_FILE", "DATABASE_MIGRATION_URL_FILE", "DATABASE_RUNTIME_URL_FILE"];
+const SECRET_NAMES = ["POSTGRES_PASSWORD_FILE", "DATABASE_MIGRATION_URL_FILE", "DATABASE_RUNTIME_URL_FILE", "DATABASE_WORKER_URL_FILE"];
 const SECRET_OWNERSHIP = Object.freeze({
   POSTGRES_PASSWORD_FILE: { uid: 70, gid: 70 },
   DATABASE_MIGRATION_URL_FILE: { uid: 1000, gid: 1000 },
   DATABASE_RUNTIME_URL_FILE: { uid: 1000, gid: 1000 },
+  DATABASE_WORKER_URL_FILE: { uid: 1000, gid: 1000 },
 });
 const MINIMUMS = Object.freeze({
   postgres: { cpus: 1.5, memory: 1536 }, migrate: { cpus: 1, memory: 512 },
-  "provision-runtime": { cpus: 0.5, memory: 256 }, api: { cpus: 1, memory: 768 }, web: { cpus: 0.5, memory: 256 },
+  "provision-runtime": { cpus: 0.5, memory: 256 }, api: { cpus: 1, memory: 768 },
+  worker:{cpus:0.5,memory:384},web: { cpus: 0.5, memory: 256 },
 });
 
 function fail(code) { throw new Error(`STAGING_PREFLIGHT:${code}`); }
@@ -105,13 +107,15 @@ export function validateResources(compose) {
 
 const EXPECTED_SECRETS = Object.freeze({
   postgres:["postgres_password"], migrate:["database_migration_url"],
-  "provision-runtime":["database_migration_url","database_runtime_url"], api:["database_runtime_url"], web:[],
+  "provision-runtime":["database_migration_url","database_runtime_url","database_worker_url"],
+  api:["database_runtime_url"],worker:["database_worker_url"],web:[],
 });
 const EXPECTED_DEPENDS = Object.freeze({
   postgres:{}, migrate:{postgres:"service_healthy"}, "provision-runtime":{migrate:"service_completed_successfully"},
-  api:{"provision-runtime":"service_completed_successfully"}, web:{api:"service_healthy"},
+  api:{"provision-runtime":"service_completed_successfully"},worker:{"provision-runtime":"service_completed_successfully"},web:{api:"service_healthy"},
 });
-const EXPECTED_NETWORKS = Object.freeze({ postgres:["data"], migrate:["data"], "provision-runtime":["data"], api:["app","data"], web:["app"] });
+const EXPECTED_NETWORKS = Object.freeze({ postgres:["data"], migrate:["data"], "provision-runtime":["data"],
+  api:["app","data"],worker:["data"],web:["app"] });
 
 export function validateComposeInvariants(compose) {
   if (compose.networks?.data?.internal !== true) fail("DATA_NETWORK_NOT_INTERNAL");

@@ -10,12 +10,17 @@ import { registerCurrentUserRoute } from "./routes/current-user.js";
 import { registerUserInvitationRoutes } from "./routes/user-invitations.js";
 import { registerUserAdministrationRoutes } from "./routes/user-administration.js";
 import { registerUserInvitationAcceptanceRoute } from "./routes/user-invitation-acceptance.js";
+import { registerInboxHandoffRoutes } from "./routes/inbox-handoffs.js";
+import { registerInboxRoutingRequiredRoutes } from "./routes/inbox-routing-required.js";
+import { registerInboxConversationRoutes } from "./routes/inbox-conversations.js";
+import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 export interface BuildAppOptions {
   readonly identityVerifier?: IdentityVerifier;
   readonly pool?: TenantTransactionPool;
+  readonly metaWebhook?: MetaWebhookOptions;
 }
 
 const unavailablePool: TenantTransactionPool = {
@@ -79,5 +84,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerUserInvitationRoutes(app, options.pool ?? unavailablePool);
   registerUserAdministrationRoutes(app, options.pool ?? unavailablePool);
   registerUserInvitationAcceptanceRoute(app, options.pool ?? unavailablePool);
+  registerInboxHandoffRoutes(app, options.pool ?? unavailablePool);
+  registerInboxRoutingRequiredRoutes(app, options.pool ?? unavailablePool);
+  registerInboxConversationRoutes(app, options.pool ?? unavailablePool);
+  await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }

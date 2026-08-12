@@ -7,6 +7,38 @@ export type UserId = string & { readonly __brand: "UserId" };
 export type ChannelType = "WHATSAPP" | "INSTAGRAM" | "FACEBOOK_MESSENGER";
 export type ChannelScope = "CORPORATE" | "SINGLE_UNIT" | "SELECTED_UNITS";
 
+export type InboundChannel = "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
+export type InboundProvider = "META_WHATSAPP" | "META_INSTAGRAM" | "META_FACEBOOK";
+export type InboundContentKind = "TEXT" | "AUDIO" | "IMAGE" | "DOCUMENT" | "INTERACTIVE";
+
+interface InboundEnvelopeBase {
+  readonly provider: InboundProvider;
+  readonly channel: InboundChannel;
+  readonly providerEventId: string;
+  readonly channelAccountId: string;
+  readonly senderExternalId: string;
+  readonly recipientExternalId: string;
+  readonly occurredAt: string;
+}
+
+export type InboundEnvelope = InboundEnvelopeBase & (
+  | { readonly kind: "TEXT"; readonly payload: { readonly text: string } }
+  | { readonly kind: "AUDIO"; readonly payload: { readonly mediaId: string; readonly mimeType?: string;
+      readonly trust: "UNTRUSTED" } }
+  | { readonly kind: "IMAGE"; readonly payload: { readonly mediaId: string; readonly mimeType?: string;
+      readonly caption?: string; readonly trust: "UNTRUSTED" } }
+  | { readonly kind: "DOCUMENT"; readonly payload: { readonly mediaId: string; readonly mimeType?: string;
+      readonly fileName?: string; readonly caption?: string; readonly trust: "UNTRUSTED" } }
+  | { readonly kind: "INTERACTIVE"; readonly payload: { readonly interactionId: string;
+      readonly title?: string; readonly trust: "UNTRUSTED" } }
+);
+
+export interface ChannelInboundAdapter<RawPayload = unknown> {
+  readonly provider: InboundProvider;
+  readonly channel: InboundChannel;
+  normalize(payload: RawPayload): readonly InboundEnvelope[];
+}
+
 export type AutomationStatus =
   | "ACTIVE"
   | "HUMAN_REQUESTED"

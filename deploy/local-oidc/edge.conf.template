@@ -1,9 +1,13 @@
 log_format zap_local_safe '$remote_addr - $remote_user [$time_local] '
                           '"$request_method $uri $server_protocol" $status $body_bytes_sent';
 
+resolver 127.0.0.11 valid=5s ipv6=off;
+
 server {
   listen 18443 ssl;
   server_name ${LOCAL_OIDC_HOST};
+  set $zap_local_keycloak_upstream http://keycloak:8080;
+  set $zap_local_web_upstream http://web:8080;
   ssl_certificate /run/secrets/local_tls_cert;
   ssl_certificate_key /run/secrets/local_tls_key;
   ssl_protocols TLSv1.2 TLSv1.3;
@@ -11,14 +15,14 @@ server {
   access_log /var/log/nginx/access.log zap_local_safe;
 
   location ~ ^/(realms|resources)/ {
-    proxy_pass http://keycloak:8080;
+    proxy_pass $zap_local_keycloak_upstream;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Port 8443;
     proxy_set_header X-Forwarded-Proto https;
   }
   location / {
-    proxy_pass http://web:8080;
+    proxy_pass $zap_local_web_upstream;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Proto https;

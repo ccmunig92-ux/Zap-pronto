@@ -16,5 +16,41 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-Fundação de contratos e regras de domínio. Não há integração ou deploy de produção.
+O checkout canônico contém uma Inbox local integrada até a migration `0050`, com:
 
+- autenticação OIDC, RBAC e isolamento por tenant e unidade;
+- fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
+- prioridade, SLA, paginação keyset e filtros operacionais;
+- administração de usuários e vínculos unitários;
+- contratos TypeBox/OpenAPI, cliente gerado, PostgreSQL/RLS, audit e outbox;
+- webhook Meta assinado e reconciliação sintética local, sem transporte outbound real.
+
+Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta
+contas Meta reais e mantém o transporte externo e Hermes desativados. O histórico de cortes e evidências
+fica em [docs/cronograma.md](docs/cronograma.md); o procedimento reproduzível de fechamento local fica em
+[docs/release-local.md](docs/release-local.md).
+
+## Desenvolvimento local
+
+Pré-requisitos: Node.js 24, pnpm 11.9, Docker com Compose e PowerShell 7 no Windows para o controlador
+OIDC local.
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm typecheck:all
+pnpm test:all
+pnpm api:check
+pnpm build:all
+```
+
+O banco de integração exige PostgreSQL 18 e `DATABASE_ADMIN_URL`. O overlay completo é controlado pelo
+script existente, sem criar uma segunda aplicação:
+
+```powershell
+pwsh -NoProfile -File deploy/local-oidc/local-oidc.ps1 -Action Up
+pwsh -NoProfile -File deploy/local-oidc/local-oidc.ps1 -Action Verify
+pwsh -NoProfile -File deploy/local-oidc/local-oidc.ps1 -Action E2E
+```
+
+Não execute deploy nem habilite Meta/Hermes a partir deste README. Essas fases exigem autorização e
+homologação externas explícitas.

@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @zap-pronto/core --filter @zap-pronto/contracts build && pnpm build && node ../../scripts/run-built-tests.mjs dist",
     "oidc:probe": "pnpm build && node ../../scripts/oidc-readiness.mjs",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "worker:start": "node dist/worker.js"
   },
   "dependencies": {
     "@fastify/swagger": "^9.5.1",

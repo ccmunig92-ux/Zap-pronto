@@ -4,9 +4,105 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiProblem, AuthenticationRequired, InvalidApiResponse } from "@zap-pronto/api-client";
 import { App } from "./App.js";
 import type { AdministrationClient } from "./AdministrationPanel.js";
+import type { UnitMembershipClient } from "./UnitMembershipPanel.js";
+import type { InboxClient } from "./InboxPanel.js";
+
+function emptyInboxClient(overrides:Partial<InboxClient>={}):InboxClient{return{
+  listHandoffs:async()=>({items:[]}),claimHandoff:async()=>({}),resolveHandoff:async()=>({}),reopenInboxHandoff:async()=>({}),requeueHandoff:async()=>({}),
+  listInboxHandoffTransferCandidates:async()=>({items:[]}),transferInboxHandoff:async()=>({}),takeoverInboxHandoff:async()=>({}),
+  listActiveInboxHandoffs:async()=>({items:[]}),listSupervisedInboxHandoffs:async()=>({items:[]}),
+  listResolvedInboxHandoffs:async()=>({items:[]}),getInboxConversation:async()=>{throw new Error("not called")},
+  listInboxConversationMessages:async()=>({items:[]}),sendHumanTextMessage:async()=>({}),cancelHumanTextMessage:async()=>({}),...overrides};}
 
 afterEach(cleanup);
 describe("authenticated shell", () => {
+  it("mounts the unit membership catalog only for units explicitly authorized to the unit manager", async () => {
+    const listUnitMemberships = vi.fn(async () => ({ items: [] }));
+    const unitMembershipClient: UnitMembershipClient = {
+      listUnitMemberships,
+      async changeUnitMembership() { return {}; },
+    };
+    render(<App client={{ async getCurrentUser() { return {
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "manager@example.test", displayName: "Gerente" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Clínica" },
+      memberships: [
+        { unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO", unitName: "Centro", role: "UNIT_MANAGER" as const },
+        { unitId: "44444444-4444-4444-8444-444444444444", unitCode: "NORTE", unitName: "Norte", role: "ATTENDANT" as const },
+      ],
+      grants: [{ permission: "unit.members.manage" as const, scope: "UNIT" as const,
+        unitId: "33333333-3333-4333-8333-333333333333" }],
+    }; } }} unitMembershipClient={unitMembershipClient}/>);
+
+    expect(await screen.findByRole("heading", { name: "Vínculos da unidade" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Centro" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Norte" })).toBeNull();
+    await waitFor(() => expect(listUnitMemberships).toHaveBeenCalledWith({
+      unitId: "33333333-3333-4333-8333-333333333333", limit: 25,
+    }));
+  });
+  it("does not call the unit membership catalog without the explicit unit grant", async () => {
+    const listUnitMemberships = vi.fn(async () => ({ items: [] }));
+    render(<App client={{ async getCurrentUser() { return {
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "manager@example.test", displayName: "Gerente" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Clínica" },
+      memberships: [{ unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO",
+        unitName: "Centro", role: "UNIT_MANAGER" as const }], grants: [],
+    }; } }} unitMembershipClient={{ listUnitMemberships, async changeUnitMembership() { return {}; } }}/>)
+    expect(await screen.findByText("Clínica")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Vínculos da unidade" })).toBeNull();
+    expect(listUnitMemberships).not.toHaveBeenCalled();
+  });
+  it("keeps tenant administration canonical without mounting a duplicate unit catalog", async () => {
+    const listUnitMemberships = vi.fn(async () => ({ items: [] }));
+    const administrationClient: AdministrationClient = {
+      async listAdministrativeUsers() { return { items: [] }; },
+      async listAdministrativeInvitations() { return { items: [] }; },
+      async changeUnitMembership() { return {}; },
+      async changeAdministrativeUserStatus() { return {}; },
+      async revokeUserInvitation() { return {}; },
+      async reissueUserInvitation():ReturnType<AdministrationClient["reissueUserInvitation"]> {
+        throw new Error("not used");
+      },
+    };
+    render(<App client={{ async getCurrentUser() { return {
+      user: { id: "22222222-2222-4222-8222-222222222222", email: "admin@example.test", displayName: "Admin" },
+      tenant: { id: "11111111-1111-4111-8111-111111111111", name: "Clínica" },
+      memberships: [{ unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO",
+        unitName: "Centro", role: "UNIT_MANAGER" as const }],
+      grants: [
+        { permission: "tenant.users.manage" as const, scope: "TENANT" as const },
+        { permission: "unit.members.manage" as const, scope: "UNIT" as const,
+          unitId: "33333333-3333-4333-8333-333333333333" },
+      ],
+    }; } }} administrationClient={administrationClient}
+      invitationClient={{ async getUserInvitationOptions() { return { providers: [], units: [], roles: [] }; },
+        async createUserInvitation() { throw new Error("not called"); } }}
+      unitMembershipClient={{ listUnitMemberships, async changeUnitMembership() { return {}; } }}/>)
+    expect(await screen.findByRole("heading", { name: "Administração de acesso" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Vínculos da unidade" })).toBeNull();
+    expect(listUnitMemberships).not.toHaveBeenCalled();
+  });
+  it("mounts routing queue only from explicit tenant grant",async()=>{const listRoutingRequired=vi.fn(async()=>({items:[]}));
+    render(<App client={{async getCurrentUser(){return{user:{id:"22222222-2222-4222-8222-222222222222",email:"admin@test",displayName:"Admin"},
+      tenant:{id:"11111111-1111-4111-8111-111111111111",name:"Clínica"},memberships:[],
+      grants:[{permission:"inbound.routing.read" as const,scope:"TENANT" as const}]}}}}
+      routingClient={{listRoutingRequired,async resolveRoutingRequired(){return{replayed:false}}}}/>);
+    expect(await screen.findByRole("heading",{name:"Aguardando unidade"})).toBeTruthy();await vi.waitFor(()=>expect(listRoutingRequired).toHaveBeenCalledOnce());});
+  it("mounts only the highest-priority authorized module and starts inactive clients only after navigation",async()=>{
+    const listQueue=vi.fn(async()=>({items:[]}));const listActive=vi.fn(async()=>({items:[]}));
+    const listRoutingRequired=vi.fn(async()=>({items:[]}));
+    render(<App client={{async getCurrentUser(){return{user:{id:"22222222-2222-4222-8222-222222222222",email:"agent@test",displayName:"Agente"},
+      tenant:{id:"11111111-1111-4111-8111-111111111111",name:"Clínica"},memberships:[{unitId:"33333333-3333-4333-8333-333333333333",unitCode:"CENTRO",unitName:"Centro",role:"ATTENDANT" as const}],
+      grants:[{permission:"conversation.read" as const,scope:"UNIT" as const,unitId:"33333333-3333-4333-8333-333333333333"},{permission:"inbound.routing.read" as const,scope:"TENANT" as const}]}}}}
+      inboxClient={emptyInboxClient({listHandoffs:listQueue,listActiveInboxHandoffs:listActive})}
+      routingClient={{listRoutingRequired,async resolveRoutingRequired(){return{replayed:false}}}}/>);
+    expect(await screen.findByRole("heading",{name:"Inbox"})).toBeTruthy();
+    expect(screen.getByRole("button",{name:"Inbox"}).getAttribute("aria-current")).toBe("page");
+    expect(listQueue).toHaveBeenCalledOnce();expect(listActive).toHaveBeenCalledOnce();expect(listRoutingRequired).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"Roteamento"}));
+    expect(await screen.findByRole("heading",{name:"Aguardando unidade"})).toBeTruthy();
+    await waitFor(()=>expect(listRoutingRequired).toHaveBeenCalledOnce());
+  });
   it("fails closed when OIDC initialization fails and recovers only after an explicit retry", async () => {
     const getCurrentUser = vi.fn().mockResolvedValue({
       user: { id: "22222222-2222-4222-8222-222222222222", email: "agent@example.test", displayName: "Agente" },
@@ -75,6 +171,7 @@ describe("authenticated shell", () => {
       async listAdministrativeUsers() { return { items: [{ id: base.user.id, email: base.user.email,
         displayName: base.user.displayName, status: "ACTIVE", version: 1, memberships: [], allowedActions: ["BLOCK"] }] }; },
       async listAdministrativeInvitations() { return { items: [] }; },
+      async changeUnitMembership() { return {}; },
       async changeAdministrativeUserStatus() { throw new ApiProblem({ type: "urn:test", title: "Forbidden",
         status: 403, correlationId: "correlation-403" }); },
       async revokeUserInvitation() { return {}; },
@@ -89,6 +186,8 @@ describe("authenticated shell", () => {
     await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByText("Administração de acesso")).toBeNull());
     expect(screen.getByText("Clínica")).toBeTruthy();
+    expect(screen.getByRole("button",{name:"Visão geral"}).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("button",{name:"Acessos"})).toBeNull();
   });
   it("ends the local shell session through the canonical logout action", async () => {
     render(<App client={{ async getCurrentUser() { return {
