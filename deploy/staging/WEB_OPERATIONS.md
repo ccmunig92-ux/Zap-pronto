@@ -48,4 +48,23 @@ que estava ativa. Após sucesso, atualize de forma atômica o `ZAP_WEB_IMAGE` no
 caso contrário, uma futura operação do Compose pode reaplicar a imagem que sofreu rollback.
 
 Rollback do web não corrige incompatibilidade de contrato da API. Se a versão anterior do frontend não
-for compatível com a API ativa, mantenha a operação bloqueada e siga o runbook de rollback integrado.
+for compatível com a API ativa, mantenha a operação bloqueada e siga o procedimento integrado abaixo.
+
+## Rollback integrado
+
+Não faça downgrade destrutivo de migration nem restaure o banco sobre o volume ativo. O rollback integrado
+é deliberadamente manual e fail-closed:
+
+1. interrompa a liberação e preserve logs, SHA, digests e o backup pré-deploy;
+2. confirme no histórico append-only que o release anterior é compatível com o schema já aplicado;
+3. se for compatível, fixe os digests anteriores de API e web no arquivo externo e recrie somente esses
+   serviços, sem executar migration reversa;
+4. execute o preflight, `verify-web.sh` e a jornada smoke autenticada antes de reabrir o ambiente;
+5. se não houver compatibilidade comprovada, mantenha o ambiente indisponível e restaure o backup em um
+   banco isolado; nunca substitua o volume ativo antes de validar migrations, RLS e login runtime;
+6. somente após a validação isolada, promova o volume restaurado por procedimento operacional aprovado e
+   repita todos os gates de saúde, autenticação e autorização.
+
+O objetivo de staging é RPO de 24 horas e RTO de 4 horas, conforme o README deste diretório. Ultrapassar
+qualquer objetivo bloqueia a homologação e exige registro do incidente; não autoriza atalhos, rollback de
+SQL ou reutilização de secrets.
