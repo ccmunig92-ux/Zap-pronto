@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { validateComposeInvariants, validateEnvironment, validateResources, validateSecrets, validateSecretMetadata, parseEnv } from "./staging-preflight.mjs";
@@ -9,6 +9,15 @@ const digest = "a".repeat(64);
 const validEnv = { ZAP_API_IMAGE:`ghcr.io/acme/api@sha256:${digest}`, ZAP_WEB_IMAGE:`ghcr.io/acme/web@sha256:${digest}`,
   POSTGRES_IMAGE:`postgres@sha256:${digest}`, OIDC_ISSUER:"https://id.example/tenant/", OIDC_AUTHORITY_ORIGIN:"https://id.example",
   OIDC_AUDIENCE:"zap-pronto", OIDC_JWKS_URL:"https://id.example/jwks", OIDC_DISCOVERY_URL:"https://id.example/discovery" };
+
+test("staging smoke scripts provision the isolated worker credential", () => {
+  for (const script of ["staging-smoke.sh", "staging-backup-smoke.sh"]) {
+    const source = readFileSync(new URL(script, import.meta.url), "utf8");
+    assert.match(source, /database-worker-url/);
+    assert.match(source, /zap_pronto_worker_runtime/);
+    assert.match(source, /export DATABASE_WORKER_URL_FILE=/);
+  }
+});
 const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resources:{limits:{cpus,memory}}},
   networks:Object.fromEntries(networks.map((name)=>[name,null])),secrets:secrets.map((source)=>({source})),depends_on,
   read_only:true,cap_drop:["ALL"],security_opt:["no-new-privileges:true"],
