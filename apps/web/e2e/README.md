@@ -10,6 +10,8 @@ Defina as variáveis somente no ambiente do processo, nunca em arquivo versionad
 - `E2E_BASE_URL=https://...`
 - `E2E_ADMIN_USERNAME`, `E2E_ADMIN_PASSWORD`, `E2E_ADMIN_EXPECTED_TENANT`
 - `E2E_ATTENDANT_USERNAME`, `E2E_ATTENDANT_PASSWORD`, `E2E_ATTENDANT_EXPECTED_TENANT`
+- `E2E_MANAGER_USERNAME`, `E2E_MANAGER_PASSWORD`, `E2E_MANAGER_EXPECTED_TENANT`
+- `E2E_MANAGER_MEMBERSHIP_MATCH`, identificador operacional de um vínculo que o gestor pode revogar e reativar
 - seletores opcionais `E2E_OIDC_USERNAME_SELECTOR`, `E2E_OIDC_PASSWORD_SELECTOR` e
   `E2E_OIDC_SUBMIT_SELECTOR`
 

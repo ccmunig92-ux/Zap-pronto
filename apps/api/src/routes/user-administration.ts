@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusRequestSchema,
-  ChangeUserStatusResponseSchema, ProblemDetailsSchema, ReissueInvitationRequestSchema,
+  ChangeUserStatusResponseSchema,ChangeUnitMembershipParamsSchema,ChangeUnitMembershipRequestSchema,
+  ChangeUnitMembershipResponseSchema, ProblemDetailsSchema, ReissueInvitationRequestSchema,
   ReissueInvitationResponseSchema, RevokeInvitationRequestSchema, RevokeInvitationResponseSchema,
-  type ChangeUserStatusRequest, type ReissueInvitationRequest, type RevokeInvitationRequest } from "@zap-pronto/contracts";
-import { changeAdministrativeUserStatus, listAdministrativeInvitations, listAdministrativeUsers,
-  reissueUserInvitation, revokeUserInvitation } from "@zap-pronto/core/domain/user-administration";
+  ListUnitMembershipsParamsSchema,ListUnitMembershipsQuerySchema,UnitMembershipsPageSchema,
+  type ChangeUserStatusRequest,type ChangeUnitMembershipParams,type ChangeUnitMembershipRequest,
+  type ListUnitMembershipsParams,type ListUnitMembershipsQuery,type ReissueInvitationRequest, type RevokeInvitationRequest } from "@zap-pronto/contracts";
+import { changeAdministrativeUserStatus,changeUnitMembership, listAdministrativeInvitations, listAdministrativeUsers,
+  listUnitMembershipCatalog,reissueUserInvitation, revokeUserInvitation } from "@zap-pronto/core/domain/user-administration";
 import type { TenantTransactionPool } from "@zap-pronto/core/database/tenant-transaction";
 import { protectedRoute } from "../http/protected-route.js";
 import { InvitationRequestError } from "./user-invitations-errors.js";
@@ -62,6 +65,22 @@ export function registerUserAdministrationRoutes(app: FastifyInstance, pool: Ten
     },
   }));
 
+  app.get<{Params:ListUnitMembershipsParams;Querystring:ListUnitMembershipsQuery}>("/v1/units/:unitId/memberships",protectedRoute({
+    pool,noStore:true,
+    authorization:{kind:"permission",permission:"unit.members.manage",scope:{kind:"unit",
+      async resolveUnitId(_client,request){return(request.params as ListUnitMembershipsParams).unitId}}},
+    schema:{operationId:"listUnitMemberships",params:ListUnitMembershipsParamsSchema,
+      querystring:ListUnitMembershipsQuerySchema,response:{200:UnitMembershipsPageSchema,
+        400:ProblemDetailsSchema,401:ProblemDetailsSchema,403:ProblemDetailsSchema,
+        500:ProblemDetailsSchema,503:ProblemDetailsSchema}},
+    async handler(client,request){
+      try{const params=request.params as ListUnitMembershipsParams;
+        const query=request.query as ListUnitMembershipsQuery;
+        return await listUnitMembershipCatalog(client,{unitId:params.unitId,...query})}
+      catch(error){throw InvitationRequestError.from(error)}
+    },
+  }));
+
   app.post("/v1/users/:userId/status", protectedRoute({
     pool, authorization: { kind: "permission", permission: "tenant.users.manage", scope: { kind: "tenant" } },
     schema: { operationId: "changeAdministrativeUserStatus", params: userParams, headers: idempotencyHeaders,
@@ -78,6 +97,15 @@ export function registerUserAdministrationRoutes(app: FastifyInstance, pool: Ten
       } catch (error) { throw InvitationRequestError.from(error); }
     },
   }));
+  app.post("/v1/users/:userId/memberships/:unitId/lifecycle",protectedRoute({pool,noStore:true,
+    authorization:{kind:"permission",permission:"unit.members.manage",scope:{kind:"unit",async resolveUnitId(_client,request){return(request.params as ChangeUnitMembershipParams).unitId}}},
+    schema:{operationId:"changeUnitMembership",params:ChangeUnitMembershipParamsSchema,headers:idempotencyHeaders,
+      body:ChangeUnitMembershipRequestSchema,response:{200:ChangeUnitMembershipResponseSchema,400:ProblemDetailsSchema,401:ProblemDetailsSchema,
+        403:ProblemDetailsSchema,404:ProblemDetailsSchema,409:ProblemDetailsSchema,500:ProblemDetailsSchema,503:ProblemDetailsSchema}},
+    async handler(client,request){try{const params=request.params as ChangeUnitMembershipParams,body=request.body as ChangeUnitMembershipRequest;
+      const result=await changeUnitMembership(client,{...params,...body,idempotencyKey:idempotencyKey(request.headers)});
+      return{membership:{userId:result.userId,unitId:result.unitId,status:result.status,version:result.version},replayed:result.replayed};
+    }catch(error){throw InvitationRequestError.from(error)}}}));
   app.post("/v1/users/invitations/:invitationId/revoke", protectedRoute({
     pool, authorization: { kind: "permission", permission: "tenant.users.manage", scope: { kind: "tenant" } },
     schema: { operationId: "revokeUserInvitation", params: invitationParams, headers: idempotencyHeaders,

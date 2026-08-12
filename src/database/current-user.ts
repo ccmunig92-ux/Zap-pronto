@@ -30,7 +30,7 @@ export async function getCurrentUser(client: TenantQueryClient): Promise<Current
       FROM user_units membership JOIN units unit
         ON unit.tenant_id=membership.tenant_id AND unit.id=membership.unit_id
       WHERE membership.tenant_id=current_app_tenant_id() AND membership.user_id=current_app_actor_id()
-        AND unit.active=true
+        AND membership.status='ACTIVE' AND unit.active=true
       ORDER BY unit.code, unit.id`),
   );
   if (membershipRows.length === 0) throw new AccountNotAssignedError();
@@ -43,6 +43,7 @@ export async function getCurrentUser(client: TenantQueryClient): Promise<Current
       JOIN units unit ON unit.tenant_id=membership.tenant_id AND unit.id=membership.unit_id AND unit.active=true
       JOIN app_role_permissions role_permission ON role_permission.role_code=membership.role
       WHERE membership.tenant_id=current_app_tenant_id() AND membership.user_id=current_app_actor_id()
+        AND membership.status='ACTIVE'
       ORDER BY permission, scope, unit_id NULLS FIRST`),
   );
   const profile = profileRows[0];

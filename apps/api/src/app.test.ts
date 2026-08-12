@@ -124,31 +124,69 @@ test("every versioned route has an explicit policy, scope and coherent error con
   const policies = getRegisteredRoutePolicies(app).filter(({ method }) => method !== "HEAD")
     .map(({ method, url, policy, permission, scope }) => [method, url, policy, permission ?? null, scope ?? null]);
   assert.deepEqual(policies.sort((left, right) => String(left).localeCompare(String(right))), [
+    ["GET", "/v1/inbox/active", "permission", "conversation.read", "unit"],
+    ["GET", "/v1/inbox/conversations/:conversationId", "permission", "conversation.read", "unit"],
+    ["GET", "/v1/inbox/conversations/:conversationId/messages", "permission", "conversation.read", "unit"],
+    ["GET", "/v1/inbox/handoffs", "permission", "handoff.read", "unit"],
+    ["GET", "/v1/inbox/resolved", "permission", "handoff.history.read", "unit"],
+    ["GET", "/v1/inbox/handoffs/:handoffId/transfer-candidates", "permission", "handoff.transfer", "unit"],
+    ["GET", "/v1/inbox/supervised", "permission", "handoff.takeover", "unit"],
+    ["GET", "/v1/inbox/routing-required", "permission", "inbound.routing.read", "tenant"],
     ["GET", "/v1/me", "bootstrap", null, null],
     ["GET", "/v1/users", "permission", "tenant.users.manage", "tenant"],
     ["GET", "/v1/users/invitations", "permission", "tenant.users.manage", "tenant"],
     ["GET", "/v1/users/invitations/options", "permission", "tenant.users.manage", "tenant"],
+    ["GET", "/v1/units/:unitId/memberships", "permission", "unit.members.manage", "unit"],
     ["POST", "/v1/auth/invitations/accept", "preProvisioning", null, null],
+    ["POST", "/v1/inbox/handoffs/:handoffId/claim", "permission", "handoff.claim", "unit"],
+    ["POST", "/v1/inbox/handoffs/:handoffId/requeue", "permission", "handoff.requeue", "unit"],
+    ["POST", "/v1/inbox/handoffs/:handoffId/reopen", "permission", "handoff.reopen", "unit"],
+    ["POST", "/v1/inbox/handoffs/:handoffId/resolve", "permission", "handoff.resolve", "unit"],
+    ["POST", "/v1/inbox/handoffs/:handoffId/transfer", "permission", "handoff.transfer", "unit"],
+    ["POST", "/v1/inbox/handoffs/:handoffId/takeover", "permission", "handoff.takeover", "unit"],
+    ["POST", "/v1/inbox/conversations/:conversationId/messages", "permission", "message.send", "unit"],
+    ["POST", "/v1/inbox/conversations/:conversationId/messages/:messageId/cancel", "permission", "message.cancel", "unit"],
+    ["POST", "/v1/inbox/routing-required/:receiptId/resolve", "permission", "inbound.routing.resolve", "tenant"],
     ["POST", "/v1/users/:userId/status", "permission", "tenant.users.manage", "tenant"],
+    ["POST", "/v1/users/:userId/memberships/:unitId/lifecycle", "permission", "unit.members.manage", "unit"],
     ["POST", "/v1/users/invitations", "permission", "tenant.users.manage", "tenant"],
     ["POST", "/v1/users/invitations/:invitationId/reissue", "permission", "tenant.users.manage", "tenant"],
     ["POST", "/v1/users/invitations/:invitationId/revoke", "permission", "tenant.users.manage", "tenant"],
   ].sort((left, right) => String(left).localeCompare(String(right))));
   const document = app.swagger() as { paths: Record<string, Record<string, { responses?: Record<string, unknown> }>> };
   const expectedErrors: Record<string, readonly number[]> = {
+    "GET /v1/inbox/active": [400,401,403,404,409],
+    "GET /v1/inbox/conversations/:conversationId": [400,401,403,404],
+    "GET /v1/inbox/conversations/:conversationId/messages": [400,401,403,404],
+    "GET /v1/inbox/handoffs": [400, 401, 403, 404, 409],
+    "GET /v1/inbox/resolved": [400,401,403,404,409],
+    "GET /v1/inbox/supervised": [400,401,403,404,409],
+    "GET /v1/inbox/routing-required": [400,401,403,404,409,422],
+    "POST /v1/inbox/handoffs/:handoffId/claim": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/handoffs/:handoffId/reopen": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/handoffs/:handoffId/requeue": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/handoffs/:handoffId/resolve": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/handoffs/:handoffId/takeover": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/conversations/:conversationId/messages": [400,401,403,404,409],
+    "POST /v1/inbox/conversations/:conversationId/messages/:messageId/cancel": [400,401,403,404,409],
+    "POST /v1/inbox/routing-required/:receiptId/resolve": [400,401,403,404,409,422],
     "GET /v1/me": [401, 403], "GET /v1/users": [400, 401, 403],
     "GET /v1/users/invitations": [400, 401, 403],
     "GET /v1/users/invitations/options": [401, 403],
+    "GET /v1/units/:unitId/memberships": [400, 401, 403],
     "POST /v1/users/invitations": [400, 401, 403, 404, 409],
     "POST /v1/users/:userId/status": [400, 401, 403, 404, 409],
+    "POST /v1/users/:userId/memberships/:unitId/lifecycle": [400, 401, 403, 404, 409],
     "POST /v1/users/invitations/:invitationId/revoke": [400, 401, 403, 404, 409],
     "POST /v1/users/invitations/:invitationId/reissue": [400, 401, 403, 404, 409],
     "POST /v1/auth/invitations/accept": [400, 401, 403, 409, 429],
   };
   for (const [key, statuses] of Object.entries(expectedErrors)) {
     const [method, routeUrl] = key.split(" ") as [string, string];
-    const openApiUrl = routeUrl.replaceAll(":userId", "{userId}").replaceAll(":invitationId", "{invitationId}");
-    const responses = document.paths[openApiUrl]?.[method.toLowerCase()]?.responses ?? {};
+    const openApiUrl = routeUrl.replaceAll(":userId", "{userId}").replaceAll(":invitationId", "{invitationId}")
+      .replaceAll(":handoffId", "{handoffId}");
+    const normalizedOpenApiUrl=openApiUrl.replaceAll(":receiptId","{receiptId}").replaceAll(":conversationId","{conversationId}").replaceAll(":messageId","{messageId}").replaceAll(":unitId","{unitId}");
+    const responses = document.paths[normalizedOpenApiUrl]?.[method.toLowerCase()]?.responses ?? {};
     for (const status of statuses) assert.ok(String(status) in responses, `${key}:MISSING_${status}`);
   }
   await app.close();
@@ -329,6 +367,7 @@ test("strict Bearer parser rejects ambiguous or client-crafted identity material
 test("all /v1 endpoints are deny-by-default and health is explicitly public", async () => {
   assert.deepEqual(publicEndpointInventory, [
     "GET /health/live", "HEAD /health/live", "GET /health/ready", "HEAD /health/ready",
+    "GET /v1/webhooks/meta", "POST /v1/webhooks/meta",
   ]);
   const app = await buildApp();
   const missing = await app.inject({ method: "GET", url: "/v1/not-registered" });
@@ -344,6 +383,111 @@ test("all /v1 endpoints are deny-by-default and health is explicitly public", as
   const readiness = await app.inject({ method: "GET", url: "/health/ready" });
   assert.equal(readiness.statusCode, 503);
   await app.close();
+});
+
+test("claim route disables caching even when authentication fails",async()=>{const app=await buildApp();const response=await app.inject({method:"POST",url:"/v1/inbox/handoffs/10000000-0000-4000-8000-000000000001/claim",headers:{"idempotency-key":"claim-test-key"},payload:{expectedVersion:1}});
+  assert.equal(response.statusCode,401);assert.equal(response.headers["cache-control"],"no-store");await app.close();});
+
+test("resolved inbox route is unit-scoped, read-only and forwards canonical history filters",async()=>{const unitId="40000000-0000-4000-8000-000000000001",handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",resolvedByUserId="22222222-2222-4222-8222-222222222222",instant=new Date("2026-08-11T12:00:00.000Z");const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:resolvedByUserId}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("list_inbox_resolved_handoffs"))return{rows:[{id:handoffId,conversationId,unitId,contactName:"Contato",reason:"HUMAN_REQUESTED",priority:"HIGH",resolvedAt:instant,disposition:"CUSTOMER_WITHDREW",resolvedByUserId,resolvedByDisplayName:"Atendente",version:3,reopenTarget:{handoffId,expectedVersion:3}}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"GET",url:`/v1/inbox/resolved?unitId=${unitId}&limit=10&priority=HIGH&disposition=CUSTOMER_WITHDREW&resolvedFrom=${encodeURIComponent("2026-08-01T09:00:00-03:00")}&resolvedBefore=${encodeURIComponent("2026-08-12T00:00:00.000Z")}`,headers:{authorization:"Bearer token"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{items:[{id:handoffId,conversationId,unitId,contactName:"Contato",reason:"HUMAN_REQUESTED",priority:"HIGH",resolvedAt:instant.toISOString(),disposition:"CUSTOMER_WITHDREW",resolvedByUserId,resolvedByDisplayName:"Atendente",version:3,reopenTarget:{handoffId,expectedVersion:3}}]});
+  const read=calls.find(call=>call.sql.includes("list_inbox_resolved_handoffs_v3"));assert.ok(read);assert.deepEqual(read.values,[unitId,11,"HIGH","CUSTOMER_WITHDREW","2026-08-01T12:00:00.000Z","2026-08-12T00:00:00.000Z",null,null]);assert.ok(!calls.some(call=>/\b(?:INSERT|UPDATE|DELETE)\b/i.test(call.sql)));await app.close();});
+
+test("resolved inbox route rejects an inverted history interval without running the history query",async()=>{const unitId="40000000-0000-4000-8000-000000000001",calls:string[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql){calls.push(sql);if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"GET",url:`/v1/inbox/resolved?unitId=${unitId}&resolvedFrom=${encodeURIComponent("2026-08-12T00:00:00.000Z")}&resolvedBefore=${encodeURIComponent("2026-08-01T00:00:00.000Z")}`,headers:{authorization:"Bearer token"}});
+  assert.equal(response.statusCode,400);assert.ok(!calls.some(sql=>sql.includes("list_inbox_resolved_handoffs_v3")));await app.close();});
+
+test("conversation message history forwards the validated snapshot cutoff to SQL",async()=>{const conversationId="20000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001",before="2026-08-11T12:00:00.000Z",calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM get_inbox_conversation("))return{rows:[{conversationId,unitId,channelConnectionId:"50000000-0000-4000-8000-000000000001",status:"OPEN",automationStatus:"SUSPENDED",assignedUserId:null,version:3,updatedAt:new Date(before),stateChangedAt:new Date(before),closedAt:null,displayName:"Contato",allowedActions:[],claimTarget:null,sendTextTarget:null,resolveTarget:null,requeueTarget:null,transferTarget:null,takeoverTarget:null}]};if(sql.includes("list_inbox_conversation_messages_v4"))return{rows:[]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"GET",url:`/v1/inbox/conversations/${conversationId}/messages?limit=25&before=${encodeURIComponent(before)}`,headers:{authorization:"Bearer token"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");const read=calls.find(call=>call.sql.includes("list_inbox_conversation_messages_v4"));assert.equal(read?.values?.[4],before);await app.close();});
+
+test("resolve route is protected and disables caching before authentication",async()=>{const app=await buildApp();const response=await app.inject({method:"POST",url:"/v1/inbox/handoffs/10000000-0000-4000-8000-000000000001/resolve",headers:{"idempotency-key":"resolve-test-key"},payload:{expectedVersion:2,disposition:"RESOLVED"}});
+  assert.equal(response.statusCode,401);assert.equal(response.headers["cache-control"],"no-store");assert.doesNotMatch(response.body,/resolve-test-key/);await app.close();});
+
+test("resolve route invokes only the canonical narrow command with the handoff version",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001";const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};
+    if(sql.includes("FROM human_handoffs h"))return{rows:[{id:handoffId,conversationId,serviceCaseId,unitId,contactName:"Contato",reason:"LOCAL",priority:"NORMAL",status:"ACTIVE",assignedUserId:"22222222-2222-4222-8222-222222222222",requestedAt:new Date(),queuedAt:new Date(),slaDueAt:null,slaStatus:null,automationStatus:"HUMAN_ACTIVE",version:2}]};
+    if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("resolve_inbox_handoff"))return{rows:[{handoffId,conversationId,serviceCaseId,handoffVersion:3,conversationVersion:9,replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/resolve`,headers:{authorization:"Bearer token","idempotency-key":"resolve-command-key"},payload:{expectedVersion:2,disposition:"CUSTOMER_WITHDREW"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{handoffId,conversationId,serviceCaseId,handoffVersion:3,conversationVersion:9,replayed:false});
+  const command=calls.find(call=>call.sql.includes("resolve_inbox_handoff"));assert.ok(command);assert.deepEqual(command.values?.slice(0,4),[handoffId,2,"CUSTOMER_WITHDREW","resolve-command-key"]);assert.match(String(command.values?.[4]),/^[a-f0-9]{64}$/);
+  const resolveOperation=(app.swagger() as {paths:Record<string,{post:{requestBody:unknown}}>}).paths["/v1/inbox/handoffs/{handoffId}/resolve"]!.post;
+  const openApiBody=JSON.stringify(resolveOperation.requestBody);assert.match(openApiBody,/"required":\["expectedVersion","disposition"\]/);
+  for(const disposition of ["RESOLVED","DUPLICATE","CUSTOMER_WITHDREW","EXTERNAL_REFERRAL"])assert.match(openApiBody,new RegExp(`"${disposition}"`));await app.close();});
+
+test("resolve route rejeita disposição ausente ou livre antes de qualquer consulta operacional",async()=>{let operationalQuery=false;const pool:TenantTransactionPool={async connect(){return{async query(sql){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("human_handoffs")||sql.includes("resolve_inbox_handoff"))operationalQuery=true;return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  for(const payload of [{expectedVersion:2},{expectedVersion:2,disposition:"FREE_TEXT"}]){const response=await app.inject({method:"POST",url:"/v1/inbox/handoffs/10000000-0000-4000-8000-000000000001/resolve",headers:{authorization:"Bearer token","idempotency-key":"resolve-command-key"},payload});assert.equal(response.statusCode,400);assert.doesNotMatch(response.body,/FREE_TEXT|resolve-command-key/)}
+  assert.equal(operationalQuery,false);await app.close();});
+
+test("requeue route is protected and invokes only the canonical command",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001";const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("FROM human_handoffs h"))return{rows:[{id:handoffId,conversationId,serviceCaseId,unitId,contactName:"Contato",reason:"LOCAL",priority:"NORMAL",status:"ACTIVE",assignedUserId:"22222222-2222-4222-8222-222222222222",requestedAt:new Date(),queuedAt:new Date(),slaDueAt:null,slaStatus:null,automationStatus:"HUMAN_ACTIVE",version:2}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("requeue_inbox_handoff"))return{rows:[{handoffId,conversationId,serviceCaseId,handoffVersion:3,conversationVersion:8,serviceCaseVersion:4,replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/requeue`,headers:{authorization:"Bearer token","idempotency-key":"requeue-command-key"},payload:{expectedVersion:2}});assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{handoffId,conversationId,serviceCaseId,handoffVersion:3,conversationVersion:8,serviceCaseVersion:4,replayed:false});const command=calls.find(call=>call.sql.includes("requeue_inbox_handoff"));assert.deepEqual(command?.values,[handoffId,2,"requeue-command-key"]);await app.close();});
+
+test("reopen route resolves owner-or-replay scope and invokes the episodic command",async()=>{const sourceHandoffId="10000000-0000-4000-8000-000000000001",handoffId="10000000-0000-4000-8000-000000000002",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001";const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_reopen_unit"))return{rows:[{unitId}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM reopen_inbox_handoff"))return{rows:[{sourceHandoffId,handoffId,conversationId,serviceCaseId,handoffVersion:1,conversationVersion:8,serviceCaseVersion:4,replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${sourceHandoffId}/reopen`,headers:{authorization:"Bearer token","idempotency-key":"reopen-command-key"},payload:{expectedVersion:3,reason:"NEW_INFORMATION"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{sourceHandoffId,handoffId,conversationId,serviceCaseId,handoffVersion:1,conversationVersion:8,serviceCaseVersion:4,replayed:false});
+  const scope=calls.find(call=>call.sql.includes("resolve_inbox_handoff_reopen_unit")),command=calls.find(call=>call.sql.includes("FROM reopen_inbox_handoff"));assert.deepEqual(scope?.values?.slice(0,4),[sourceHandoffId,3,"NEW_INFORMATION","reopen-command-key"]);assert.deepEqual(command?.values,scope?.values);assert.match(String(command?.values?.[4]),/^[a-f0-9]{64}$/);await app.close();});
+
+test("transfer route resolves owner-or-replay scope and invokes only the canonical command",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001",targetUserId="70000000-0000-4000-8000-000000000002";const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_transfer_unit"))return{rows:[{unitId}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM transfer_inbox_handoff"))return{rows:[{handoffId,conversationId,serviceCaseId,targetUserId,handoffVersion:3,conversationVersion:9,replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/transfer`,headers:{authorization:"Bearer token","idempotency-key":"transfer-command-key"},payload:{expectedVersion:2,targetUserId,reason:"LOAD_BALANCING"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{handoffId,conversationId,serviceCaseId,targetUserId,handoffVersion:3,conversationVersion:9,replayed:false});const scope=calls.find(call=>call.sql.includes("resolve_inbox_handoff_transfer_unit")),command=calls.find(call=>call.sql.includes("FROM transfer_inbox_handoff"));assert.deepEqual(scope?.values?.slice(0,5),[handoffId,2,targetUserId,"LOAD_BALANCING","transfer-command-key"]);assert.deepEqual(command?.values?.slice(0,5),[handoffId,2,targetUserId,"LOAD_BALANCING","transfer-command-key"]);assert.match(String(command?.values?.[5]),/^[a-f0-9]{64}$/);assert.equal(scope?.values?.[5],command?.values?.[5]);await app.close();});
+
+test("transfer route sanitizes a target that becomes ineligible after authorization",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001",targetUserId="70000000-0000-4000-8000-000000000002";
+  const pool:TenantTransactionPool={async connect(){return{async query(sql){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_transfer_unit"))return{rows:[{unitId}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM transfer_inbox_handoff"))throw new Error("ASSIGNEE_NOT_ELIGIBLE");return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/transfer`,headers:{authorization:"Bearer token","idempotency-key":"transfer-command-key"},payload:{expectedVersion:2,targetUserId,reason:"SPECIALIZED_SUPPORT"}});
+  assert.equal(response.statusCode,409);assert.equal(response.headers["cache-control"],"no-store");assert.equal(response.json().type,"urn:zap-pronto:error:handoff-conflict");assert.equal(response.json().detail,"HANDOFF_CONFLICT");assert.doesNotMatch(response.body,/ASSIGNEE_NOT_ELIGIBLE|70000000|transfer-command-key/);await app.close();});
+
+test("transfer route rejeita motivo fora do enum sem resolver escopo ou executar comando",async()=>{let operationalQuery=false;const pool:TenantTransactionPool={async connect(){return{async query(sql){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_transfer_unit")||sql.includes("FROM transfer_inbox_handoff"))operationalQuery=true;return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:"/v1/inbox/handoffs/10000000-0000-4000-8000-000000000001/transfer",headers:{authorization:"Bearer token","idempotency-key":"transfer-command-key"},payload:{expectedVersion:2,targetUserId:"70000000-0000-4000-8000-000000000002",reason:"FREE_TEXT"}});assert.equal(response.statusCode,400);assert.equal(operationalQuery,false);assert.doesNotMatch(response.body,/FREE_TEXT/);await app.close();});
+
+test("supervised inbox is unit-scoped, no-store and reads only the narrow supervised function",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001",assignedUserId="70000000-0000-4000-8000-000000000002",instant=new Date("2026-08-11T12:00:00.000Z"),calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM list_inbox_supervised_handoffs"))return{rows:[{id:handoffId,conversationId,serviceCaseId,unitId,contactName:"Contato",reason:"LOCAL",priority:"HIGH",status:"ACTIVE",assignedUserId,requestedAt:instant,queuedAt:instant,slaDueAt:null,slaStatus:null,automationStatus:"HUMAN_ACTIVE",version:2,claimedAt:instant}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"GET",url:`/v1/inbox/supervised?unitId=${unitId}&limit=10`,headers:{authorization:"Bearer token"}});assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{items:[{id:handoffId,conversationId,serviceCaseId,unitId,contactName:"Contato",reason:"LOCAL",priority:"HIGH",status:"ACTIVE",assignedUserId,requestedAt:instant.toISOString(),queuedAt:instant.toISOString(),slaDueAt:null,slaStatus:null,automationStatus:"HUMAN_ACTIVE",version:2}]});const read=calls.find(call=>call.sql.includes("FROM list_inbox_supervised_handoffs"));assert.deepEqual(read?.values?.slice(0,4),[unitId,11,null,null]);assert.ok(!calls.some(call=>/INSERT|UPDATE|DELETE/i.test(call.sql)));await app.close();});
+
+test("takeover route resolves replay-safe unit scope and invokes only the canonical command",async()=>{const handoffId="10000000-0000-4000-8000-000000000001",conversationId="20000000-0000-4000-8000-000000000001",serviceCaseId="30000000-0000-4000-8000-000000000001",unitId="40000000-0000-4000-8000-000000000001",previousAssignedUserId="70000000-0000-4000-8000-000000000002";const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push({sql,values});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_takeover_unit"))return{rows:[{unitId}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM takeover_inbox_handoff"))return{rows:[{handoffId,conversationId,serviceCaseId,previousAssignedUserId,handoffVersion:3,conversationVersion:9,replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/takeover`,headers:{authorization:"Bearer token","idempotency-key":"takeover-command-key"},payload:{expectedVersion:2}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{handoffId,conversationId,serviceCaseId,previousAssignedUserId,handoffVersion:3,conversationVersion:9,replayed:false});const scope=calls.find(call=>call.sql.includes("resolve_inbox_handoff_takeover_unit")),command=calls.find(call=>call.sql.includes("FROM takeover_inbox_handoff"));assert.deepEqual(scope?.values?.slice(0,3),[handoffId,2,"takeover-command-key"]);assert.deepEqual(command?.values?.slice(0,3),[handoffId,2,"takeover-command-key"]);assert.match(String(scope?.values?.[3]),/^[a-f0-9]{64}$/);assert.equal(scope?.values?.[3],command?.values?.[3]);await app.close();});
+
+test("takeover route returns generic 404 when the protected scope cannot be resolved",async()=>{const handoffId="10000000-0000-4000-8000-000000000001";const pool:TenantTransactionPool={async connect(){return{async query(sql){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_handoff_takeover_unit"))return{rows:[{unitId:null}]};return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/inbox/handoffs/${handoffId}/takeover`,headers:{authorization:"Bearer token","idempotency-key":"takeover-command-key"},payload:{expectedVersion:2}});assert.equal(response.statusCode,404);assert.equal(response.json().status,404);assert.doesNotMatch(response.body,/takeover-command-key|HANDOFF_TAKEOVER|resolve_inbox_handoff/);await app.close();});
+
+test("human TEXT endpoint queues through the narrow command and never exposes body in errors",async()=>{const conversationId="10000000-0000-4000-8000-000000000001",messageId="60000000-0000-4000-8000-000000000001";const calls:string[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql){calls.push(sql);if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};
+    if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM get_inbox_conversation("))return{rows:[{conversationId,unitId:"33333333-3333-4333-8333-333333333333",channelConnectionId:"40000000-0000-4000-8000-000000000001",status:"OPEN",automationStatus:"HUMAN_ACTIVE",assignedUserId:"22222222-2222-4222-8222-222222222222",version:7,updatedAt:new Date(),stateChangedAt:new Date(),closedAt:null,displayName:"Contato",allowedActions:["SEND_TEXT"],claimTarget:null,sendTextTarget:{expectedConversationVersion:7}}]};
+    if(sql.includes("send_human_text_message"))return{rows:[{messageId,conversationVersion:8,deliveryStatus:"QUEUED",replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  const response=await app.inject({method:"POST",url:`/v1/inbox/conversations/${conversationId}/messages`,headers:{authorization:"Bearer token","idempotency-key":"send-command-key"},payload:{kind:"TEXT",body:"Resposta local",expectedConversationVersion:7}});
+  assert.equal(response.statusCode,202);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{messageId,conversationId,conversationVersion:8,deliveryStatus:"QUEUED",replayed:false});assert.ok(calls.some(sql=>sql.includes("send_human_text_message")));
+  const invalid=await app.inject({method:"POST",url:`/v1/inbox/conversations/${conversationId}/messages`,headers:{authorization:"Bearer token","idempotency-key":"send-command-key"},payload:{kind:"TEXT",body:"bad\u0000secret",expectedConversationVersion:7}});
+  assert.equal(invalid.statusCode,400);assert.equal(invalid.headers["cache-control"],"no-store");assert.doesNotMatch(invalid.body,/secret/);await app.close();});
+
+test("human TEXT cancellation uses the narrow command and disables caching",async()=>{const conversationId="10000000-0000-4000-8000-000000000001",messageId="60000000-0000-4000-8000-000000000001";const calls:string[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql){calls.push(sql);if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};
+    if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("FROM get_inbox_conversation("))return{rows:[{conversationId,unitId:"33333333-3333-4333-8333-333333333333",channelConnectionId:"40000000-0000-4000-8000-000000000001",status:"OPEN",automationStatus:"HUMAN_ACTIVE",assignedUserId:"22222222-2222-4222-8222-222222222222",version:8,updatedAt:new Date(),stateChangedAt:new Date(),closedAt:null,displayName:"Contato",allowedActions:["SEND_TEXT"],claimTarget:null,sendTextTarget:{expectedConversationVersion:8}}]};
+    if(sql.includes("cancel_human_text_message"))return{rows:[{messageId,conversationVersion:9,deliveryStatus:"CANCELLED",replayed:false}]};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  const response=await app.inject({method:"POST",url:`/v1/inbox/conversations/${conversationId}/messages/${messageId}/cancel`,headers:{authorization:"Bearer token","idempotency-key":"cancel-command-key"},payload:{expectedConversationVersion:8}});
+  assert.equal(response.statusCode,202);assert.equal(response.headers["cache-control"],"no-store");assert.deepEqual(response.json(),{messageId,conversationId,conversationVersion:9,deliveryStatus:"CANCELLED",replayed:false});assert.ok(calls.some(sql=>sql.includes("cancel_human_text_message")));
+  const invalid=await app.inject({method:"POST",url:`/v1/inbox/conversations/${conversationId}/messages/not-a-uuid/cancel`,headers:{authorization:"Bearer token","idempotency-key":"cancel-command-key"},payload:{expectedConversationVersion:8}});assert.equal(invalid.statusCode,400);assert.equal(invalid.headers["cache-control"],"no-store");await app.close();});
+
+test("routing-required endpoints are protected, tenant-scoped and sanitize failures",async()=>{
+  const verifier={async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}};
+  const denied=authorizationPool({allowed:false});const deniedApp=await buildApp({pool:denied.pool,identityVerifier:verifier});
+  assert.equal((await deniedApp.inject({method:"GET",url:"/v1/inbox/routing-required"})).statusCode,401);
+  assert.equal((await deniedApp.inject({method:"GET",url:"/v1/inbox/routing-required",headers:{authorization:"Bearer token"}})).statusCode,403);
+  await deniedApp.close();
+  const allowed=authorizationPool();const app=await buildApp({pool:allowed.pool,identityVerifier:verifier});
+  const listed=await app.inject({method:"GET",url:"/v1/inbox/routing-required",headers:{authorization:"Bearer token"}});
+  assert.equal(listed.statusCode,200);assert.deepEqual(listed.json(),{items:[]});
+  const invalid=await app.inject({method:"POST",url:"/v1/inbox/routing-required/not-a-uuid/resolve",
+    headers:{authorization:"Bearer token","idempotency-key":"routing-key"},payload:{unitId:"bad"}});assert.equal(invalid.statusCode,400);
+  const failed=await app.inject({method:"POST",url:"/v1/inbox/routing-required/10000000-0000-4000-8000-000000000001/resolve",
+    headers:{authorization:"Bearer token","idempotency-key":"routing-key"},payload:{unitId:"30000000-0000-4000-8000-000000000001"}});
+  assert.equal(failed.statusCode,500);assert.doesNotMatch(failed.body,/SQL|sender|payload/);await app.close();
 });
 
 test("verifier is injected, rejection is 401 and verified identity is server-derived", async () => {
@@ -475,5 +619,38 @@ test("a unit-scoped route fails closed when its resolver does not return a UUID"
   assert.equal(handlerCalled, false);
   assert.ok(database.queries.includes("ROLLBACK"));
   assert.ok(!database.queries.some((query) => query.includes("current_actor_has_permission")));
+  await app.close();
+});
+
+test("unit membership catalog is unit-scoped, no-store and excludes email",async()=>{
+  const unitId="33333333-3333-4333-8333-333333333333";
+  const userId="55555555-5555-4555-8555-555555555555";
+  const calls:{sql:string;values:readonly unknown[]|undefined}[]=[];
+  const pool:TenantTransactionPool={async connect(){return{async query(sql,values){
+    calls.push({sql,values});
+    if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};
+    if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};
+    if(sql.includes("list_unit_memberships"))return{rows:[{user_id:userId,email:"must-not-leak@example.test",display_name:"Atendente",role:"ATTENDANT",status:"ACTIVE",version:2,allowed_actions:["REVOKE"]}]};
+    return{rows:[]};
+  },release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  const response=await app.inject({method:"GET",url:`/v1/units/${unitId}/memberships?limit=10`,headers:{authorization:"Bearer token"}});
+  assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");
+  assert.deepEqual(response.json(),{items:[{userId,displayName:"Atendente",role:"ATTENDANT",status:"ACTIVE",version:2,allowedActions:["REVOKE"]}]});
+  assert.doesNotMatch(response.body,/email|must-not-leak/i);
+  const permission=calls.find(call=>call.sql.includes("current_actor_has_permission"));
+  assert.ok(permission?.values?.includes(unitId));
+  const read=calls.find(call=>call.sql.includes("list_unit_memberships"));
+  assert.ok(read);assert.ok(read?.values?.includes(unitId));
+  await app.close();
+});
+
+test("unit membership catalog denies missing unit permission before reading members",async()=>{
+  const unitId="33333333-3333-4333-8333-333333333333";
+  const database=authorizationPool({allowed:false});
+  const app=await buildApp({pool:database.pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  const response=await app.inject({method:"GET",url:`/v1/units/${unitId}/memberships`,headers:{authorization:"Bearer token"}});
+  assert.equal(response.statusCode,403);assert.equal(response.headers["cache-control"],"no-store");
+  assert.ok(!database.queries.some(query=>query.includes("list_unit_memberships")));
   await app.close();
 });

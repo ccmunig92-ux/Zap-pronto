@@ -18,7 +18,8 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - `database_migration_url` usa o owner do banco e nunca é reutilizado pela API.
 - O usuário da migration URL precisa de `CREATEROLE` no primeiro boot para criar os roles de componente e
   o login runtime; na imagem oficial ele é o `POSTGRES_USER` inicial. Essa credencial não chega à API.
-- `database_runtime_url` usa `zap_pronto_runtime` com senha não vazia. O provisionador valida que admin e
+- `database_runtime_url` usa `zap_pronto_runtime` com senha não vazia. `database_worker_url` usa
+  `zap_pronto_worker_runtime`, separado da API e autorizado somente a assumir `zap_pronto_worker`. O provisionador valida que admin e
   runtime apontam ao mesmo banco, remove memberships e grants diretos residuais, recusa ownership/default
   privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
 - O password do owner contido na migration URL corresponde a `postgres_password`.

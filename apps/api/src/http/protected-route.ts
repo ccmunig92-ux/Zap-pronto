@@ -27,6 +27,7 @@ export interface ProtectedRouteInput {
     | { readonly kind: "permission"; readonly permission: Permission; readonly scope: ProtectedScope };
   readonly schema?: FastifySchema;
   readonly beforeTransaction?: (principal: VerifiedOidcPrincipal) => Promise<void>;
+  readonly noStore?: boolean;
   readonly handler: (client: TenantQueryClient, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 }
 
@@ -34,6 +35,7 @@ export function protectedRoute(input: ProtectedRouteInput): {
   config: { permission?: Permission; authenticated: true; bootstrap?: true; preProvisioning?: true;
     authorizationScope?: "tenant" | "unit" };
   schema: FastifySchema;
+  onSend?: (_request: FastifyRequest, reply: FastifyReply, payload: unknown) => Promise<unknown>;
   handler: RouteHandlerMethod;
 } {
   if (input.beforeTransaction && input.authorization.kind !== "preProvisioning") {
@@ -48,6 +50,9 @@ export function protectedRoute(input: ProtectedRouteInput): {
   protectedRouteConfigurations.add(config);
   return {
     config,
+    ...(input.noStore ? { onSend: async (_request: FastifyRequest, reply: FastifyReply, payload: unknown) => {
+      void reply.header("cache-control", "no-store"); return payload;
+    } } : {}),
     ...(input.schema ? { schema: { ...input.schema, security: [{ bearerAuth: [] }] } }
       : { schema: { security: [{ bearerAuth: [] }] } }),
     handler: async (request, reply) => {

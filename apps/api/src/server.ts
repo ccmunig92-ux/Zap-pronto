@@ -12,6 +12,6 @@ const pool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
 });
 const identityVerifier = createOidcIdentityVerifier(oidc);
-const app = await buildApp({ pool, identityVerifier });
+const app = await buildApp({ pool, identityVerifier, metaWebhook: runtime.metaWebhook });
 app.addHook("onClose", async () => { await pool.end(); });
 await app.listen({ host: runtime.host, port: runtime.port });

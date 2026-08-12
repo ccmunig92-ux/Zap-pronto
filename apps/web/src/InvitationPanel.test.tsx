@@ -14,6 +14,17 @@ const options = {
 afterEach(cleanup);
 
 describe("administrative invitation", () => {
+  it("reports draft state and clears navigation state on unmount", async () => {
+    const state = vi.fn();
+    const view = render(<InvitationPanel client={{ async getUserInvitationOptions() { return options; },
+      async createUserInvitation() { throw new Error("not called"); } }} onNavigationStateChange={state}/>);
+    await screen.findByRole("option", { name: "primary" });
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Pessoa" } });
+    await waitFor(() => expect(state).toHaveBeenLastCalledWith({ blocked: false, dirty: true }));
+    view.unmount();
+    expect(state).toHaveBeenLastCalledWith({ blocked: false, dirty: false });
+  });
+
   it("uses only API options and reveals a newly issued token once", async () => {
     let submitted: CreateUserInvitationRequest | undefined;
     let key: string | undefined;

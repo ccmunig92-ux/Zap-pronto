@@ -16,8 +16,9 @@ const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resou
 const compose = { networks:{data:{internal:true}}, services: {
   postgres:{...hardened("1.50","1536M",["data"],["postgres_password"]),read_only:undefined,cap_drop:undefined},
   migrate:hardened("1","512M",["data"],["database_migration_url"],{postgres:{condition:"service_healthy"}}),
-  "provision-runtime":hardened("0.5","256M",["data"],["database_migration_url","database_runtime_url"],{migrate:{condition:"service_completed_successfully"}}),
+  "provision-runtime":hardened("0.5","256M",["data"],["database_migration_url","database_runtime_url","database_worker_url"],{migrate:{condition:"service_completed_successfully"}}),
   api:hardened("1","768M",["app","data"],["database_runtime_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),
+  worker:hardened("0.5","384M",["data"],["database_worker_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),
   web:{...hardened("0.5","256M",["app"],[],{api:{condition:"service_healthy"}}),ports:[{host_ip:"127.0.0.1",target:8080,protocol:"tcp"}]},
 } };
 
@@ -48,10 +49,10 @@ test("rejects missing resource guarantees and malformed or duplicate env entries
 
 test("requires canonical 0400 ownership for non-root container secret readers", async () => {
   const directory = mkdtempSync(join(tmpdir(), "zap-preflight-"));
-  const names = ["postgres", "migration", "runtime"].map((name) => join(directory, name));
+  const names = ["postgres", "migration", "runtime", "worker"].map((name) => join(directory, name));
   try {
     for (const file of names) { writeFileSync(file, "not-read-by-preflight"); chmodSync(file, 0o600); }
-    const env = { POSTGRES_PASSWORD_FILE:names[0], DATABASE_MIGRATION_URL_FILE:names[1], DATABASE_RUNTIME_URL_FILE:names[2] };
+    const env = { POSTGRES_PASSWORD_FILE:names[0], DATABASE_MIGRATION_URL_FILE:names[1], DATABASE_RUNTIME_URL_FILE:names[2], DATABASE_WORKER_URL_FILE:names[3] };
     if (typeof process.getuid === "function") {
       await assert.rejects(validateSecrets({...env,POSTGRES_PASSWORD_FILE:"relative-secret"}, process.cwd()), /NOT_ABSOLUTE/);
     } else {

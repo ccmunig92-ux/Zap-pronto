@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type {
   CreateUserInvitationRequest,
@@ -24,8 +24,9 @@ function defaultExpiry(): string {
 }
 
 export function InvitationPanel({ client, onAuthenticationRequired = () => undefined,
-  onAuthorizationChanged = () => undefined }: { readonly client: InvitationClient;
-  readonly onAuthenticationRequired?: () => void; readonly onAuthorizationChanged?: () => void }) {
+  onAuthorizationChanged = () => undefined, onNavigationStateChange }: { readonly client: InvitationClient;
+  readonly onAuthenticationRequired?: () => void; readonly onAuthorizationChanged?: () => void;
+  readonly onNavigationStateChange?: (state: { blocked: boolean; dirty: boolean }) => void }) {
   const [options, setOptions] = useState<UserInvitationOptions>();
   const [loadError, setLoadError] = useState<string>();
   const [email, setEmail] = useState("");
@@ -39,6 +40,14 @@ export function InvitationPanel({ client, onAuthenticationRequired = () => undef
   const [result, setResult] = useState<CreateUserInvitationResponse>();
   const [revealed, setRevealed] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string>();
+  const initialExpiry = useRef(expiresAt);
+
+  const blocked = submitting || Boolean(result);
+  const dirty = blocked || Boolean(idempotencyKey) || email.length > 0 || displayName.length > 0
+    || assignments.some(({ unitId, role }) => Boolean(unitId || role)) || expiresAt !== initialExpiry.current
+    || Boolean(options && providerCode && providerCode !== options.providers[0]?.code);
+  useEffect(() => { onNavigationStateChange?.({ blocked, dirty }); }, [onNavigationStateChange, blocked, dirty]);
+  useEffect(() => () => onNavigationStateChange?.({ blocked: false, dirty: false }), [onNavigationStateChange]);
 
   useEffect(() => {
     let active = true;

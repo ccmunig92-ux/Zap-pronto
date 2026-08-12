@@ -48,8 +48,8 @@ fi
 cleanup_validation
 trap - EXIT INT TERM
 
-compose stop web api
-for service in web api; do
+compose stop web api worker
+for service in web api worker; do
   container=$(compose ps --all --quiet "$service")
   if [ -n "$container" ] && [ "$(docker inspect --format '{{.State.Running}}' "$container")" != false ]; then
     echo "RESTORE_APPLICATION_STILL_RUNNING:$service" >&2
@@ -80,6 +80,7 @@ compose exec -T postgres pg_restore --username "${POSTGRES_USER:-zap_pronto_owne
   --dbname "${POSTGRES_DB:-zap_pronto}" --data-only --disable-triggers --exit-on-error < "$archive"
 compose run --rm --no-deps provision-runtime
 if [ "${STAGING_RESTORE_START_APPLICATION:-yes}" = yes ]; then
+  compose up --detach worker
   compose up --detach --wait api web
 fi
 printf 'staging restore completed\n'

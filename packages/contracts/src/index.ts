@@ -26,8 +26,10 @@ export const AppRoleSchema = Type.Union([
 export type AppRole = Static<typeof AppRoleSchema>;
 
 export const permissionValues = [
-  "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.claim",
+  "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
+  "inbound.routing.read", "inbound.routing.resolve",
+  "message.send", "message.cancel",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -119,11 +121,15 @@ export const UserLifecycleActionSchema = Type.Union([
 export const InvitationLifecycleActionSchema = Type.Union([
   Type.Literal("REVOKE"), Type.Literal("REISSUE"),
 ]);
+export const UnitMembershipLifecycleActionSchema = Type.Union([Type.Literal("REVOKE"),Type.Literal("REACTIVATE")]);
+export const AdministrativeUnitMembershipSchema=Type.Object({unitId:Type.String({format:"uuid"}),unitCode:Type.String(),unitName:Type.String(),role:Type.Union([Type.Literal("TENANT_ADMIN"),InvitationRoleSchema]),
+  status:Type.Union([Type.Literal("ACTIVE"),Type.Literal("REVOKED")]),version:Type.Integer({minimum:1}),
+  allowedActions:Type.Array(UnitMembershipLifecycleActionSchema,{uniqueItems:true})},{additionalProperties:false});
 
 export const AdministrativeUserSchema = Type.Object({
   id: Type.String({ format: "uuid" }), email: Type.String(), displayName: Type.String(),
   status: Type.Union([Type.Literal("ACTIVE"), Type.Literal("BLOCKED"), Type.Literal("REVOKED")]),
-  version: Type.Integer({ minimum: 1 }), memberships: Type.Array(UserMembershipSchema),
+  version: Type.Integer({ minimum: 1 }), memberships: Type.Array(AdministrativeUnitMembershipSchema),
   allowedActions: Type.Array(UserLifecycleActionSchema, { uniqueItems: true }),
 }, { additionalProperties: false });
 export type AdministrativeUser = Static<typeof AdministrativeUserSchema>;
@@ -171,6 +177,38 @@ export const ChangeUserStatusResponseSchema = Type.Object({
 }, { $id: "ChangeUserStatusResponse", additionalProperties: false });
 export type ChangeUserStatusResponse = Static<typeof ChangeUserStatusResponseSchema>;
 
+export const ChangeUnitMembershipParamsSchema=Type.Object({userId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type ChangeUnitMembershipParams=Static<typeof ChangeUnitMembershipParamsSchema>;
+export const ChangeUnitMembershipRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1}),
+  operation:Type.Union([Type.Literal("REVOKE"),Type.Literal("REACTIVATE")]),reason:Type.String({minLength:3,maxLength:500})},{additionalProperties:false});
+export type ChangeUnitMembershipRequest=Static<typeof ChangeUnitMembershipRequestSchema>;
+export const ChangeUnitMembershipResponseSchema=Type.Object({membership:Type.Object({userId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"}),
+  status:Type.Union([Type.Literal("ACTIVE"),Type.Literal("REVOKED")]),version:Type.Integer({minimum:1})},{additionalProperties:false}),replayed:Type.Boolean()},{additionalProperties:false});
+export type ChangeUnitMembershipResponse=Static<typeof ChangeUnitMembershipResponseSchema>;
+
+export const ListUnitMembershipsParamsSchema=Type.Object({
+  unitId:Type.String({format:"uuid"}),
+},{$id:"ListUnitMembershipsParams",additionalProperties:false});
+export type ListUnitMembershipsParams=Static<typeof ListUnitMembershipsParamsSchema>;
+export const ListUnitMembershipsQuerySchema=Type.Object({
+  limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),
+  cursor:Type.Optional(Type.String({minLength:1,maxLength:1024})),
+},{$id:"ListUnitMembershipsQuery",additionalProperties:false});
+export type ListUnitMembershipsQuery=Static<typeof ListUnitMembershipsQuerySchema>;
+export const UnitMembershipMemberSchema=Type.Object({
+  userId:Type.String({format:"uuid"}),displayName:Type.String(),
+  role:Type.Union([Type.Literal("TENANT_ADMIN"),InvitationRoleSchema]),
+  status:Type.Union([Type.Literal("ACTIVE"),Type.Literal("REVOKED")]),
+  version:Type.Integer({minimum:1}),
+  allowedActions:Type.Array(UnitMembershipLifecycleActionSchema,{uniqueItems:true}),
+},{$id:"UnitMembershipMember",additionalProperties:false});
+export type UnitMembershipMember=Static<typeof UnitMembershipMemberSchema>;
+export const UnitMembershipsPageSchema=Type.Object({
+  items:Type.Array(UnitMembershipMemberSchema),
+  nextCursor:Type.Optional(Type.String({minLength:1,maxLength:1024})),
+},{$id:"UnitMembershipsPage",additionalProperties:false});
+export type UnitMembershipsPage=Static<typeof UnitMembershipsPageSchema>;
+
 const InvitationMutationBaseSchema = Type.Object({ invitation: AdministrativeInvitationSchema },
   { additionalProperties: false });
 export const RevokeInvitationResponseSchema = Type.Composite([InvitationMutationBaseSchema,
@@ -197,3 +235,214 @@ export const AcceptUserInvitationResponseSchema = Type.Object({
   replayed: Type.Boolean(),
 }, { $id: "AcceptUserInvitationResponse", additionalProperties: false });
 export type AcceptUserInvitationResponse = Static<typeof AcceptUserInvitationResponseSchema>;
+
+export const HandoffStatusSchema = Type.Union([
+  Type.Literal("REQUESTED"), Type.Literal("QUEUED"), Type.Literal("ACTIVE"),
+  Type.Literal("RESOLVED"), Type.Literal("FAILED"), Type.Literal("CANCELLED"),
+], { $id: "HandoffStatus" });
+export type HandoffStatus = Static<typeof HandoffStatusSchema>;
+
+export const HandoffPrioritySchema = Type.Union([
+  Type.Literal("LOW"), Type.Literal("NORMAL"), Type.Literal("HIGH"), Type.Literal("URGENT"),
+], { $id: "HandoffPriority" });
+export type HandoffPriority = Static<typeof HandoffPrioritySchema>;
+
+export const HandoffAutomationStatusSchema = Type.Union([
+  Type.Literal("ACTIVE"), Type.Literal("HUMAN_REQUESTED"), Type.Literal("HUMAN_QUEUED"),
+  Type.Literal("HUMAN_ACTIVE"), Type.Literal("CLOSED"),
+], { $id: "HandoffAutomationStatus" });
+export type HandoffAutomationStatus = Static<typeof HandoffAutomationStatusSchema>;
+export const HandoffSlaStatusSchema=Type.Union([Type.Literal("ON_TRACK"),Type.Literal("DUE_SOON"),Type.Literal("OVERDUE")],{$id:"HandoffSlaStatus"});
+export type HandoffSlaStatus=Static<typeof HandoffSlaStatusSchema>;
+
+export const InboxHandoffSchema = Type.Object({
+  id: Type.String({ format: "uuid" }),
+  conversationId: Type.String({ format: "uuid" }),
+  serviceCaseId: Type.String({ format: "uuid" }),
+  unitId: Type.String({ format: "uuid" }),
+  contactName: Type.Union([Type.String({ maxLength: 160 }), Type.Null()]),
+  reason: Type.String({ minLength: 1, maxLength: 200 }),
+  priority: HandoffPrioritySchema,
+  status: HandoffStatusSchema,
+  assignedUserId: Type.Union([Type.String({ format: "uuid" }), Type.Null()]),
+  requestedAt: Type.String({ format: "date-time" }),
+  queuedAt: Type.Union([Type.String({ format: "date-time" }), Type.Null()]),
+  slaDueAt: Type.Union([Type.String({ format: "date-time" }), Type.Null()]),
+  slaStatus:Type.Union([HandoffSlaStatusSchema,Type.Null()]),
+  automationStatus: HandoffAutomationStatusSchema,
+  version: Type.Integer({ minimum: 1 }),
+}, { $id: "InboxHandoff", additionalProperties: false });
+export type InboxHandoff = Static<typeof InboxHandoffSchema>;
+
+export const ListHandoffsQuerySchema = Type.Object({
+  unitId: Type.String({ format: "uuid" }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 25 })),
+  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+  priority:Type.Optional(HandoffPrioritySchema),
+  slaStatus:Type.Optional(HandoffSlaStatusSchema),
+}, { $id: "ListHandoffsQuery", additionalProperties: false });
+export type ListHandoffsQuery = Static<typeof ListHandoffsQuerySchema>;
+export const ListActiveHandoffsQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),
+  cursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListActiveHandoffsQuery",additionalProperties:false});
+export type ListActiveHandoffsQuery=Static<typeof ListActiveHandoffsQuerySchema>;
+export const ListSupervisedHandoffsQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),
+  cursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListSupervisedHandoffsQuery",additionalProperties:false});
+export type ListSupervisedHandoffsQuery=Static<typeof ListSupervisedHandoffsQuerySchema>;
+
+export const ResolvedHandoffDispositionSchema=Type.Union([
+  Type.Literal("LEGACY_UNSPECIFIED"),Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),
+  Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
+],{$id:"ResolvedHandoffDisposition"});
+export const ResolvedInboxHandoffSchema=Type.Object({
+  id:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"}),contactName:Type.Union([Type.String({maxLength:160}),Type.Null()]),
+  reason:Type.String({minLength:1,maxLength:200}),priority:HandoffPrioritySchema,resolvedAt:Type.String({format:"date-time"}),
+  disposition:ResolvedHandoffDispositionSchema,resolvedByUserId:Type.Union([Type.String({format:"uuid"}),Type.Null()]),
+  resolvedByDisplayName:Type.Union([Type.String({maxLength:200}),Type.Null()]),version:Type.Integer({minimum:1}),
+  reopenTarget:Type.Union([Type.Object({handoffId:Type.String({format:"uuid"}),expectedVersion:Type.Integer({minimum:1})},{additionalProperties:false}),Type.Null()]),
+},{ $id:"ResolvedInboxHandoff",additionalProperties:false});
+export type ResolvedInboxHandoff=Static<typeof ResolvedInboxHandoffSchema>;
+export const ListResolvedHandoffsQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),
+  limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),cursor:Type.Optional(Type.String({minLength:1,maxLength:1024})),
+  priority:Type.Optional(HandoffPrioritySchema),disposition:Type.Optional(ResolvedHandoffDispositionSchema),
+  resolvedFrom:Type.Optional(Type.String({format:"date-time"})),resolvedBefore:Type.Optional(Type.String({format:"date-time"}))},
+{$id:"ListResolvedHandoffsQuery",additionalProperties:false});
+export type ListResolvedHandoffsQuery=Static<typeof ListResolvedHandoffsQuerySchema>;
+export const ListResolvedHandoffsResponseSchema=Type.Object({items:Type.Array(ResolvedInboxHandoffSchema),
+  nextCursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListResolvedHandoffsResponse",additionalProperties:false});
+export type ListResolvedHandoffsResponse=Static<typeof ListResolvedHandoffsResponseSchema>;
+
+export const ListHandoffsResponseSchema = Type.Object({
+  items: Type.Array(InboxHandoffSchema),
+  nextCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+}, { $id: "ListHandoffsResponse", additionalProperties: false });
+export type ListHandoffsResponse = Static<typeof ListHandoffsResponseSchema>;
+
+export const ClaimHandoffParamsSchema = Type.Object({
+  handoffId: Type.String({ format: "uuid" }),
+}, { $id: "ClaimHandoffParams", additionalProperties: false });
+export type ClaimHandoffParams = Static<typeof ClaimHandoffParamsSchema>;
+
+export const ClaimHandoffRequestSchema = Type.Object({
+  expectedVersion: Type.Integer({ minimum: 1 }),
+}, { $id: "ClaimHandoffRequest", additionalProperties: false });
+export type ClaimHandoffRequest = Static<typeof ClaimHandoffRequestSchema>;
+
+export const ClaimHandoffResponseSchema = Type.Object({
+  handoff: InboxHandoffSchema,
+  replayed: Type.Boolean(),
+}, { $id: "ClaimHandoffResponse", additionalProperties: false });
+export type ClaimHandoffResponse = Static<typeof ClaimHandoffResponseSchema>;
+
+export const RoutingRequiredActionSchema=Type.Literal("RESOLVE");
+export const EligibleRoutingUnitSchema=Type.Object({id:Type.String({format:"uuid"}),code:Type.String(),name:Type.String()},
+  {additionalProperties:false});
+export const RoutingRequiredItemSchema=Type.Object({receiptId:Type.String({format:"uuid"}),
+  channelConnectionId:Type.String({format:"uuid"}),provider:Type.String(),kind:Type.String(),
+  occurredAt:Type.String({format:"date-time"}),receivedAt:Type.String({format:"date-time"}),
+  eligibleUnits:Type.Array(EligibleRoutingUnitSchema),allowedActions:Type.Array(RoutingRequiredActionSchema,{uniqueItems:true})},
+{additionalProperties:false});
+export type RoutingRequiredItem=Static<typeof RoutingRequiredItemSchema>;
+export const ListRoutingRequiredQuerySchema=Type.Object({limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),
+  cursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{additionalProperties:false});
+export type ListRoutingRequiredQuery=Static<typeof ListRoutingRequiredQuerySchema>;
+export const ListRoutingRequiredResponseSchema=Type.Object({items:Type.Array(RoutingRequiredItemSchema),
+  nextCursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListRoutingRequiredResponse",additionalProperties:false});
+export type ListRoutingRequiredResponse=Static<typeof ListRoutingRequiredResponseSchema>;
+export const ResolveRoutingRequiredParamsSchema=Type.Object({receiptId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type ResolveRoutingRequiredParams=Static<typeof ResolveRoutingRequiredParamsSchema>;
+export const ResolveRoutingRequiredRequestSchema=Type.Object({unitId:Type.String({format:"uuid"})},
+  { $id:"ResolveRoutingRequiredRequest",additionalProperties:false});
+export type ResolveRoutingRequiredRequest=Static<typeof ResolveRoutingRequiredRequestSchema>;
+export const ResolveRoutingRequiredResponseSchema=Type.Object({receiptId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"}),
+  routingStatus:Type.Literal("ROUTED"),replayed:Type.Boolean()},{$id:"ResolveRoutingRequiredResponse",additionalProperties:false});
+export type ResolveRoutingRequiredResponse=Static<typeof ResolveRoutingRequiredResponseSchema>;
+
+export const InboxConversationParamsSchema=Type.Object({conversationId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type InboxConversationParams=Static<typeof InboxConversationParamsSchema>;
+export const InboxConversationActionSchema=Type.Union([Type.Literal("CLAIM_HANDOFF"),Type.Literal("SEND_TEXT"),Type.Literal("RESOLVE_HANDOFF"),Type.Literal("REQUEUE_HANDOFF"),Type.Literal("TRANSFER_HANDOFF"),Type.Literal("TAKEOVER_HANDOFF")]);
+export const InboxConversationClaimTargetSchema=Type.Object({handoffId:Type.String({format:"uuid"}),expectedVersion:Type.Integer({minimum:1})},{additionalProperties:false});
+export const InboxConversationSchema=Type.Object({conversationId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"}),
+  channelConnectionId:Type.String({format:"uuid"}),status:Type.Union([Type.Literal("OPEN"),Type.Literal("CLOSED"),Type.Literal("ARCHIVED")]),
+  automationStatus:Type.Union([Type.Literal("ACTIVE"),Type.Literal("HUMAN_REQUESTED"),Type.Literal("HUMAN_QUEUED"),Type.Literal("HUMAN_ACTIVE"),Type.Literal("SUSPENDED")]),
+  assignedUserId:Type.Union([Type.String({format:"uuid"}),Type.Null()]),version:Type.Integer({minimum:1}),
+  updatedAt:Type.String({format:"date-time"}),stateChangedAt:Type.String({format:"date-time"}),closedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
+  displayName:Type.Union([Type.String({maxLength:200}),Type.Null()]),allowedActions:Type.Array(InboxConversationActionSchema,{uniqueItems:true}),
+  claimTarget:Type.Union([InboxConversationClaimTargetSchema,Type.Null()]),
+  sendTextTarget:Type.Union([Type.Object({expectedConversationVersion:Type.Integer({minimum:1})},{additionalProperties:false}),Type.Null()]),
+  resolveTarget:Type.Union([InboxConversationClaimTargetSchema,Type.Null()]),
+  requeueTarget:Type.Union([InboxConversationClaimTargetSchema,Type.Null()]),
+  transferTarget:Type.Union([InboxConversationClaimTargetSchema,Type.Null()]),
+  takeoverTarget:Type.Union([InboxConversationClaimTargetSchema,Type.Null()])},{additionalProperties:false});
+export type InboxConversation=Static<typeof InboxConversationSchema>;
+export const InboxMessageActionSchema=Type.Literal("CANCEL_QUEUED");
+export const InboxMessageSchema=Type.Object({id:Type.String({format:"uuid"}),direction:Type.Union([Type.Literal("INBOUND"),Type.Literal("OUTBOUND")]),
+  actor:Type.Union([Type.Literal("CUSTOMER"),Type.Literal("HERMES"),Type.Literal("HUMAN"),Type.Literal("SYSTEM")]),
+  body:Type.Union([Type.String({maxLength:32000}),Type.Null()]),kind:Type.Union([Type.Literal("TEXT"),Type.Literal("AUDIO"),Type.Literal("IMAGE"),Type.Literal("DOCUMENT"),Type.Literal("INTERACTIVE"),Type.Literal("UNKNOWN")]),
+  trust:Type.Union([Type.Literal("UNTRUSTED"),Type.Null()]),deliveryStatus:Type.Union([Type.Literal("QUEUED"),Type.Literal("SENT"),Type.Literal("DELIVERED"),Type.Literal("READ"),Type.Literal("FAILED"),Type.Literal("CANCELLED"),Type.Null()]),
+  allowedActions:Type.Array(InboxMessageActionSchema,{uniqueItems:true}),createdAt:Type.String({format:"date-time"})},{additionalProperties:false});
+export type InboxMessage=Static<typeof InboxMessageSchema>;
+export const ListInboxMessagesQuerySchema=Type.Object({limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),cursor:Type.Optional(Type.String({minLength:1,maxLength:1024})),
+  before:Type.Optional(Type.String({format:"date-time"}))},{additionalProperties:false});
+export type ListInboxMessagesQuery=Static<typeof ListInboxMessagesQuerySchema>;
+export const ListInboxMessagesResponseSchema=Type.Object({items:Type.Array(InboxMessageSchema),nextCursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{additionalProperties:false});
+export type ListInboxMessagesResponse=Static<typeof ListInboxMessagesResponseSchema>;
+export const SendHumanTextMessageRequestSchema=Type.Object({kind:Type.Literal("TEXT"),body:Type.String({minLength:1,maxLength:4096}),
+  expectedConversationVersion:Type.Integer({minimum:1})},{additionalProperties:false});
+export type SendHumanTextMessageRequest=Static<typeof SendHumanTextMessageRequestSchema>;
+export const SendHumanTextMessageResponseSchema=Type.Object({messageId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  conversationVersion:Type.Integer({minimum:1}),deliveryStatus:Type.Literal("QUEUED"),replayed:Type.Boolean()},{additionalProperties:false});
+export type SendHumanTextMessageResponse=Static<typeof SendHumanTextMessageResponseSchema>;
+export const InboxMessageParamsSchema=Type.Object({conversationId:Type.String({format:"uuid"}),messageId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type InboxMessageParams=Static<typeof InboxMessageParamsSchema>;
+export const CancelHumanTextMessageRequestSchema=Type.Object({expectedConversationVersion:Type.Integer({minimum:1})},{additionalProperties:false});
+export type CancelHumanTextMessageRequest=Static<typeof CancelHumanTextMessageRequestSchema>;
+export const CancelHumanTextMessageResponseSchema=Type.Object({messageId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  conversationVersion:Type.Integer({minimum:1}),deliveryStatus:Type.Literal("CANCELLED"),replayed:Type.Boolean()},{additionalProperties:false});
+export type CancelHumanTextMessageResponse=Static<typeof CancelHumanTextMessageResponseSchema>;
+export const HandoffResolutionDispositionSchema=Type.Union([
+  Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
+],{$id:"HandoffResolutionDisposition"});
+export type HandoffResolutionDisposition=Static<typeof HandoffResolutionDispositionSchema>;
+export const ResolveHandoffRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1}),
+  disposition:HandoffResolutionDispositionSchema},{additionalProperties:false});
+export type ResolveHandoffRequest=Static<typeof ResolveHandoffRequestSchema>;
+export const ResolveHandoffResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  serviceCaseId:Type.String({format:"uuid"}),handoffVersion:Type.Integer({minimum:1}),conversationVersion:Type.Integer({minimum:1}),replayed:Type.Boolean()},
+  {$id:"ResolveHandoffResponse",additionalProperties:false});
+export type ResolveHandoffResponse=Static<typeof ResolveHandoffResponseSchema>;
+export const RequeueHandoffRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1})},{additionalProperties:false});
+export type RequeueHandoffRequest=Static<typeof RequeueHandoffRequestSchema>;
+export const RequeueHandoffResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  serviceCaseId:Type.String({format:"uuid"}),handoffVersion:Type.Integer({minimum:1}),conversationVersion:Type.Integer({minimum:1}),
+  serviceCaseVersion:Type.Integer({minimum:1}),replayed:Type.Boolean()},{$id:"RequeueHandoffResponse",additionalProperties:false});
+export type RequeueHandoffResponse=Static<typeof RequeueHandoffResponseSchema>;
+export const ReopenReasonSchema=Type.Union([Type.Literal("FOLLOW_UP_REQUIRED"),Type.Literal("PREMATURE_CLOSURE"),
+  Type.Literal("NEW_INFORMATION"),Type.Literal("OPERATIONAL_CORRECTION")],{$id:"ReopenReason"});
+export type ReopenReason=Static<typeof ReopenReasonSchema>;
+export const ReopenHandoffRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1}),reason:ReopenReasonSchema},
+  {$id:"ReopenHandoffRequest",additionalProperties:false});
+export type ReopenHandoffRequest=Static<typeof ReopenHandoffRequestSchema>;
+export const ReopenHandoffResponseSchema=Type.Object({sourceHandoffId:Type.String({format:"uuid"}),handoffId:Type.String({format:"uuid"}),
+  conversationId:Type.String({format:"uuid"}),serviceCaseId:Type.String({format:"uuid"}),handoffVersion:Type.Integer({minimum:1}),
+  conversationVersion:Type.Integer({minimum:1}),serviceCaseVersion:Type.Integer({minimum:1}),replayed:Type.Boolean()},
+  {$id:"ReopenHandoffResponse",additionalProperties:false});
+export type ReopenHandoffResponse=Static<typeof ReopenHandoffResponseSchema>;
+export const InboxTransferCandidateSchema=Type.Object({id:Type.String({format:"uuid"}),displayName:Type.String({minLength:1,maxLength:160})},{additionalProperties:false});
+export const ListInboxTransferCandidatesResponseSchema=Type.Object({items:Type.Array(InboxTransferCandidateSchema)},{additionalProperties:false});
+export type ListInboxTransferCandidatesResponse=Static<typeof ListInboxTransferCandidatesResponseSchema>;
+export const TransferReasonSchema=Type.Union([
+  Type.Literal("SHIFT_CHANGE"),Type.Literal("LOAD_BALANCING"),Type.Literal("SPECIALIZED_SUPPORT"),Type.Literal("OPERATIONAL_CONTINUITY"),
+],{$id:"TransferReason"});
+export type TransferReason=Static<typeof TransferReasonSchema>;
+export const TransferHandoffRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1}),targetUserId:Type.String({format:"uuid"}),reason:TransferReasonSchema},{additionalProperties:false});
+export type TransferHandoffRequest=Static<typeof TransferHandoffRequestSchema>;
+export const TransferHandoffResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  serviceCaseId:Type.String({format:"uuid"}),targetUserId:Type.String({format:"uuid"}),handoffVersion:Type.Integer({minimum:1}),
+  conversationVersion:Type.Integer({minimum:1}),replayed:Type.Boolean()},{$id:"TransferHandoffResponse",additionalProperties:false});
+export type TransferHandoffResponse=Static<typeof TransferHandoffResponseSchema>;
+export const TakeoverHandoffRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1})},{additionalProperties:false});
+export type TakeoverHandoffRequest=Static<typeof TakeoverHandoffRequestSchema>;
+export const TakeoverHandoffResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
+  serviceCaseId:Type.String({format:"uuid"}),previousAssignedUserId:Type.String({format:"uuid"}),handoffVersion:Type.Integer({minimum:1}),
+  conversationVersion:Type.Integer({minimum:1}),replayed:Type.Boolean()},{$id:"TakeoverHandoffResponse",additionalProperties:false});
+export type TakeoverHandoffResponse=Static<typeof TakeoverHandoffResponseSchema>;

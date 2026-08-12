@@ -20,6 +20,7 @@
     "typecheck:all": "pnpm typecheck && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api --filter @zap-pronto/api-client --filter @zap-pronto/web typecheck",
     "api:generate": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs",
     "api:check": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs --check"
+    ,"release:check": "node scripts/release-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
@@ -40,6 +41,14 @@
       ,"./domain/user-administration": { "types": "./src/domain/user-administration.ts", "default": "./dist/domain/user-administration.js" }
       ,"./domain/user-invitation-acceptance": { "types": "./src/domain/user-invitation-acceptance.ts", "default": "./dist/domain/user-invitation-acceptance.js" }
       ,"./domain/invitation-acceptance-rate-limit": { "types": "./src/domain/invitation-acceptance-rate-limit.ts", "default": "./dist/domain/invitation-acceptance-rate-limit.js" }
+      ,"./domain/handoffs": { "types": "./src/domain/handoffs.ts", "default": "./dist/domain/handoffs.js" }
+      ,"./domain/channel-inbound": { "types": "./src/domain/channel-inbound.ts", "default": "./dist/domain/channel-inbound.js" }
+      ,"./domain/meta-webhook-signature": { "types": "./src/domain/meta-webhook-signature.ts", "default": "./dist/domain/meta-webhook-signature.js" }
+      ,"./domain/meta-callback": { "types": "./src/domain/meta-callback.ts", "default": "./dist/domain/meta-callback.js" }
+      ,"./domain/meta-delivery-status": { "types": "./src/domain/meta-delivery-status.ts", "default": "./dist/domain/meta-delivery-status.js" }
+      ,"./domain/inbound-materialization": { "types": "./src/domain/inbound-materialization.ts", "default": "./dist/domain/inbound-materialization.js" }
+      ,"./domain/inbound-routing": { "types": "./src/domain/inbound-routing.ts", "default": "./dist/domain/inbound-routing.js" }
+      ,"./domain/inbox-conversations": { "types": "./src/domain/inbox-conversations.ts", "default": "./dist/domain/inbox-conversations.js" }
   },
   "types": "./src/index.ts"
 }

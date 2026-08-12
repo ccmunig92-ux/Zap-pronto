@@ -6,9 +6,19 @@ declare global {
   }
 }
 
+let pendingAccessToken:Promise<string|undefined>|undefined;
+export function getAccessTokenSingleFlight():Promise<string|undefined>{
+  if(!pendingAccessToken){
+    const request=window.__ZAP_PRONTO_AUTH__?.getAccessToken()??Promise.resolve(undefined);
+    pendingAccessToken=request;
+    request.finally(()=>{if(pendingAccessToken===request)pendingAccessToken=undefined}).catch(()=>undefined);
+  }
+  return pendingAccessToken;
+}
+
 const transportClient = createApiClient({
   baseUrl: window.location.origin,
-  getAccessToken: async () => window.__ZAP_PRONTO_AUTH__?.getAccessToken(),
+  getAccessToken: getAccessTokenSingleFlight,
 });
 let pendingCurrentUser: ReturnType<typeof transportClient.getCurrentUser> | undefined;
 export const apiClient = {
@@ -39,6 +49,12 @@ export const apiClient = {
   changeAdministrativeUserStatus(...parameters: Parameters<typeof transportClient.changeAdministrativeUserStatus>) {
     return transportClient.changeAdministrativeUserStatus(...parameters);
   },
+  changeUnitMembership(...parameters:Parameters<typeof transportClient.changeUnitMembership>){
+    return transportClient.changeUnitMembership(...parameters);
+  },
+  listUnitMemberships(...parameters:Parameters<typeof transportClient.listUnitMemberships>){
+    return transportClient.listUnitMemberships(...parameters);
+  },
   revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
     return transportClient.revokeUserInvitation(...parameters);
   },
@@ -48,4 +64,25 @@ export const apiClient = {
   acceptUserInvitation(...parameters: Parameters<typeof transportClient.acceptUserInvitation>) {
     return transportClient.acceptUserInvitation(...parameters);
   },
+  listRoutingRequired(...parameters:Parameters<typeof transportClient.listRoutingRequired>){
+    return transportClient.listRoutingRequired(...parameters);
+  },
+  resolveRoutingRequired(...parameters:Parameters<typeof transportClient.resolveRoutingRequired>){
+    return transportClient.resolveRoutingRequired(...parameters);
+  },
+  listHandoffs(...parameters:Parameters<typeof transportClient.listHandoffs>){return transportClient.listHandoffs(...parameters)},
+  claimHandoff(...parameters:Parameters<typeof transportClient.claimHandoff>){return transportClient.claimHandoff(...parameters)},
+  resolveHandoff(...parameters:Parameters<typeof transportClient.resolveHandoff>){return transportClient.resolveHandoff(...parameters)},
+  requeueHandoff(...parameters:Parameters<typeof transportClient.requeueHandoff>){return transportClient.requeueHandoff(...parameters)},
+  listInboxHandoffTransferCandidates(...parameters:Parameters<typeof transportClient.listInboxHandoffTransferCandidates>){return transportClient.listInboxHandoffTransferCandidates(...parameters)},
+  transferInboxHandoff(...parameters:Parameters<typeof transportClient.transferInboxHandoff>){return transportClient.transferInboxHandoff(...parameters)},
+  takeoverInboxHandoff(...parameters:Parameters<typeof transportClient.takeoverInboxHandoff>){return transportClient.takeoverInboxHandoff(...parameters)},
+  listActiveInboxHandoffs(...parameters:Parameters<typeof transportClient.listActiveInboxHandoffs>){return transportClient.listActiveInboxHandoffs(...parameters)},
+  listSupervisedInboxHandoffs(...parameters:Parameters<typeof transportClient.listSupervisedInboxHandoffs>){return transportClient.listSupervisedInboxHandoffs(...parameters)},
+  listResolvedInboxHandoffs(...parameters:Parameters<typeof transportClient.listResolvedInboxHandoffs>){return transportClient.listResolvedInboxHandoffs(...parameters)},
+  reopenInboxHandoff(...parameters:Parameters<typeof transportClient.reopenInboxHandoff>){return transportClient.reopenInboxHandoff(...parameters)},
+  getInboxConversation(...parameters:Parameters<typeof transportClient.getInboxConversation>){return transportClient.getInboxConversation(...parameters)},
+  listInboxConversationMessages(...parameters:Parameters<typeof transportClient.listInboxConversationMessages>){return transportClient.listInboxConversationMessages(...parameters)},
+  sendHumanTextMessage(...parameters:Parameters<typeof transportClient.sendHumanTextMessage>){return transportClient.sendHumanTextMessage(...parameters)},
+  cancelHumanTextMessage(...parameters:Parameters<typeof transportClient.cancelHumanTextMessage>){return transportClient.cancelHumanTextMessage(...parameters)},
 };

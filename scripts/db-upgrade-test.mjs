@@ -19,6 +19,9 @@ const suffix = randomBytes(4).toString("hex");
 const migrationFiles = (await readdir(resolve("database/migrations")))
   .filter((file) => /^\d+_[a-z0-9_]+\.sql$/.test(file))
   .sort((left, right) => left.localeCompare(right));
+const publishedOutboxWorker = await readFile(resolve("database/migrations/0006_outbox_worker.sql"));
+assert.equal(createHash("sha256").update(publishedOutboxWorker).digest("hex"),
+  "0d438019d70f9bdd09027b4ef681a53cc8b2a1f85c658a791115bc9b7d59bf87");
 
 function runMigrator() {
   return new Promise((resolvePromise, reject) => {
@@ -122,14 +125,70 @@ try {
   assert.match(firstRun, /applied 0014_invitation_user_lifecycle\.sql/);
   assert.match(firstRun, /applied 0015_oidc_invitation_acceptance\.sql/);
   assert.match(firstRun, /applied 0016_invitation_acceptance_rate_limit\.sql/);
+  assert.match(firstRun, /applied 0018_inbound_channel_events\.sql/);
+  assert.match(firstRun, /applied 0020_inbox_claim_target\.sql/);
+  assert.match(firstRun, /applied 0021_human_text_outbound\.sql/);
+  assert.match(firstRun, /applied 0022_outbound_cancellation_status\.sql/);
+  assert.match(firstRun, /applied 0023_human_text_outbound_cancel\.sql/);
+  assert.match(firstRun, /applied 0024_meta_delivery_status_receipts\.sql/);
+  assert.match(firstRun, /applied 0025_meta_delivery_status_timestamp_guard\.sql/);
+  assert.match(firstRun, /applied 0026_meta_delivery_status_message_time_guard\.sql/);
+  assert.match(firstRun, /applied 0027_inbox_handoff_resolve\.sql/);
+  assert.match(firstRun, /applied 0028_request_handoff_idempotency\.sql/);
+  assert.match(firstRun, /applied 0029_outbound_worker_foundation\.sql/);
+  assert.match(firstRun, /applied 0030_inbox_handoff_requeue\.sql/);
+  assert.match(firstRun, /applied 0031_inbox_handoff_transfer\.sql/);
+  assert.match(firstRun, /applied 0032_inbox_sla_priority\.sql/);
+  assert.match(firstRun, /applied 0033_inbox_handoff_takeover\.sql/);
+  assert.match(firstRun, /applied 0034_membership_lifecycle\.sql/);
+  assert.match(firstRun, /applied 0035_medical_order_active_membership_rls\.sql/);
+  assert.match(firstRun, /applied 0036_unit_membership_catalog\.sql/);
+  assert.match(firstRun, /applied 0037_supervised_handoff_projection_types\.sql/);
+  assert.match(firstRun, /applied 0038_handoff_transfer_active_membership\.sql/);
+  assert.match(firstRun, /applied 0039_handoff_transfer_replay_authorization\.sql/);
+  assert.match(firstRun, /applied 0040_handoff_transfer_reason\.sql/);
+  assert.match(firstRun, /applied 0041_membership_assignment_serialization\.sql/);
+  assert.match(firstRun, /applied 0042_handoff_resolution_disposition\.sql/);
+  assert.match(firstRun, /applied 0043_handoff_replay_authorization\.sql/);
+  assert.match(firstRun, /applied 0044_inbox_resolved_history\.sql/);
+  assert.match(firstRun, /applied 0045_resolved_history_actor_join\.sql/);
+  assert.match(firstRun, /applied 0046_closed_conversation_history_authorization\.sql/);
+  assert.match(firstRun, /applied 0047_resolved_history_filters\.sql/);
+  assert.match(firstRun, /applied 0048_closed_history_server_cutoff\.sql/);
+  assert.match(firstRun, /applied 0049_handoff_reopen\.sql/);
+  assert.match(firstRun, /applied 0050_handoff_reopen_latest_episode\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
   try {
     const migrations = await verify.query("SELECT filename FROM schema_migrations ORDER BY filename");
     assert.deepEqual(migrations.rows.map((row) => row.filename), migrationFiles);
-    const conversations = await verify.query("SELECT count(*)::integer AS count, min(status::text) AS status FROM conversations");
-    assert.deepEqual(conversations.rows[0], { count: 3, status: "OPEN" });
+    const transferReplayUpgrade=await verify.query(`SELECT
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='handoff_transfer_commands' AND column_name='unit_id') unit_nullable,
+      EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_transfer_commands'::regclass
+        AND conname='handoff_transfer_commands_unit_fk') unit_fk,
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='handoff_transfer_commands' AND column_name='reason') reason_nullable,
+      has_function_privilege('zap_pronto_api','transfer_inbox_handoff(uuid,integer,uuid,text,text,text)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_api','transfer_inbox_handoff(uuid,integer,uuid,text,text)','EXECUTE') legacy_api_execute,
+      has_function_privilege('zap_pronto_worker','transfer_inbox_handoff(uuid,integer,uuid,text,text,text)','EXECUTE') worker_execute`);
+    assert.deepEqual(transferReplayUpgrade.rows[0],{unit_nullable:"NO",unit_fk:true,reason_nullable:"NO",
+      api_execute:true,legacy_api_execute:false,worker_execute:false});
+    const reopenUpgrade=await verify.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='handoff.reopen' ORDER BY role_code) roles,
+      has_function_privilege('zap_pronto_api','reopen_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','reopen_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','reopen_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') app_execute,
+      has_function_privilege('zap_pronto_api','reopen_inbox_handoff_v0049(uuid,integer,text,text,text)','EXECUTE') legacy_api_execute,
+      has_function_privilege('zap_pronto_api','resolve_inbox_handoff_reopen_unit_v0049(uuid,integer,text,text,text)','EXECUTE') legacy_resolver_api_execute,
+      has_table_privilege('zap_pronto_api','handoff_reopen_commands','SELECT') command_select`);
+    assert.deepEqual(reopenUpgrade.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],api_execute:true,
+      worker_execute:false,app_execute:false,legacy_api_execute:false,legacy_resolver_api_execute:false,command_select:false});
+    const conversations = await verify.query(`SELECT count(*)::integer AS count,
+      count(*) FILTER (WHERE status='OPEN')::integer AS open_count,
+      count(*) FILTER (WHERE status='CLOSED')::integer AS closed_count FROM conversations`);
+    assert.deepEqual(conversations.rows[0], { count: 3, open_count: 1, closed_count: 2 });
     const cases = await verify.query("SELECT id, status::text, version, resolved_at IS NOT NULL AS resolved, collected_data FROM service_cases ORDER BY id");
     assert.equal(cases.rowCount, 3);
     assert.deepEqual(cases.rows.map((row) => [row.status, row.version, row.resolved]), [
@@ -155,8 +214,58 @@ try {
     const newDomainRows = await verify.query(`SELECT
       (SELECT count(*)::integer FROM workflow_transitions) AS workflow_count,
       (SELECT count(*)::integer FROM quotes) AS quote_count,
-      (SELECT count(*)::integer FROM medical_orders) AS medical_count`);
-    assert.deepEqual(newDomainRows.rows[0], { workflow_count: 0, quote_count: 0, medical_count: 0 });
+      (SELECT count(*)::integer FROM medical_orders) AS medical_count,
+      (SELECT count(*)::integer FROM inbound_channel_events) AS inbound_count`);
+    assert.deepEqual(newDomainRows.rows[0], { workflow_count: 0, quote_count: 0, medical_count: 0, inbound_count: 0 });
+    await assert.rejects(verify.query(`INSERT INTO channel_connections
+      (tenant_id,type,scope,external_account_id) VALUES
+      ('10000000-0000-4000-8000-000000000001','WHATSAPP','SINGLE_UNIT','legacy-${suffix}')`),
+    (error) => error instanceof Error && "code" in error && error.code === "23505");
+    const inboundUpgrade = await verify.query(`SELECT
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='inbound_channel_events' AND column_name='unit_id') AS unit_nullable,
+      to_regprocedure('resolve_inbound_channel_binding(text,text)') IS NOT NULL AS resolver_exists,
+      to_regprocedure('persist_inbound_channel_event(text,text,text,text,text,timestamp with time zone,text,jsonb,text,text,uuid,uuid,text,text)') IS NOT NULL AS persistence_exists,
+      has_function_privilege('zap_pronto_api','resolve_inbound_channel_binding(text,text)','EXECUTE') AS api_resolve,
+      has_function_privilege('zap_pronto_worker','resolve_inbound_channel_binding(text,text)','EXECUTE') AS worker_resolve,
+      has_table_privilege('zap_pronto_worker','inbound_channel_events','SELECT') AS worker_select_receipts,
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='messages'
+        AND column_name='source_inbound_event_id') AS message_source_nullable,
+      to_regprocedure('materialize_inbound_channel_event(uuid,uuid)') IS NOT NULL AS materializer_exists,
+      has_function_privilege('zap_pronto_worker','materialize_inbound_channel_event(uuid,uuid)','EXECUTE') AS worker_materialize,
+      has_function_privilege('zap_pronto_api','materialize_inbound_channel_event(uuid,uuid)','EXECUTE') AS api_materialize,
+      to_regprocedure('claim_inbound_materialization_events(integer,integer)') IS NOT NULL AS worker_claim_exists,
+      has_function_privilege('zap_pronto_worker','claim_inbound_materialization_events(integer,integer)','EXECUTE') AS worker_claim,
+      has_function_privilege('zap_pronto_api','claim_inbound_materialization_events(integer,integer)','EXECUTE') AS api_claim,
+      to_regprocedure('list_inbound_routing_required(integer,timestamptz,uuid)') IS NOT NULL AS routing_list_exists,
+      to_regprocedure('resolve_inbound_routing_required(uuid,uuid,text,text)') IS NOT NULL AS routing_resolve_exists,
+      has_table_privilege('zap_pronto_api','inbound_routing_commands','SELECT') AS routing_commands_select,
+      has_table_privilege('zap_pronto_worker','messages','SELECT') AS worker_message_select,
+      has_function_privilege('zap_pronto_api','resolve_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') AS api_handoff_resolve,
+      has_function_privilege('zap_pronto_worker','resolve_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') AS worker_handoff_resolve,
+      has_function_privilege('zap_pronto_api','resolve_inbox_handoff_legacy_v0027(uuid,integer,text,text)','EXECUTE') AS legacy_api_handoff_resolve,
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='handoff_resolve_commands' AND column_name='disposition') AS resolve_disposition_nullable,
+      has_table_privilege('zap_pronto_api','handoff_resolve_commands','SELECT') AS resolve_commands_select`);
+    assert.deepEqual(inboundUpgrade.rows[0], {
+      unit_nullable: "YES", resolver_exists: true, persistence_exists: true,
+      api_resolve: true, worker_resolve: false, worker_select_receipts: false,
+      message_source_nullable:"YES",materializer_exists:true,worker_materialize:true,api_materialize:false,
+      worker_claim_exists:true,worker_claim:true,api_claim:false,
+      routing_list_exists:true,routing_resolve_exists:true,routing_commands_select:false,
+      worker_message_select:false,api_handoff_resolve:true,worker_handoff_resolve:false,legacy_api_handoff_resolve:false,
+      resolve_disposition_nullable:"NO",resolve_commands_select:false,
+    });
+    const outboundUpgrade=await verify.query(`SELECT
+      to_regprocedure('claim_outbound_delivery_events(integer,integer)') IS NOT NULL claim_exists,
+      to_regprocedure('finalize_outbound_delivery_event(uuid,uuid,text)') IS NOT NULL finalize_exists,
+      to_regprocedure('fail_outbound_delivery_event(uuid,uuid,text,integer)') IS NOT NULL fail_exists,
+      has_function_privilege('zap_pronto_worker','claim_outbound_delivery_events(integer,integer)','EXECUTE') worker_claim,
+      has_function_privilege('zap_pronto_api','claim_outbound_delivery_events(integer,integer)','EXECUTE') api_claim,
+      has_function_privilege('zap_pronto_worker','finalize_outbound_delivery_event(uuid,uuid,text)','EXECUTE') worker_finalize,
+      has_function_privilege('zap_pronto_api','finalize_outbound_delivery_event(uuid,uuid,text)','EXECUTE') api_finalize`);
+    assert.deepEqual(outboundUpgrade.rows[0],{claim_exists:true,finalize_exists:true,fail_exists:true,
+      worker_claim:true,api_claim:false,worker_finalize:true,api_finalize:false});
     const identityUpgrade = await verify.query(`SELECT
       (SELECT count(*)::integer FROM app_roles) AS role_count,
       (SELECT count(*)::integer FROM app_permissions) AS permission_count,
@@ -168,10 +277,100 @@ try {
       (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
       to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
-      role_count: 5, permission_count: 9, provider_count: 0, identity_count: 0, membership_count: 1,
+      role_count: 5, permission_count: 21, provider_count: 0, identity_count: 0, membership_count: 1,
       normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,
       permission_policy_exists: true,
     });
+    const unitMembershipCatalogUpgrade=await verify.query(`SELECT
+      to_regprocedure('admin_list_unit_memberships(uuid,text,uuid,integer)') IS NOT NULL function_exists,
+      has_function_privilege('zap_pronto_api','admin_list_unit_memberships(uuid,text,uuid,integer)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','admin_list_unit_memberships(uuid,text,uuid,integer)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','admin_list_unit_memberships(uuid,text,uuid,integer)','EXECUTE') app_execute,
+      NOT EXISTS(SELECT 1 FROM information_schema.routine_privileges
+        WHERE routine_name='admin_list_unit_memberships' AND grantee='PUBLIC') public_revoked`);
+    assert.deepEqual(unitMembershipCatalogUpgrade.rows[0],{
+      function_exists:true,api_execute:true,worker_execute:false,app_execute:false,public_revoked:true,
+    });
+    const assignmentSerializationUpgrade=await verify.query(`SELECT
+      pg_get_functiondef('enforce_active_human_assignee()'::regprocedure) LIKE '%:membership-lifecycle%' serialized,
+      to_regprocedure('transfer_inbox_handoff_reason_v0040(uuid,integer,uuid,text,text,text)') IS NOT NULL internal_exists,
+      has_function_privilege('zap_pronto_api','transfer_inbox_handoff_reason_v0040(uuid,integer,uuid,text,text,text)','EXECUTE') internal_api,
+      has_function_privilege('zap_pronto_api','transfer_inbox_handoff(uuid,integer,uuid,text,text,text)','EXECUTE') canonical_api,
+      pg_get_functiondef('resolve_inbox_handoff_transfer_unit(uuid,integer,uuid,text,text,text)'::regprocedure)
+        LIKE '%reason<>''LEGACY_UNSPECIFIED''%' legacy_scope_closed`);
+    assert.deepEqual(assignmentSerializationUpgrade.rows[0],{
+      serialized:true,internal_exists:true,internal_api:false,canonical_api:true,legacy_scope_closed:true,
+    });
+    const replayAuthorizationUpgrade=await verify.query(`SELECT
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='handoff_resolve_commands' AND column_name='unit_id') resolve_unit_nullable,
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='handoff_requeue_commands' AND column_name='unit_id') requeue_unit_nullable,
+      EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_resolve_commands'::regclass
+        AND conname='handoff_resolve_commands_unit_fk') resolve_unit_fk,
+      EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_requeue_commands'::regclass
+        AND conname='handoff_requeue_commands_unit_fk') requeue_unit_fk,
+      has_function_privilege('zap_pronto_api','resolve_inbox_handoff(uuid,integer,text,text,text)','EXECUTE') resolve_api,
+      has_function_privilege('zap_pronto_api','resolve_inbox_handoff_disposition_v0042(uuid,integer,text,text,text)','EXECUTE') resolve_internal_api,
+      has_function_privilege('zap_pronto_api','requeue_inbox_handoff(uuid,integer,text)','EXECUTE') requeue_api,
+      has_function_privilege('zap_pronto_api','requeue_inbox_handoff_v0030(uuid,integer,text)','EXECUTE') requeue_internal_api,
+      pg_get_functiondef('resolve_inbox_handoff(uuid,integer,text,text,text)'::regprocedure)
+        LIKE '%current_actor_has_permission(''handoff.resolve'',command_unit_id)%' resolve_reauthorizes,
+      pg_get_functiondef('requeue_inbox_handoff(uuid,integer,text)'::regprocedure)
+        LIKE '%current_actor_has_permission(''handoff.requeue'',command_unit_id)%' requeue_reauthorizes`);
+    assert.deepEqual(replayAuthorizationUpgrade.rows[0],{
+      resolve_unit_nullable:"NO",requeue_unit_nullable:"NO",resolve_unit_fk:true,requeue_unit_fk:true,
+      resolve_api:true,resolve_internal_api:false,requeue_api:true,requeue_internal_api:false,
+      resolve_reauthorizes:true,requeue_reauthorizes:true,
+    });
+    const resolvedHistoryUpgrade=await verify.query(`SELECT
+      EXISTS(SELECT 1 FROM app_permissions WHERE code='handoff.history.read') permission_exists,
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='handoff.history.read' ORDER BY role_code) roles,
+      has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)','EXECUTE') worker_execute,
+      pg_get_functiondef('list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)'::regprocedure)
+        LIKE '%handoff.status=''RESOLVED''%' resolved_only,
+      pg_get_functiondef('list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)'::regprocedure)
+        LIKE '%actor.tenant_id=handoff.tenant_id%' actor_tenant_join`);
+    assert.deepEqual(resolvedHistoryUpgrade.rows[0],{permission_exists:true,
+      roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],api_execute:false,worker_execute:false,resolved_only:true,actor_tenant_join:true});
+    const filteredResolvedHistoryUpgrade=await verify.query(`SELECT
+      to_regprocedure('list_inbox_resolved_handoffs_v3(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)') IS NOT NULL function_exists,
+      has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs_v3(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_inbox_resolved_handoffs_v3(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','list_inbox_resolved_handoffs_v3(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)','EXECUTE') app_execute,
+      EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='handoff_resolve_commands_history_lookup_idx') lookup_index,
+      pg_get_functiondef('list_inbox_resolved_handoffs_v3_v0049(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%current_actor_has_permission(''handoff.history.read'',requested_unit_id)%' reauthorizes,
+      pg_get_functiondef('list_inbox_resolved_handoffs_v3_v0049(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%requested_before-requested_from>interval ''366 days''%' bounded_window,
+      has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs_v3_v0049(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)','EXECUTE') legacy_api_execute,
+      pg_get_functiondef('list_inbox_resolved_handoffs_v3(uuid,integer,text,text,timestamptz,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%newer.status=''RESOLVED''%' latest_only`);
+    assert.deepEqual(filteredResolvedHistoryUpgrade.rows[0],{function_exists:true,api_execute:true,worker_execute:false,
+      app_execute:false,lookup_index:true,reauthorizes:true,bounded_window:true,legacy_api_execute:false,latest_only:true});
+    const historyTimelineUpgrade=await verify.query(`SELECT
+      has_function_privilege('zap_pronto_api','list_inbox_conversation_messages_v4(uuid,integer,timestamptz,uuid,timestamptz)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_inbox_conversation_messages_v4(uuid,integer,timestamptz,uuid,timestamptz)','EXECUTE') worker_execute,
+      pg_get_functiondef('list_inbox_conversation_messages_v4(uuid,integer,timestamptz,uuid,timestamptz)'::regprocedure)
+        LIKE '%message.created_at<=effective_before%' cutoff_in_function,
+      pg_get_functiondef('list_inbox_conversation_messages_v4(uuid,integer,timestamptz,uuid,timestamptz)'::regprocedure)
+        LIKE '%LEAST(COALESCE(requested_before%detail.closed_at)%' caps_at_closed,
+      pg_get_functiondef('list_inbox_conversation_messages_v4(uuid,integer,timestamptz,uuid,timestamptz)'::regprocedure)
+        LIKE '%detail.status=''CLOSED''%detail.closed_at IS NULL%' rejects_invalid_closed`);
+    assert.deepEqual(historyTimelineUpgrade.rows[0],{api_execute:true,worker_execute:false,cutoff_in_function:true,
+      caps_at_closed:true,rejects_invalid_closed:true});
+    const closedConversationAuthorizationUpgrade=await verify.query(`SELECT
+      has_function_privilege('zap_pronto_api','get_inbox_conversation(uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','get_inbox_conversation(uuid)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','get_inbox_conversation(uuid)','EXECUTE') app_execute,
+      function.prosecdef,function.proconfig,
+      pg_get_functiondef(function.oid)
+        LIKE '%c.status=''CLOSED'' AND NOT public.current_actor_has_permission(''handoff.history.read'',c.unit_id)%' closed_reauthorized
+      FROM pg_proc function WHERE function.oid='get_inbox_conversation(uuid)'::regprocedure`);
+    assert.deepEqual(closedConversationAuthorizationUpgrade.rows[0],{api_execute:true,worker_execute:false,
+      app_execute:false,prosecdef:true,proconfig:["search_path=pg_catalog, public","row_security=off"],
+      closed_reauthorized:true});
   } finally {
     await verify.end();
   }
