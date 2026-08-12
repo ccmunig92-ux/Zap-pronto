@@ -11,9 +11,10 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
-- Os três arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
+- Os quatro arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
   Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
-  imagem PostgreSQL Alpine e as duas URLs ao UID/GID 1000 da imagem API, todos com modo `0400`; modo `0600`
+  imagem PostgreSQL Alpine e as três URLs (`database_migration_url`, `database_runtime_url` e
+  `database_worker_url`) ao UID/GID 1000 da imagem API, todos com modo `0400`; modo `0600`
   pertencente ao operador torna o secret ilegível para os containers não privilegiados.
 - `database_migration_url` usa o owner do banco e nunca é reutilizado pela API.
 - O usuário da migration URL precisa de `CREATEROLE` no primeiro boot para criar os roles de componente e
@@ -56,3 +57,15 @@ limites mínimos do manifesto. A validação operacional de owner/mode exige um 
 9. O Nginx do host encaminha HTTPS somente ao loopback configurado, sem publicar diretamente a porta interna.
 10. A rotação local do driver de logs limita cada serviço a cinco arquivos de 10 MB; a retenção externa deve
     ser definida antes de produção.
+
+## Objetivos operacionais de staging
+
+Até existir medição de produção, staging adota objetivos conservadores, não SLOs contratuais:
+
+- RPO máximo de 24 horas, com backup diário externo ao host e retenção mínima de 14 dias;
+- RTO máximo de 4 horas, contado da declaração do incidente até o serviço verificado;
+- restore drill antes de cada promoção e ao menos mensalmente enquanto o ambiente estiver ativo;
+- nenhum backup é considerado válido sem restauração em banco isolado e verificação das migrations.
+
+O primeiro exercício real deve registrar duração, tamanho, SHA do artefato e local imutável do backup.
+Se RPO ou RTO não forem comprovados, staging permanece bloqueado para homologação.
