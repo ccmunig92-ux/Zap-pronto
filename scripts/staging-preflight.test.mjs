@@ -18,6 +18,14 @@ test("staging smoke scripts provision the isolated worker credential", () => {
     assert.match(source, /export DATABASE_WORKER_URL_FILE=/);
   }
 });
+
+test("staging worker exposes a process liveness healthcheck for compose wait", () => {
+  const source = readFileSync(new URL("../deploy/staging/compose.yaml", import.meta.url), "utf8");
+  const worker = source.match(/\n  worker:\n([\s\S]*?)\n  web:\n/)?.[1];
+  assert.ok(worker, "worker service must exist");
+  assert.match(worker, /healthcheck:\s*\n\s+test: \["CMD", "node", "-e", "process\.kill\(1, 0\)"\]/);
+  assert.doesNotMatch(worker, /healthcheck:\s*\n\s+disable: true/);
+});
 const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resources:{limits:{cpus,memory}}},
   networks:Object.fromEntries(networks.map((name)=>[name,null])),secrets:secrets.map((source)=>({source})),depends_on,
   read_only:true,cap_drop:["ALL"],security_opt:["no-new-privileges:true"],
