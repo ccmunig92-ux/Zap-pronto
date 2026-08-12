@@ -19,9 +19,10 @@ const suffix = randomBytes(4).toString("hex");
 const migrationFiles = (await readdir(resolve("database/migrations")))
   .filter((file) => /^\d+_[a-z0-9_]+\.sql$/.test(file))
   .sort((left, right) => left.localeCompare(right));
-const publishedOutboxWorker = await readFile(resolve("database/migrations/0006_outbox_worker.sql"));
+const publishedOutboxWorker = (await readFile(resolve("database/migrations/0006_outbox_worker.sql"), "utf8"))
+  .replace(/\r\n/gu, "\n");
 assert.equal(createHash("sha256").update(publishedOutboxWorker).digest("hex"),
-  "0d438019d70f9bdd09027b4ef681a53cc8b2a1f85c658a791115bc9b7d59bf87");
+  "00c385c3b1a1a051d24e763268db530b9585ecefbd4873cda83211510d7cbde8");
 
 function runMigrator() {
   return new Promise((resolvePromise, reject) => {
