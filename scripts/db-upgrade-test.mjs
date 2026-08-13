@@ -202,7 +202,7 @@ try {
       has_function_privilege('zap_pronto_api','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') api_execute,
       has_function_privilege('zap_pronto_worker','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') worker_execute,
       has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') legacy_api_execute,
-      pg_get_functiondef('list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
         LIKE '%evaluate_unit_staff_shift_internal%' shift_aware,
       pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
         LIKE '%active_counts AS MATERIALIZED%' active_counts_once,
@@ -265,7 +265,7 @@ try {
       has_function_privilege('zap_pronto_api','resolve_inbox_sla_alert_ack_unit(uuid,integer,text,text)','EXECUTE') resolver_api,
       has_function_privilege('zap_pronto_worker','resolve_inbox_sla_alert_ack_unit(uuid,integer,text,text)','EXECUTE') resolver_worker,
       has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0053(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') internal_list_api,
-      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+      pg_get_functiondef('list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
         LIKE '%candidate.version%' projects_handoff_version,
       EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_sla_acknowledgements'::regclass
         AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (tenant_id, handoff_id, handoff_version)') episode_primary_key,
