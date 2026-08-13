@@ -8,6 +8,8 @@ import type { UnitMembershipClient } from "./UnitMembershipPanel.js";
 import type { InboxClient } from "./InboxPanel.js";
 
 function emptyInboxClient(overrides:Partial<InboxClient>={}):InboxClient{return{
+  getInboxAvailability:async unitId=>({unitId,userId:"22222222-2222-4222-8222-222222222222",status:"OFFLINE",maxActive:5,pauseReason:null,pausedUntil:null,activeCount:0,version:1,updatedAt:"2026-08-12T20:00:00.000Z"}),
+  setInboxAvailability:async input=>({unitId:input.unitId,userId:"22222222-2222-4222-8222-222222222222",status:input.status,maxActive:input.maxActive,pauseReason:input.pauseReason??null,pausedUntil:input.pausedUntil??null,activeCount:0,version:input.expectedVersion+1,updatedAt:"2026-08-12T20:01:00.000Z",replayed:false}),
   listHandoffs:async()=>({items:[]}),claimHandoff:async()=>({}),resolveHandoff:async()=>({}),reopenInboxHandoff:async()=>({}),requeueHandoff:async()=>({}),
   listInboxHandoffTransferCandidates:async()=>({items:[]}),transferInboxHandoff:async()=>({}),takeoverInboxHandoff:async()=>({}),
   listActiveInboxHandoffs:async()=>({items:[]}),listSupervisedInboxHandoffs:async()=>({items:[]}),

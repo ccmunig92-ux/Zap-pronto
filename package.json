@@ -49,6 +49,7 @@
       ,"./domain/inbound-materialization": { "types": "./src/domain/inbound-materialization.ts", "default": "./dist/domain/inbound-materialization.js" }
       ,"./domain/inbound-routing": { "types": "./src/domain/inbound-routing.ts", "default": "./dist/domain/inbound-routing.js" }
       ,"./domain/inbox-conversations": { "types": "./src/domain/inbox-conversations.ts", "default": "./dist/domain/inbox-conversations.js" }
+      ,"./domain/availability": { "types": "./src/domain/availability.ts", "default": "./dist/domain/availability.js" }
   },
   "types": "./src/index.ts"
 }

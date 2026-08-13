@@ -158,6 +158,7 @@ try {
   assert.match(firstRun, /applied 0048_closed_history_server_cutoff\.sql/);
   assert.match(firstRun, /applied 0049_handoff_reopen\.sql/);
   assert.match(firstRun, /applied 0050_handoff_reopen_latest_episode\.sql/);
+  assert.match(firstRun, /applied 0051_attendant_availability\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -186,6 +187,16 @@ try {
       has_table_privilege('zap_pronto_api','handoff_reopen_commands','SELECT') command_select`);
     assert.deepEqual(reopenUpgrade.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],api_execute:true,
       worker_execute:false,app_execute:false,legacy_api_execute:false,legacy_resolver_api_execute:false,command_select:false});
+    const availabilityUpgrade=await verify.query(`SELECT
+      to_regclass('attendant_unit_availability') IS NOT NULL availability_table,
+      to_regclass('attendant_availability_commands') IS NOT NULL command_table,
+      has_function_privilege('zap_pronto_api','get_actor_unit_availability(uuid)','EXECUTE') read_api,
+      has_function_privilege('zap_pronto_worker','get_actor_unit_availability(uuid)','EXECUTE') read_worker,
+      has_function_privilege('zap_pronto_api','set_actor_unit_availability(uuid,text,integer,text,timestamptz,integer,text,text)','EXECUTE') write_api,
+      has_function_privilege('zap_pronto_app','set_actor_unit_availability(uuid,text,integer,text,timestamptz,integer,text,text)','EXECUTE') write_app,
+      has_table_privilege('zap_pronto_api','attendant_unit_availability','SELECT') direct_select`);
+    assert.deepEqual(availabilityUpgrade.rows[0],{availability_table:true,command_table:true,read_api:true,
+      read_worker:false,write_api:true,write_app:false,direct_select:false});
     const conversations = await verify.query(`SELECT count(*)::integer AS count,
       count(*) FILTER (WHERE status='OPEN')::integer AS open_count,
       count(*) FILTER (WHERE status='CLOSED')::integer AS closed_count FROM conversations`);

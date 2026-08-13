@@ -71,6 +71,7 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   assert.match(seed, /'CORPORATE','local-e2e-routing-account','ACTIVE'/);
   assert.match(seed, /local-e2e-routing-account'[\s\S]*NULL,'UNROUTED','MULTIPLE_ACTIVE_UNITS'/);
   assert.match(seed, /DELETE FROM inbound_routing_commands[\s\S]*DELETE FROM inbound_channel_events/);
+  assert.match(seed,/DELETE FROM attendant_availability_commands[\s\S]*INSERT INTO attendant_unit_availability[\s\S]*'AVAILABLE',100,NULL,NULL,1/);
 });
 
 test("controlador isola volumes pelo project name local fixo", async () => {
@@ -98,6 +99,7 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/previousTrusted\.Thumbprint/);
   assert.match(controller,/Read-InboxImmutableSnapshot[\s\S]*LOCAL_OIDC_CLAIM_REQUEUE_STATE_INVALID/);
   assert.match(controller,/event_type='handoff\.claimed'/);
+  assert.match(controller,/--grep','atendente altera a própria disponibilidade'[\s\S]*attendant_unit_availability[\s\S]*attendant_availability_commands[\s\S]*LOCAL_OIDC_ATTENDANT_AVAILABILITY_STATE_INVALID/);
   assert.match(controller,/resposta humana TEXT/);
   assert.match(controller,/LOCAL_OIDC_HUMAN_TEXT_STATE_INVALID/);
   assert.match(controller,/cancelamento local mantém TEXT/);

@@ -103,6 +103,7 @@ try {
       "0048_closed_history_server_cutoff.sql",
       "0049_handoff_reopen.sql",
       "0050_handoff_reopen_latest_episode.sql",
+      "0051_attendant_availability.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -111,6 +112,13 @@ try {
     for (const filename of ["0001_rls.sql", "0002_integrity.sql"]) {
       const testSql = await readFile(resolve("database/tests", filename), "utf8");
       await target.query(testSql);
+    }
+    const availabilityTestClient = new pg.Client({ connectionString: targetUrl.toString() });
+    await availabilityTestClient.connect();
+    try {
+      await availabilityTestClient.query(await readFile(resolve("database/tests", "0003_availability.sql"), "utf8"));
+    } finally {
+      await availabilityTestClient.end();
     }
 
     const role = await target.query(
@@ -176,7 +184,7 @@ try {
       "user_invitations", "user_invitation_units", "user_lifecycle_commands", "user_oidc_identities",
     ];
     protectedTables.sort();
-    const globalHiddenTables = ["invitation_acceptance_rate_limits","inbound_routing_commands","human_text_message_commands",
+    const globalHiddenTables = ["attendant_unit_availability","attendant_availability_commands","invitation_acceptance_rate_limits","inbound_routing_commands","human_text_message_commands",
       "human_text_message_cancel_commands","meta_delivery_status_receipts","meta_delivery_status_applications","handoff_resolve_commands","handoff_requeue_commands","handoff_transfer_commands",
       "handoff_takeover_commands","handoff_reopen_commands","membership_lifecycle_commands"];
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
@@ -253,6 +261,7 @@ try {
       "medical_order_review_events", "handoff_claim_commands",
     ]);
     const apiHidden = new Set([
+      "attendant_unit_availability", "attendant_availability_commands",
       "user_invitations", "user_invitation_units", "user_lifecycle_commands",
       "invitation_acceptance_rate_limits",
       "inbound_routing_commands",
@@ -1115,6 +1124,12 @@ try {
          '6a000000-0000-4000-8000-000000000001','6b000000-0000-4000-8000-000000000001',
          '6d000000-0000-4000-8000-000000000001','6e000000-0000-4000-8000-000000000001')`);
       await target.query("DELETE FROM user_oidc_identities WHERE subject LIKE 'accepted-%'");
+      await target.query(`DELETE FROM attendant_availability_commands WHERE user_id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
+      await target.query(`DELETE FROM attendant_unit_availability WHERE user_id IN
+        ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
+         '6f000000-0000-4000-8000-000000000003')`);
       await target.query(`DELETE FROM user_units WHERE user_id IN
         ('6f000000-0000-4000-8000-000000000001','6f000000-0000-4000-8000-000000000002',
          '6f000000-0000-4000-8000-000000000003')`);
@@ -1234,6 +1249,8 @@ try {
       [actorAId, competingAdminId]);
       await target.query("DELETE FROM user_lifecycle_commands WHERE target_user_id IN ($1,$2)",
       [actorAId, competingAdminId]);
+      await target.query("DELETE FROM attendant_availability_commands WHERE user_id=$1", [competingAdminId]);
+      await target.query("DELETE FROM attendant_unit_availability WHERE user_id=$1", [competingAdminId]);
       await target.query("DELETE FROM user_units WHERE user_id=$1", [competingAdminId]);
       await target.query("DELETE FROM users WHERE id=$1", [competingAdminId]);
       await target.query(`UPDATE user_units SET role='ATTENDANT'
@@ -1242,6 +1259,8 @@ try {
       await target.query("DELETE FROM outbox_events WHERE aggregate_id=$1", [lifecycleTargetId]);
       await target.query("DELETE FROM user_lifecycle_commands WHERE target_user_id=$1", [lifecycleTargetId]);
       await target.query("DELETE FROM user_oidc_identities WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM attendant_availability_commands WHERE user_id=$1", [lifecycleTargetId]);
+      await target.query("DELETE FROM attendant_unit_availability WHERE user_id=$1", [lifecycleTargetId]);
       await target.query("DELETE FROM user_units WHERE user_id=$1", [lifecycleTargetId]);
       await target.query("DELETE FROM users WHERE id=$1", [lifecycleTargetId]);
 
@@ -1530,6 +1549,9 @@ try {
         expectedVersion: handoffA.rows[0].version,
         idempotencyKey: "claim-concurrent-a",
       };
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE tenant_id=$1 AND user_id=$2`,
+        [claimContext.tenantId,claimContext.actorId]);
       const claimResults = await Promise.allSettled([
         withTenantTransaction(
           runtimePool,
@@ -1660,6 +1682,8 @@ try {
       await target.query("UPDATE user_units SET role='AUDITOR' WHERE user_id=$1",[transferTargetId]);
       assert.deepEqual(await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates-auditor"},client=>listTransferCandidates(client,handoffA.rows[0].id)),{items:[]});
       await target.query("UPDATE user_units SET role='ATTENDANT' WHERE user_id=$1",[transferTargetId]);
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE user_id=$1`,[transferTargetId]);
       const legacyTransferKey="handoff-transfer-legacy-key";
       const legacyTransferFingerprint=createHash("sha256").update(`{"expectedVersion":4,"handoffId":"${handoffA.rows[0].id.toLowerCase()}","targetUserId":"${transferTargetId.toLowerCase()}"}`).digest("hex");
       await target.query(`INSERT INTO handoff_transfer_commands(tenant_id,idempotency_key,handoff_id,expected_version,target_user_id,
@@ -1748,6 +1772,8 @@ try {
         ()=>updateCorruptFixture(`UPDATE service_cases SET conversation_id=(SELECT conversation_id FROM human_handoffs WHERE id=$1)
           WHERE id=(SELECT service_case_id FROM human_handoffs WHERE id=$1)`,[handoffA.rows[0].id]));
       await target.query("DELETE FROM conversations WHERE id=$1",[inconsistentConversationId]);
+      await target.query("DELETE FROM attendant_availability_commands WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
+      await target.query("DELETE FROM attendant_unit_availability WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
       await target.query("DELETE FROM user_units WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
       await target.query("DELETE FROM units WHERE id=$1",[inconsistentUnitId]);
       const candidates=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates"},client=>listTransferCandidates(client,handoffA.rows[0].id));
@@ -1817,6 +1843,8 @@ try {
         VALUES($1,'40000000-0000-4000-8000-000000000001','takeover-manager@test.local','Takeover Manager','ACTIVE')`,[takeoverActorId]);
       await target.query(`INSERT INTO user_units(tenant_id,user_id,unit_id,role)
         VALUES('40000000-0000-4000-8000-000000000001',$1,$2,'UNIT_MANAGER')`,[takeoverActorId,handoffUnitId]);
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE user_id=$1 AND unit_id=$2`,[takeoverActorId,handoffUnitId]);
       const takeoverFingerprint=(handoffId,expectedVersion)=>createHash("sha256")
         .update(`{"expectedVersion":${expectedVersion},"handoffId":"${handoffId.toLowerCase()}"}`).digest("hex");
       const callTakeover=(pool,actorId,input,correlationId)=>withTenantTransaction(pool,{
@@ -2264,6 +2292,9 @@ try {
       const snapshotAfter=(await target.query("SELECT (SELECT count(*)::int FROM messages) messages,(SELECT count(*)::int FROM outbox_events) outbox,(SELECT count(*)::int FROM audit_events) audit")).rows[0];assert.deepEqual(snapshotAfter,snapshotBefore);
 
       const sendCaseId="7c000000-0000-4000-8000-000000000007",sendHandoffId="7c000000-0000-4000-8000-000000000008";
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3`,
+        ["50000000-0000-4000-8000-000000000002",actorBId,unitB]);
       await target.query(`INSERT INTO service_cases(id,tenant_id,conversation_id,unit_id,kind,status)
         VALUES($1,'50000000-0000-4000-8000-000000000002',$2,$3,'HUMAN_TEXT_TEST','IN_REVIEW')`,[sendCaseId,firstMaterialized.conversationId,unitB]);
       await target.query(`INSERT INTO human_handoffs(id,tenant_id,conversation_id,service_case_id,unit_id,reason,priority,status,assigned_user_id,idempotency_key,queued_at,claimed_at)
@@ -3036,6 +3067,9 @@ try {
       {commands:1,outbox:1,audit:1,workflows:3});
       assert.deepEqual(reopenEvidence.source_snapshot,reopenBefore.source_snapshot);
       assert.equal(reopenEvidence.sla_duration_seconds,reopenEvidence.source_sla_duration_seconds);
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3`,
+        ["50000000-0000-4000-8000-000000000002",readerId,unitB]);
       const closeEpisode=async(handoffId,version,label)=>{
         const claimed=await historyContext(readerId,`${label}-claim`,client=>claimHandoff(client,{handoffId,expectedVersion:version,idempotencyKey:`${label}-claim-key`}));
         return await historyContext(readerId,`${label}-resolve`,client=>resolveHandoff(client,{handoffId,

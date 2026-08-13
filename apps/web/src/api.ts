@@ -71,6 +71,8 @@ export const apiClient = {
     return transportClient.resolveRoutingRequired(...parameters);
   },
   listHandoffs(...parameters:Parameters<typeof transportClient.listHandoffs>){return transportClient.listHandoffs(...parameters)},
+  getInboxAvailability(...parameters:Parameters<typeof transportClient.getInboxAvailability>){return transportClient.getInboxAvailability(...parameters)},
+  setInboxAvailability(...parameters:Parameters<typeof transportClient.setInboxAvailability>){return transportClient.setInboxAvailability(...parameters)},
   claimHandoff(...parameters:Parameters<typeof transportClient.claimHandoff>){return transportClient.claimHandoff(...parameters)},
   resolveHandoff(...parameters:Parameters<typeof transportClient.resolveHandoff>){return transportClient.resolveHandoff(...parameters)},
   requeueHandoff(...parameters:Parameters<typeof transportClient.requeueHandoff>){return transportClient.requeueHandoff(...parameters)},

@@ -13,6 +13,7 @@ import { registerUserInvitationAcceptanceRoute } from "./routes/user-invitation-
 import { registerInboxHandoffRoutes } from "./routes/inbox-handoffs.js";
 import { registerInboxRoutingRequiredRoutes } from "./routes/inbox-routing-required.js";
 import { registerInboxConversationRoutes } from "./routes/inbox-conversations.js";
+import { registerInboxAvailabilityRoutes } from "./routes/inbox-availability.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -87,6 +88,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerInboxHandoffRoutes(app, options.pool ?? unavailablePool);
   registerInboxRoutingRequiredRoutes(app, options.pool ?? unavailablePool);
   registerInboxConversationRoutes(app, options.pool ?? unavailablePool);
+  registerInboxAvailabilityRoutes(app, options.pool ?? unavailablePool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }

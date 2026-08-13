@@ -47,6 +47,8 @@ if(document.paths?.["/v1/inbox/conversations/{conversationId}"]?.get?.operationI
 if(document.paths?.["/v1/inbox/conversations/{conversationId}/messages/{messageId}/cancel"]?.post?.operationId!=="cancelHumanTextMessage"){
   throw new Error("OPENAPI_INBOX_MESSAGE_CANCEL_MISSING");
 }
+if(document.paths?.["/v1/inbox/availability"]?.get?.operationId!=="getInboxAvailability"
+  ||document.paths?.["/v1/inbox/availability"]?.post?.operationId!=="setInboxAvailability")throw new Error("OPENAPI_INBOX_AVAILABILITY_MISSING");
 const source = `// Generated from the canonical OpenAPI document. Do not edit manually.\n${astToString(await openapiTS(document))}`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8").catch(() => "");
