@@ -208,6 +208,7 @@ try {
       "human_text_message_cancel_commands","meta_delivery_status_receipts","meta_delivery_status_applications","handoff_resolve_commands","handoff_requeue_commands","handoff_transfer_commands",
       "handoff_takeover_commands","handoff_reopen_commands","membership_lifecycle_commands"];
     globalHiddenTables.push("handoff_sla_acknowledgements","handoff_sla_acknowledge_commands");
+    globalHiddenTables.push("unit_sla_policy_publish_commands","unit_sla_policy_targets","unit_sla_policy_versions");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
