@@ -32,7 +32,10 @@ BEGIN
   IF (SELECT count(*) FROM audit_events WHERE tenant_id='96000000-0000-4000-8000-000000000001'
       AND action='UNIT_OPERATIONAL_TIMEZONE_CONFIGURED')<>1 THEN RAISE EXCEPTION 'TIMEZONE_AUDIT_NOT_UNIQUE';END IF;
 END$$;
-UPDATE user_units SET status='REVOKED' WHERE tenant_id='96000000-0000-4000-8000-000000000001'
+UPDATE user_units SET status='REVOKED',version=version+1,state_changed_at=clock_timestamp(),
+  revoked_at=clock_timestamp(),revoked_by_user_id='96000000-0000-4000-8000-000000000004',
+  revocation_reason='Timezone replay authorization test'
+  WHERE tenant_id='96000000-0000-4000-8000-000000000001'
   AND user_id='96000000-0000-4000-8000-000000000004' AND unit_id='96000000-0000-4000-8000-000000000002';
 DO $$DECLARE fingerprint text:=encode(digest(convert_to(
   '{"unitId":"96000000-0000-4000-8000-000000000002","timeZone":"America/Sao_Paulo","expectedVersion":0}','UTF8'),'sha256'),'hex');BEGIN
