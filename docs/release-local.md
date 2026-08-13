@@ -8,7 +8,7 @@ produção.
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
-- Cadeia append-only local validada de `0001_core.sql` até `0063_assignment_policy_authorization_hardening.sql`.
+- Cadeia append-only local validada de `0001_core.sql` até `0064_shift_aware_sla_capacity.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -173,6 +173,20 @@ do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, inclui
 1/1. Nenhum transporte outbound, Hermes, Meta, staging ou deploy foi executado. Os runs remotos de
 push `31682880249` e pull request `31682884013` passaram integralmente, incluindo banco limpo e upgrade.
 
+## Evidência incremental 0064
+
+A migration `0064_shift_aware_sla_capacity.sql` preserva a existência e a ordenação dos alertas de SLA
+mesmo quando a capacidade é zero. Ela redefine somente `availableCapacity` como a soma da capacidade
+residual dos integrantes simultaneamente `AVAILABLE` e `IN_SHIFT`, descontando seus atendimentos ativos.
+Integrantes pausados, offline, fora do turno, sem escala vigente ou em dia fechado contribuem com zero.
+O agregado é calculado uma vez por unidade e um índice parcial atende a contagem de atribuições ativas;
+paginação, severidade, reconhecimento, política SLA, claim, transferência e takeover não mudaram.
+
+Os gates locais passaram com a cadeia limpa `0001`–`0064`, 112 testes core, 91 da API, 32 do cliente,
+185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
+1/1. Nenhum transporte outbound, Hermes, Meta, staging, merge ou deploy foi executado. O CI remoto do
+novo HEAD permanece pendente.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
@@ -207,8 +221,8 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com todos os gates locais e remotos verdes, a declaração permitida é **candidato 0063 validado**. O candidato atual
-está no branch `codex/phase-4-attendant-availability`, com PR draft. A promoção à `main` exige PR,
+Com os gates locais verdes, a declaração permitida é **candidato local 0064 validado**. O candidato atual
+está no branch `codex/phase-4-attendant-availability`, com PR draft e CI remoto pendente para o novo HEAD. A promoção à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
 force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e

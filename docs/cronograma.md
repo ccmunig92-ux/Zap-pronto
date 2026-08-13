@@ -7,7 +7,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
 - Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
-- Fase atual: **Fase 4 — inbox multiusuário e produtividade**, validada localmente até a migration `0063` no branch `codex/phase-4-attendant-availability`.
+- Fase atual: **Fase 4 — inbox multiusuário e produtividade**, validada localmente até a migration `0064` no branch `codex/phase-4-attendant-availability`.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -733,6 +733,19 @@ frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo
 1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging ou deploy. Os runs remotos de
 push `31682880249` e pull request `31682884013` passaram integralmente; este checkpoint ainda não está integrado à `main`.
 
+Checkpoint local incremental em 2026-08-13, migration `0064`: os alertas de SLA continuam derivados
+exclusivamente da fila, prioridade e prazo e permanecem visíveis mesmo quando não há capacidade elegível.
+Somente o campo `availableCapacity` foi endurecido: ele soma a capacidade residual dos integrantes
+simultaneamente `AVAILABLE` e `IN_SHIFT`, descontando atendimentos ativos e tratando estados sem turno
+como capacidade zero. A projeção calcula o agregado uma vez por unidade e usa índice parcial dedicado
+para atendimentos ativos; não altera paginação, severidade, reconhecimento, política SLA, claim,
+transferência ou takeover.
+
+Os gates locais da cadeia limpa `0001`–`0064` passaram: 112 testes core, 91 da API, 32 do cliente,
+185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
+1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging, merge ou deploy. O CI remoto
+do novo HEAD permanece pendente.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -745,7 +758,7 @@ push `31682880249` e pull request `31682884013` passaram integralmente; este che
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0063`; staging deve
+   execução como evidência. A Inbox canônica já está implementada até a migration `0064`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

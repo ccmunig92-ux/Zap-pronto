@@ -147,7 +147,9 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/function E2E[\s\S]*Compose @\('run','--rm','local-seed'\);Sync-SyntheticSupervisorSubject \$supervisorSubject[\s\S]*gestor consulta disponibilidade/);
   assert.match(controller,/--grep','supervisor consulta escala efetiva sem controles nem mutações'/);
   assert.match(controller,/LOCAL_OIDC_TRANSFER_ENFORCEMENT_FIXTURE_FAILED[\s\S]*--grep','enforcement filtra destino fora do turno'[\s\S]*handoff_transfer_commands[\s\S]*handoff\.transferred[\s\S]*LOCAL_OIDC_TRANSFER_ENFORCEMENT_STATE_INVALID/);
+  assert.match(controller,/LOCAL_OIDC_SLA_SHIFT_CAPACITY_FIXTURE_FAILED[\s\S]*--grep','alerta SLA preserva o item e zera a capacidade'[\s\S]*unit_shift_schedule_commands[\s\S]*LOCAL_OIDC_SLA_SHIFT_CAPACITY_STATE_INVALID/);
   assert.match(controller,/--grep-invert'[\s\S]*enforcement filtra destino fora do turno/);
+  assert.match(controller,/--grep-invert'[\s\S]*alerta SLA preserva o item e zera a capacidade/);
   assert.match(controller,/Compose @\('run','--rm','local-seed'\)[\s\S]*--grep','gestor administra vínculos da unidade'/);
   assert.match(controller,/LOCAL_OIDC_SYNTHETIC_MANAGER_MEMBERSHIP_INVALID/);
   assert.match(controller,/LOCAL_OIDC_SYNTHETIC_SUPERVISOR_MEMBERSHIP_INVALID/);
@@ -165,4 +167,5 @@ test("Playwright recusa origem externa ou nonce ausente antes do browser",async(
   assert.match(spec,/E2E_LOCAL_DESTRUCTIVE_ALLOWED/);assert.match(spec,/https:\/\/zap-pronto\.127\.0\.0\.1\.nip\.io:18443/);
   assert.match(spec,/E2E_LOCAL_INSTANCE_NONCE/);assert.match(spec,/E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED/);
   assert.match(spec,/gestor consulta disponibilidade da equipe sob demanda[\s\S]*gets[\s\S]*Atendente Local[\s\S]*Capacidade: 0\/100 · Restante: 100[\s\S]*selectOption\("PAUSED"\)[\s\S]*mutations\)\.toEqual\(\[\]\)[\s\S]*externalHosts\)\.toEqual\(\[\]\)/);
-  assert.match(spec,/enforcement filtra destino fora do turno[\s\S]*Atendente Local 2[\s\S]*expectedVersion:1[\s\S]*type:"CLOSED"[\s\S]*status\(\)\)\.toBe\(409\)[\s\S]*O atendimento mudou antes da transferência\.[\s\S]*toHaveCount\(0\)[\s\S]*outboundRequests\)\.toEqual\(\[\]\)/);});
+  assert.match(spec,/enforcement filtra destino fora do turno[\s\S]*Atendente Local 2[\s\S]*expectedVersion:1[\s\S]*type:"CLOSED"[\s\S]*status\(\)\)\.toBe\(409\)[\s\S]*O atendimento mudou antes da transferência\.[\s\S]*toHaveCount\(0\)[\s\S]*outboundRequests\)\.toEqual\(\[\]\)/);
+  assert.match(spec,/alerta SLA preserva o item e zera a capacidade[\s\S]*Capacidade disponível: \[1-9\][\s\S]*type:"CLOSED"[\s\S]*Atualizar Inbox[\s\S]*Capacidade disponível: 0[\s\S]*initialAlertCount[\s\S]*outboundRequests\)\.toEqual\(\[\]\)/);});
