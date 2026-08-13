@@ -363,6 +363,7 @@ try {
     globalHiddenTables.push("unit_sla_policy_publish_commands","unit_sla_policy_targets","unit_sla_policy_versions");
     globalHiddenTables.push("unit_operational_timezone_commands","unit_operational_timezone_versions");
     globalHiddenTables.push("unit_shift_schedule_commands","unit_shift_schedule_versions");
+    globalHiddenTables.push("unit_assignment_policies","unit_assignment_policy_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
