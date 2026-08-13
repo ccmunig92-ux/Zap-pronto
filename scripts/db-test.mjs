@@ -109,6 +109,7 @@ try {
       "0053_inbox_sla_alerts.sql",
       "0054_sla_alert_projection_hardening.sql",
       "0055_sla_acknowledgement_episodes.sql",
+      "0056_unit_sla_policy.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -131,6 +132,13 @@ try {
       await slaAlertTestClient.query(await readFile(resolve("database/tests", "0004_sla_alerts.sql"), "utf8"));
     } finally {
       await slaAlertTestClient.end();
+    }
+    const slaPolicyTestClient = new pg.Client({ connectionString: targetUrl.toString() });
+    await slaPolicyTestClient.connect();
+    try {
+      await slaPolicyTestClient.query(await readFile(resolve("database/tests", "0005_sla_policy.sql"), "utf8"));
+    } finally {
+      await slaPolicyTestClient.end();
     }
 
     const role = await target.query(

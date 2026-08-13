@@ -151,6 +151,16 @@ BEGIN
   UPDATE conversations SET status='OPEN',closed_at=NULL,automation_status='HUMAN_QUEUED',assigned_user_id=NULL,version=1,
     state_changed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=conversation_id;
   PERFORM set_config('session_replication_role','origin',true);
+  DELETE FROM audit_events WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND action='SLA_POLICY_PUBLISHED' AND entity_id IN(SELECT id::text FROM unit_sla_policy_versions
+      WHERE tenant_id='90000000-0000-4000-8000-000000000001' AND unit_id='90000000-0000-4000-8000-000000000002');
+  DELETE FROM unit_sla_policy_publish_commands WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND unit_id='90000000-0000-4000-8000-000000000002';
+  DELETE FROM unit_sla_policy_targets WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND policy_version_id IN(SELECT id FROM unit_sla_policy_versions WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+      AND unit_id='90000000-0000-4000-8000-000000000002');
+  DELETE FROM unit_sla_policy_versions WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND unit_id='90000000-0000-4000-8000-000000000002';
   IF current_setting('app.local_seed_meta_status')='true' THEN
     INSERT INTO messages(id,tenant_id,conversation_id,direction,actor,external_message_id,body,payload,delivery_status,
       provider_sent_at,last_provider_status_at,created_at)

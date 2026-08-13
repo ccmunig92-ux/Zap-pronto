@@ -77,7 +77,7 @@ async function login(page: Page, configuration: AccountConfiguration): Promise<v
   await expect(page.getByRole("heading", { name: configuration.tenant })).toBeVisible();
 }
 
-async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Visão geral"): Promise<void> {
+async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Visão geral"): Promise<void> {
   const navigation = page.getByRole("navigation", { name: "Módulos" });
   const button = navigation.getByRole("button", { name });
   await expect(button).toBeVisible();
@@ -215,6 +215,26 @@ test.describe("shell OIDC real", () => {
     await page.getByRole("button",{name:"Confirmar alteração"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await changed).status()).toBe(200);
     await expect(page.getByText("Disponibilidade atualizada.")).toBeVisible();await expect(page.getByText(/Status:\s*Pausado/u)).toBeVisible();
     expect(mutations).toEqual(["POST /v1/inbox/availability"]);expect(externalHosts).toEqual([]);
+  });
+
+  test("gestor configura a primeira política de SLA uma única vez e persiste a versão",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a política de SLA local.");await login(page,account("MANAGER"));
+    const posts:string[]=[];const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
+      if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+      if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`);
+      if(request.method()==="POST"&&/^\/v1\/units\/[^/]+\/sla-policy$/u.test(url.pathname))posts.push(url.pathname)});
+    await openModule(page,"Política de SLA");await expect(page.getByRole("heading",{name:"Política de SLA da unidade"})).toBeVisible();
+    await expect(page.getByText("Nenhuma política de SLA configurada para esta unidade.")).toBeVisible();
+    await page.getByLabel("Prioridade baixa (minutos)").fill("240");await page.getByLabel("Prioridade normal (minutos)").fill("120");
+    await page.getByLabel("Prioridade alta (minutos)").fill("60");await page.getByLabel("Prioridade urgente (minutos)").fill("15");
+    await page.getByRole("button",{name:"Salvar política de SLA"}).click();await expect(page.getByRole("dialog",{name:"Confirmar política de SLA"})).toBeVisible();
+    const saved=page.waitForResponse(response=>response.request().method()==="POST"&&/^\/v1\/units\/[^/]+\/sla-policy$/u.test(new URL(response.url()).pathname));
+    await page.getByRole("button",{name:"Confirmar alteração"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await saved).status()).toBe(200);
+    expect(posts).toHaveLength(1);expect(mutations).toEqual([`POST ${posts[0]}`]);await expect(page.getByText("Política de SLA atualizada.")).toBeVisible();
+    await expect(page.getByText(/Versão 1\./u)).toBeVisible();await page.reload();await openModule(page,"Política de SLA");
+    await expect(page.getByText(/Versão 1\./u)).toBeVisible();await expect(page.getByLabel("Prioridade baixa (minutos)")).toHaveValue("240");
+    await expect(page.getByLabel("Prioridade normal (minutos)")).toHaveValue("120");await expect(page.getByLabel("Prioridade alta (minutos)")).toHaveValue("60");
+    await expect(page.getByLabel("Prioridade urgente (minutos)")).toHaveValue("15");expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);
   });
 
   test("gestor reconhece alerta de SLA uma única vez por versão e persiste após reload",async({page})=>{
