@@ -320,6 +320,8 @@ try {
     const identityUpgrade = await verify.query(`SELECT
       (SELECT count(*)::integer FROM app_roles) AS role_count,
       (SELECT count(*)::integer FROM app_permissions) AS permission_count,
+      EXISTS(SELECT 1 FROM app_permissions WHERE permission = 'sla_policy.read') AS sla_policy_read_exists,
+      EXISTS(SELECT 1 FROM app_permissions WHERE permission = 'sla_policy.manage') AS sla_policy_manage_exists,
       (SELECT count(*)::integer FROM oidc_providers) AS provider_count,
       (SELECT count(*)::integer FROM user_oidc_identities) AS identity_count,
       (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count,
@@ -328,7 +330,8 @@ try {
       (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
       to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
-      role_count: 5, permission_count: 23, provider_count: 0, identity_count: 0, membership_count: 1,
+      role_count: 5, permission_count: 25, sla_policy_read_exists: true, sla_policy_manage_exists: true,
+      provider_count: 0, identity_count: 0, membership_count: 1,
       normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,
       permission_policy_exists: true,
     });
