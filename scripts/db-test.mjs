@@ -297,6 +297,7 @@ try {
       "handoff_reopen_commands",
       "membership_lifecycle_commands",
       "handoff_sla_acknowledgements", "handoff_sla_acknowledge_commands",
+      "unit_sla_policy_versions", "unit_sla_policy_targets", "unit_sla_policy_publish_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
