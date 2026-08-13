@@ -170,6 +170,7 @@ try {
   assert.match(firstRun, /applied 0060_unit_shift_schedule\.sql/);
   assert.match(firstRun, /applied 0061_effective_staff_shift\.sql/);
   assert.match(firstRun, /applied 0062_unit_assignment_shift_enforcement\.sql/);
+  assert.match(firstRun, /applied 0063_assignment_policy_authorization_hardening\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -189,10 +190,13 @@ try {
       has_table_privilege('zap_pronto_api','unit_assignment_policies','SELECT') table_api,
       (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='unit_assignment_policies'::regclass) rls_forced,
       pg_get_functiondef('transfer_inbox_handoff(uuid,integer,uuid,text,text,text)'::regprocedure) LIKE '%assert_new_assignment_shift_internal%' transfer_gated,
+      pg_get_functiondef('set_unit_assignment_policy(uuid,text,integer,text,text)'::regprocedure) LIKE '%command.actor_id<>public.current_app_actor_id()%' replay_actor_bound,
+      strpos(pg_get_functiondef('set_unit_assignment_policy(uuid,text,integer,text,text)'::regprocedure), ':membership-lifecycle') < strpos(pg_get_functiondef('set_unit_assignment_policy(uuid,text,integer,text,text)'::regprocedure), 'current_actor_has_permission') auth_after_membership_lock,
       pg_get_functiondef('takeover_inbox_handoff(uuid,integer,text,text)'::regprocedure) NOT LIKE '%assert_new_assignment_shift_internal%' takeover_unchanged`);
     assert.deepEqual(assignmentPolicyUpgrade.rows[0],{policy_count:assignmentPolicyUpgrade.rows[0].unit_count,
       unit_count:assignmentPolicyUpgrade.rows[0].unit_count,defaults_observe:true,get_api:true,set_api:true,get_worker:false,
-      evaluator_api:false,assignment_internal_api:false,claim_gate_api:true,table_api:false,rls_forced:true,transfer_gated:true,takeover_unchanged:true});
+      evaluator_api:false,assignment_internal_api:false,claim_gate_api:true,table_api:false,rls_forced:true,transfer_gated:true,
+      replay_actor_bound:true,auth_after_membership_lock:true,takeover_unchanged:true});
     const transferReplayUpgrade=await verify.query(`SELECT
       (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
         AND table_name='handoff_transfer_commands' AND column_name='unit_id') unit_nullable,

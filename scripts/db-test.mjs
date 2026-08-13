@@ -116,6 +116,7 @@ try {
       "0060_unit_shift_schedule.sql",
       "0061_effective_staff_shift.sql",
       "0062_unit_assignment_shift_enforcement.sql",
+      "0063_assignment_policy_authorization_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -188,6 +189,36 @@ try {
       (SELECT count(*)::integer FROM audit_events WHERE tenant_id=$1 AND action='UNIT_ASSIGNMENT_POLICY_CHANGED') audits,
       (SELECT version FROM unit_assignment_policies WHERE tenant_id=$1 AND unit_id=$2) version`,[assignmentRaceTenant,assignmentRaceUnit]);
     assert.deepEqual(assignmentRaceProof.rows[0],{commands:1,audits:1,version:2});
+
+    // A policy request queued behind membership revocation must authorize only
+    // after the revocation commits, never with a stale pre-lock decision.
+    const assignmentRevoker=new pg.Client({connectionString:targetUrl.toString()});
+    const assignmentPolicyAfterRevoke=new pg.Client({connectionString:targetUrl.toString()});
+    await assignmentRevoker.connect();await assignmentPolicyAfterRevoke.connect();
+    try{
+      await assignmentRevoker.query("BEGIN");
+      await assignmentRevoker.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text||':membership-lifecycle',0))",[assignmentRaceTenant]);
+      await assignmentRevoker.query("UPDATE user_units SET status='REVOKED',version=version+1 WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
+        [assignmentRaceTenant,assignmentRaceManager,assignmentRaceUnit]);
+      await assignmentPolicyAfterRevoke.query("BEGIN");await assignmentPolicyAfterRevoke.query("SET LOCAL ROLE zap_pronto_api");
+      await assignmentPolicyAfterRevoke.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','assignment-revocation-race',true)",
+        [assignmentRaceTenant,assignmentRaceManager]);
+      const observeFingerprint=createHash("sha256").update(JSON.stringify({unitId:assignmentRaceUnit,mode:"OBSERVE",expectedVersion:2})).digest("hex");
+      const blockedPolicy=assignmentPolicyAfterRevoke.query("SELECT * FROM set_unit_assignment_policy($1,'OBSERVE',2,'assignment-after-revoke',$2)",
+        [assignmentRaceUnit,observeFingerprint]);
+      await new Promise(resolvePromise=>setTimeout(resolvePromise,50));
+      await assignmentRevoker.query("COMMIT");
+      await assert.rejects(blockedPolicy,/ASSIGNMENT_POLICY_NOT_FOUND/);
+      await assignmentPolicyAfterRevoke.query("ROLLBACK");
+      const revocationRaceProof=(await target.query(`SELECT
+        (SELECT version FROM unit_assignment_policies WHERE tenant_id=$1 AND unit_id=$2) version,
+        (SELECT count(*)::int FROM unit_assignment_policy_commands WHERE tenant_id=$1 AND idempotency_key='assignment-after-revoke') commands`,
+        [assignmentRaceTenant,assignmentRaceUnit])).rows[0];
+      assert.deepEqual(revocationRaceProof,{version:2,commands:0});
+    }finally{
+      await assignmentRevoker.query("ROLLBACK").catch(()=>undefined);await assignmentPolicyAfterRevoke.query("ROLLBACK").catch(()=>undefined);
+      await assignmentRevoker.end();await assignmentPolicyAfterRevoke.end();
+    }
 
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";
@@ -2055,6 +2086,18 @@ try {
       await target.query("DELETE FROM unit_assignment_policy_commands WHERE unit_id=$1",[inconsistentUnitId]);
       await target.query("DELETE FROM unit_assignment_policies WHERE unit_id=$1",[inconsistentUnitId]);
       await target.query("DELETE FROM units WHERE id=$1",[inconsistentUnitId]);
+      const enforcedTransferUnit=(await target.query("SELECT unit_id FROM human_handoffs WHERE id=$1",[handoffA.rows[0].id])).rows[0].unit_id;
+      await target.query("UPDATE unit_assignment_policies SET mode='ENFORCE_NEW_ASSIGNMENTS',version=version+1 WHERE tenant_id=$1 AND unit_id=$2",
+        [claimContext.tenantId,enforcedTransferUnit]);
+      assert.deepEqual(await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates-outside-shift"},
+        client=>listTransferCandidates(client,handoffA.rows[0].id)),{items:[]});
+      await assert.rejects(withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-outside-shift"},client=>transferHandoff(client,
+        {handoffId:handoffA.rows[0].id,expectedVersion:4,targetUserId:transferTargetId,reason:"LOAD_BALANCING",idempotencyKey:"handoff-transfer-outside-shift"})),
+      /ASSIGNEE_OUTSIDE_SHIFT/);
+      await target.query(`INSERT INTO unit_shift_schedule_versions(tenant_id,unit_id,user_id,version,effective_from,time_zone,weekly_slots,exceptions,created_by_user_id)
+        VALUES($1,$2,$3,1,(transaction_timestamp() AT TIME ZONE 'UTC')::date,'UTC',
+          jsonb_build_array(jsonb_build_object('weekday',extract(isodow FROM transaction_timestamp() AT TIME ZONE 'UTC')::integer,'start','00:00','end','23:59')),
+          '[]'::jsonb,$4)`,[claimContext.tenantId,enforcedTransferUnit,transferTargetId,actorAId]);
       const candidates=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates"},client=>listTransferCandidates(client,handoffA.rows[0].id));
       assert.deepEqual(candidates,{items:[{id:transferTargetId,displayName:"Transfer Target"}]});
       const transferInput={handoffId:handoffA.rows[0].id,expectedVersion:4,targetUserId:transferTargetId,reason:"LOAD_BALANCING",idempotencyKey:"handoff-transfer-key"};
@@ -2080,6 +2123,9 @@ try {
       assert.deepEqual(transferEvidence,{status:"ACTIVE",version:5,assigned_user_id:transferTargetId,automation_status:"HUMAN_ACTIVE",conversation_owner:transferTargetId,
         case_status:"IN_REVIEW",case_version:4,transitions:2,audits:1,outbox:1,hermes:0,meta:0,command_reason:"LOAD_BALANCING"});
       const handoffUnitId=(await target.query("SELECT unit_id FROM human_handoffs WHERE id=$1",[handoffA.rows[0].id])).rows[0].unit_id;
+      await target.query(`UPDATE unit_shift_schedule_versions SET exceptions=jsonb_build_array(jsonb_build_object(
+        'date',(transaction_timestamp() AT TIME ZONE 'UTC')::date::text,'type','CLOSED'))
+        WHERE tenant_id=$1 AND unit_id=$2 AND user_id=$3`,[claimContext.tenantId,handoffUnitId,transferTargetId]);
       const authorizedTransferReplay=await withTenantTransaction(runtimePool,
         {...claimContext,correlationId:"transfer-authorized-replay"},client=>transferHandoff(client,transferInput));
       assert.equal(authorizedTransferReplay.replayed,true);
