@@ -52,6 +52,10 @@ O controlador exige dois acknowledgements, dois comandos idempotentes e dois aud
 `SLA_ALERT_ACKNOWLEDGED`, vinculados às versões 1 e 3, além do estado final `QUEUED` versão 3 e zero
 mensagem outbound, Hermes ou evento Meta/outbound. O seed remove deterministicamente toda essa
 evidência ao final e devolve o handoff à fila sintética versão 1.
+O gestor também abre o módulo `Equipe` sob demanda e consulta a projeção sintética de disponibilidade:
+os dois atendentes, status e capacidade aparecem após um único GET inicial. O filtro `PAUSED` produz
+uma segunda leitura explícita, sem polling, mutação, Hermes, Meta ou host externo. O controlador restaura
+o seed antes da jornada seguinte para que a prova não dependa da ordem das demais mutações E2E.
 Na sequência do encerramento e da leitura histórica, o harness usa o mesmo episódio sintético para provar
 a reabertura unit-scoped pelo gestor. A operação preserva o handoff encerrado como histórico, cria exatamente
 um novo handoff em `QUEUED`, reabre caso e conversa em `WAITING_HUMAN`/`HUMAN_QUEUED`, registra um comando,

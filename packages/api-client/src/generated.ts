@@ -464,6 +464,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inbox/team-availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listInboxTeamAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/inbox/sla-alerts": {
         parameters: {
             query?: never;
@@ -635,11 +651,11 @@ export interface operations {
                             role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                         }[];
                         grants: ({
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
                             /** @enum {string} */
                             scope: "TENANT";
                         } | {
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
                             /** @enum {string} */
                             scope: "UNIT";
                             /** Format: uuid */
@@ -2107,11 +2123,11 @@ export interface operations {
                                 role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                             }[];
                             grants: ({
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
                                 /** @enum {string} */
                                 scope: "TENANT";
                             } | {
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
                                 /** @enum {string} */
                                 scope: "UNIT";
                                 /** Format: uuid */
@@ -5065,6 +5081,137 @@ export interface operations {
             };
             /** @description Default Response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    listInboxTeamAvailability: {
+        parameters: {
+            query: {
+                unitId: string;
+                limit?: number;
+                status?: "AVAILABLE" | "PAUSED" | "OFFLINE";
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** Format: uuid */
+                            userId: string;
+                            displayName: string;
+                            role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT";
+                            status: "AVAILABLE" | "PAUSED" | "OFFLINE";
+                            maxActive: number;
+                            activeCount: number;
+                            remainingCapacity: number;
+                            pauseReason: ("BREAK" | "TRAINING" | "MEETING" | "OTHER_OPERATIONAL") | null;
+                            pausedUntil: string | null;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        }[];
+                        nextCursor?: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

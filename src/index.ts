@@ -17,3 +17,4 @@ export * from "./domain/invitation-acceptance-rate-limit.js";
 export * from "./domain/availability.js";
 export * from "./domain/sla-alerts.js";
 export * from "./domain/sla-policy.js";
+export * from "./domain/team-availability.js";

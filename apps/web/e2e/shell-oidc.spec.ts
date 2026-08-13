@@ -77,7 +77,7 @@ async function login(page: Page, configuration: AccountConfiguration): Promise<v
   await expect(page.getByRole("heading", { name: configuration.tenant })).toBeVisible();
 }
 
-async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Visão geral"): Promise<void> {
+async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Equipe" | "Visão geral"): Promise<void> {
   const navigation = page.getByRole("navigation", { name: "Módulos" });
   const button = navigation.getByRole("button", { name });
   await expect(button).toBeVisible();
@@ -153,7 +153,6 @@ test.describe("shell OIDC real", () => {
   test("admin encaminha entrada sem unidade", async ({ page }) => {
     test.skip(!enabled, "Defina E2E_OIDC_ENABLED=true para homologar o roteamento local.");
     await login(page, account("ADMIN"));
-    await openModule(page, "Roteamento");
     const mutations: string[] = [];
     const resolvePosts: string[] = [];
     const externalHosts: string[] = [];
@@ -172,6 +171,7 @@ test.describe("shell OIDC real", () => {
       }
     });
     await page.reload();
+    await openModule(page, "Roteamento");
     const heading = page.getByRole("heading", { name: "Aguardando unidade" });
     await expect(heading).toBeVisible();
     const panel = heading.locator("xpath=ancestor::section[1]");
@@ -235,6 +235,19 @@ test.describe("shell OIDC real", () => {
     await expect(page.getByText(/Versão 1\./u)).toBeVisible();await expect(page.getByLabel("Prioridade baixa (minutos)")).toHaveValue("240");
     await expect(page.getByLabel("Prioridade normal (minutos)")).toHaveValue("120");await expect(page.getByLabel("Prioridade alta (minutos)")).toHaveValue("60");
     await expect(page.getByLabel("Prioridade urgente (minutos)")).toHaveValue("15");expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);
+  });
+
+  test("gestor consulta disponibilidade da equipe sob demanda sem mutações",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a equipe local.");await login(page,account("MANAGER"));
+    const gets:string[]=[];const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
+      if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+      if(url.pathname==="/v1/inbox/team-availability"&&request.method()==="GET")gets.push(`${url.pathname}${url.search}`);
+      if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
+    await expect(page.getByRole("button",{name:"Equipe"})).toBeVisible();expect(gets).toEqual([]);await openModule(page,"Equipe");
+    await expect(page.getByRole("heading",{name:"Disponibilidade da equipe"})).toBeVisible();await expect(page.getByText("Atendente Local",{exact:true})).toBeVisible();
+    await expect(page.getByText("Atendente Local 2",{exact:true})).toBeVisible();await expect(page.getByText("Capacidade: 0/100 · Restante: 100").first()).toBeVisible();
+    expect(gets).toHaveLength(1);await page.getByLabel("Status").selectOption("PAUSED");await expect(page.getByText("Nenhum integrante encontrado.")).toBeVisible();
+    expect(gets).toHaveLength(2);expect(new URL(`https://local${gets[1]}`).searchParams.get("status")).toBe("PAUSED");expect(mutations).toEqual([]);expect(externalHosts).toEqual([]);
   });
 
   test("gestor reconhece alerta de SLA uma única vez por versão e persiste após reload",async({page})=>{
