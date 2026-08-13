@@ -106,6 +106,8 @@ try {
       "0050_handoff_reopen_latest_episode.sql",
       "0051_attendant_availability.sql",
       "0052_availability_authorization_hardening.sql",
+      "0053_inbox_sla_alerts.sql",
+      "0054_sla_alert_projection_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -121,6 +123,13 @@ try {
       await availabilityTestClient.query(await readFile(resolve("database/tests", "0003_availability.sql"), "utf8"));
     } finally {
       await availabilityTestClient.end();
+    }
+    const slaAlertTestClient = new pg.Client({ connectionString: targetUrl.toString() });
+    await slaAlertTestClient.connect();
+    try {
+      await slaAlertTestClient.query(await readFile(resolve("database/tests", "0004_sla_alerts.sql"), "utf8"));
+    } finally {
+      await slaAlertTestClient.end();
     }
 
     const role = await target.query(
@@ -189,6 +198,7 @@ try {
     const globalHiddenTables = ["attendant_unit_availability","attendant_availability_commands","invitation_acceptance_rate_limits","inbound_routing_commands","human_text_message_commands",
       "human_text_message_cancel_commands","meta_delivery_status_receipts","meta_delivery_status_applications","handoff_resolve_commands","handoff_requeue_commands","handoff_transfer_commands",
       "handoff_takeover_commands","handoff_reopen_commands","membership_lifecycle_commands"];
+    globalHiddenTables.push("handoff_sla_acknowledgements","handoff_sla_acknowledge_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -276,6 +286,7 @@ try {
       "handoff_takeover_commands",
       "handoff_reopen_commands",
       "membership_lifecycle_commands",
+      "handoff_sla_acknowledgements", "handoff_sla_acknowledge_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
@@ -1666,6 +1677,27 @@ try {
         JOIN conversations conversation ON conversation.id=handoff.conversation_id WHERE handoff.id=$1`,[handoffA.rows[0].id])).rows[0];
       assert.deepEqual(requeueEvidence,{status:"QUEUED",version:3,assigned_user_id:null,claimed_at:null,case_status:"WAITING_HUMAN",
         automation_status:"HUMAN_QUEUED",conversation_owner:null,transitions:3,audits:1,outbox:1});
+      await target.query("UPDATE user_units SET role='SUPERVISOR' WHERE tenant_id=$1 AND user_id=$2",
+        [claimContext.tenantId,claimContext.actorId]);
+      const slaProjection=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"sla-projection-version"},async client=>
+        (await client.query(`SELECT handoff_id,acknowledgement_version FROM list_inbox_sla_alerts($1,101,NULL,NULL,
+          clock_timestamp()+interval '1 day',NULL,NULL,NULL,NULL,NULL)`,[(await target.query(
+          "SELECT unit_id FROM human_handoffs WHERE id=$1",[handoffA.rows[0].id])).rows[0].unit_id])).rows);
+      assert.equal(slaProjection.find(row=>row.handoff_id===handoffA.rows[0].id)?.acknowledgement_version,3);
+      const slaResolverKey="sla-resolver-unacked",slaResolverFingerprint=createHash("sha256").update(
+        `{"expectedVersion":3,"handoffId":"${handoffA.rows[0].id.toLowerCase()}"}`).digest("hex");
+      const slaHandoffUnit=(await target.query("SELECT unit_id FROM human_handoffs WHERE id=$1",
+        [handoffA.rows[0].id])).rows[0].unit_id;
+      const resolvedSlaUnit=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"sla-resolver-owned"},
+        async client=>(await client.query("SELECT resolve_inbox_sla_alert_ack_unit($1,$2,$3,$4) unit_id",
+          [handoffA.rows[0].id,3,slaResolverKey,slaResolverFingerprint])).rows[0].unit_id);
+      assert.equal(resolvedSlaUnit,slaHandoffUnit);
+      await assert.rejects(withTenantTransaction(runtimePool,{tenantId:"50000000-0000-4000-8000-000000000002",
+        actorId:actorBId,correlationId:"sla-resolver-cross-tenant"},client=>client.query(
+        "SELECT resolve_inbox_sla_alert_ack_unit($1,$2,$3,$4)",[handoffA.rows[0].id,3,slaResolverKey,
+          slaResolverFingerprint])),/SLA_ALERT_NOT_FOUND/);
+      await target.query("UPDATE user_units SET role='ATTENDANT' WHERE tenant_id=$1 AND user_id=$2",
+        [claimContext.tenantId,claimContext.actorId]);
       const requeueEffectsBefore=(await target.query(`SELECT
         (SELECT count(*)::int FROM handoff_requeue_commands WHERE handoff_id=$1) commands,
         (SELECT count(*)::int FROM workflow_transitions WHERE reason='ATTENDANT_REQUEUED' AND aggregate_id IN(

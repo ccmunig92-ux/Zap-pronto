@@ -82,6 +82,8 @@ export const apiClient = {
   listActiveInboxHandoffs(...parameters:Parameters<typeof transportClient.listActiveInboxHandoffs>){return transportClient.listActiveInboxHandoffs(...parameters)},
   listSupervisedInboxHandoffs(...parameters:Parameters<typeof transportClient.listSupervisedInboxHandoffs>){return transportClient.listSupervisedInboxHandoffs(...parameters)},
   listResolvedInboxHandoffs(...parameters:Parameters<typeof transportClient.listResolvedInboxHandoffs>){return transportClient.listResolvedInboxHandoffs(...parameters)},
+  listInboxSlaAlerts(...parameters:Parameters<typeof transportClient.listInboxSlaAlerts>){return transportClient.listInboxSlaAlerts(...parameters)},
+  acknowledgeInboxSlaAlert(...parameters:Parameters<typeof transportClient.acknowledgeInboxSlaAlert>){return transportClient.acknowledgeInboxSlaAlert(...parameters)},
   reopenInboxHandoff(...parameters:Parameters<typeof transportClient.reopenInboxHandoff>){return transportClient.reopenInboxHandoff(...parameters)},
   getInboxConversation(...parameters:Parameters<typeof transportClient.getInboxConversation>){return transportClient.getInboxConversation(...parameters)},
   listInboxConversationMessages(...parameters:Parameters<typeof transportClient.listInboxConversationMessages>){return transportClient.listInboxConversationMessages(...parameters)},

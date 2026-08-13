@@ -217,6 +217,20 @@ test.describe("shell OIDC real", () => {
     expect(mutations).toEqual(["POST /v1/inbox/availability"]);expect(externalHosts).toEqual([]);
   });
 
+  test("gestor reconhece alerta de SLA uma única vez e persiste após reload",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar alertas SLA locais.");await login(page,account("MANAGER"));
+    const posts:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
+      if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+      if(request.method()==="POST"&&/^\/v1\/inbox\/sla-alerts\/[^/]+\/acknowledge$/u.test(url.pathname))posts.push(url.pathname)});
+    await page.reload();await expect(page.getByRole("heading",{name:"Alertas de SLA"})).toBeVisible();
+    await expect(page.getByText("Sem prazo de SLA",{exact:true}).last()).toBeVisible();await expect(page.getByText(/Capacidade disponível: \d+/u)).toBeVisible();
+    const acknowledged=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/acknowledge"));
+    await page.getByRole("button",{name:"Reconhecer alerta"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await acknowledged).status()).toBe(200);
+    expect(posts).toHaveLength(1);await expect(page.getByText(/Reconhecido em/u)).toBeVisible();await page.reload();
+    await expect(page.getByText(/Reconhecido em/u)).toBeVisible();await expect(page.getByRole("button",{name:"Reconhecer alerta"})).toHaveCount(0);
+    expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);await expect(page.getByText("Enviado",{exact:true})).toHaveCount(0);
+  });
+
   test("inbound materializado permite claim e devolução segura à fila",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");await login(page,account("ATTENDANT"));
     const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);

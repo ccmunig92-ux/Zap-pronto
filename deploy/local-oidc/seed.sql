@@ -130,6 +130,12 @@ BEGIN
     AND handoff_id='90000000-0000-4000-8000-000000000060';
   DELETE FROM handoff_takeover_commands WHERE tenant_id='90000000-0000-4000-8000-000000000001'
     AND handoff_id='90000000-0000-4000-8000-000000000060';
+  DELETE FROM handoff_sla_acknowledge_commands WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND handoff_id='90000000-0000-4000-8000-000000000060';
+  DELETE FROM audit_events WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND action='SLA_ALERT_ACKNOWLEDGED' AND entity_id='90000000-0000-4000-8000-000000000060';
+  DELETE FROM handoff_sla_acknowledgements WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+    AND handoff_id='90000000-0000-4000-8000-000000000060';
   DELETE FROM outbox_events WHERE tenant_id='90000000-0000-4000-8000-000000000001'
     AND aggregate_type='handoff' AND aggregate_id='90000000-0000-4000-8000-000000000060' AND event_type IN('handoff.claimed','handoff.resolved','handoff.requeued','handoff.transferred','handoff.taken_over');
   DELETE FROM audit_events WHERE tenant_id='90000000-0000-4000-8000-000000000001' AND action IN('HANDOFF_RESOLVED','HANDOFF_REQUEUED','HANDOFF_TRANSFERRED','HANDOFF_TAKEN_OVER')
@@ -138,8 +144,8 @@ BEGIN
     AND reason IN('ATTENDANT_CLAIM','ATTENDANT_RESOLVED','ATTENDANT_REQUEUED','ATTENDANT_TRANSFERRED','SUPERVISOR_TAKEOVER') AND aggregate_type IN ('HANDOFF','SERVICE_CASE','CONVERSATION')
     AND aggregate_id IN ('90000000-0000-4000-8000-000000000060','90000000-0000-4000-8000-000000000050',conversation_id);
   PERFORM set_config('session_replication_role','replica',true);
-  UPDATE human_handoffs SET status='QUEUED',assigned_user_id=NULL,claimed_at=NULL,resolved_at=NULL,
-    version=1,state_changed_at=clock_timestamp() WHERE id='90000000-0000-4000-8000-000000000060';
+  UPDATE human_handoffs SET status='QUEUED',assigned_user_id=NULL,claimed_at=NULL,resolved_at=NULL,sla_due_at=NULL,
+    queued_at=clock_timestamp()-interval '30 minutes',version=1,state_changed_at=clock_timestamp() WHERE id='90000000-0000-4000-8000-000000000060';
   UPDATE service_cases SET status='WAITING_HUMAN',resolved_at=NULL,version=1,state_changed_at=clock_timestamp()
     WHERE id='90000000-0000-4000-8000-000000000050';
   UPDATE conversations SET status='OPEN',closed_at=NULL,automation_status='HUMAN_QUEUED',assigned_user_id=NULL,version=1,

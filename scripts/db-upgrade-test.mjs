@@ -160,6 +160,8 @@ try {
   assert.match(firstRun, /applied 0050_handoff_reopen_latest_episode\.sql/);
   assert.match(firstRun, /applied 0051_attendant_availability\.sql/);
   assert.match(firstRun, /applied 0052_availability_authorization_hardening\.sql/);
+  assert.match(firstRun, /applied 0053_inbox_sla_alerts\.sql/);
+  assert.match(firstRun, /applied 0054_sla_alert_projection_hardening\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -208,6 +210,26 @@ try {
     assert.deepEqual(availabilityUpgrade.rows[0],{availability_table:true,command_table:true,read_api:true,
       read_worker:false,write_api:true,write_app:false,internal_read_api:false,internal_write_api:false,
       read_asserts_context:true,write_reauthorizes:true,transfer_role_filter:true,direct_select:false});
+    const slaAlertUpgrade=await verify.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='sla_alert.read' ORDER BY role_code) read_roles,
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='sla_alert.acknowledge' ORDER BY role_code) ack_roles,
+      to_regclass('handoff_sla_acknowledgements') IS NOT NULL ack_table,
+      to_regclass('handoff_sla_acknowledge_commands') IS NOT NULL command_table,
+      has_function_privilege('zap_pronto_api','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') list_api,
+      has_function_privilege('zap_pronto_worker','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') list_worker,
+      has_function_privilege('zap_pronto_api','acknowledge_inbox_sla_alert(uuid,integer,text,text)','EXECUTE') ack_api,
+      has_function_privilege('zap_pronto_worker','acknowledge_inbox_sla_alert(uuid,integer,text,text)','EXECUTE') ack_worker,
+      has_function_privilege('zap_pronto_api','resolve_inbox_sla_alert_ack_unit(uuid,integer,text,text)','EXECUTE') resolver_api,
+      has_function_privilege('zap_pronto_worker','resolve_inbox_sla_alert_ack_unit(uuid,integer,text,text)','EXECUTE') resolver_worker,
+      has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0053(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') internal_list_api,
+      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%handoff.version%' projects_handoff_version,
+      has_table_privilege('zap_pronto_api','handoff_sla_acknowledgements','SELECT') direct_select,
+      NOT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='handoff_sla_alerts') no_alert_table`);
+    assert.deepEqual(slaAlertUpgrade.rows[0],{read_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
+      ack_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],ack_table:true,command_table:true,list_api:true,
+      list_worker:false,ack_api:true,ack_worker:false,resolver_api:true,resolver_worker:false,internal_list_api:false,
+      projects_handoff_version:true,direct_select:false,no_alert_table:true});
     const conversations = await verify.query(`SELECT count(*)::integer AS count,
       count(*) FILTER (WHERE status='OPEN')::integer AS open_count,
       count(*) FILTER (WHERE status='CLOSED')::integer AS closed_count FROM conversations`);
@@ -300,7 +322,7 @@ try {
       (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
       to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
-      role_count: 5, permission_count: 21, provider_count: 0, identity_count: 0, membership_count: 1,
+      role_count: 5, permission_count: 23, provider_count: 0, identity_count: 0, membership_count: 1,
       normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,
       permission_policy_exists: true,
     });

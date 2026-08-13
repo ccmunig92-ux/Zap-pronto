@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { InboxAvailability, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
+import type { AcknowledgeInboxSlaAlertResponse, InboxAvailability, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxSlaAlertsResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 
 function DeliveryLabel({ message }: { readonly message: InboxMessage }) {
@@ -36,6 +36,8 @@ function dispositionLabel(disposition: ResolvedInboxHandoff["disposition"]): str
     case "LEGACY_UNSPECIFIED": return "Encerramento legado";
   }
 }
+type SlaAlertSeverity=ListInboxSlaAlertsResponse["items"][number]["severity"];
+function alertLabel(severity:SlaAlertSeverity):string{switch(severity){case"MISSING_SLA":return"Sem prazo de SLA";case"DUE_SOON":return"Vence em breve";case"OVERDUE":return"SLA vencido"}}
 
 export interface InboxClient {
   getInboxAvailability(unitId:string):Promise<InboxAvailability>;
@@ -52,6 +54,8 @@ export interface InboxClient {
   listResolvedInboxHandoffs(input:{unitId:string;limit?:number;cursor?:string;priority?:InboxHandoff["priority"];
     disposition?:ResolveDisposition;resolvedFrom?:string;resolvedBefore?:string}):Promise<ListResolvedHandoffsResponse>;
   reopenInboxHandoff(sourceHandoffId:string,expectedVersion:number,reason:ReopenReason,idempotencyKey:string):Promise<unknown>;
+  listInboxSlaAlerts(input:{unitId:string;limit?:number;cursor?:string;severity?:SlaAlertSeverity;priority?:InboxHandoff["priority"]}):Promise<ListInboxSlaAlertsResponse>;
+  acknowledgeInboxSlaAlert(handoffId:string,expectedVersion:number,idempotencyKey:string):Promise<AcknowledgeInboxSlaAlertResponse>;
   getInboxConversation(id: string): Promise<InboxConversation>;
   listInboxConversationMessages(id: string, input?: { limit?: number; cursor?: string; before?:string }): Promise<ListInboxMessagesResponse>;
   sendHumanTextMessage(id: string, input: { body: string; expectedConversationVersion: number }, idempotencyKey: string): Promise<unknown>;
@@ -61,7 +65,7 @@ export interface InboxClient {
 type TransferReason = "SHIFT_CHANGE" | "LOAD_BALANCING" | "SPECIALIZED_SUPPORT" | "OPERATIONAL_CONTINUITY";
 type ResolveDisposition = "RESOLVED" | "DUPLICATE" | "CUSTOMER_WITHDREW" | "EXTERNAL_REFERRAL";
 
-type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "detail" | "messages" | "availability"; readonly cause: unknown };
+type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "slaAlerts" | "detail" | "messages" | "availability"; readonly cause: unknown };
 type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
@@ -71,12 +75,13 @@ function historicalMessages(page:ListInboxMessagesResponse,resolvedAt:string):Li
   return {...page,items:page.items.filter(message=>message.createdAt<=resolvedAt).map(message=>({...message,allowedActions:[]}))};
 }
 
-export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds=[], onAuthenticationRequired,
+export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds=[], slaAlertReadUnitIds=[],slaAlertAcknowledgeUnitIds=[],onAuthenticationRequired,
   onAuthorizationChanged, onNavigationStateChange }: {
   readonly client: InboxClient;
   readonly units: readonly { id: string; name: string }[];
   readonly supervisedUnitIds?:readonly string[];
   readonly historyUnitIds?:readonly string[];
+  readonly slaAlertReadUnitIds?:readonly string[];readonly slaAlertAcknowledgeUnitIds?:readonly string[];
   readonly onAuthenticationRequired: () => void;
   readonly onAuthorizationChanged: () => void;
   readonly onNavigationStateChange?: (state: { readonly blocked: boolean; readonly dirty: boolean }) => void;
@@ -88,6 +93,11 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [active, setActive] = useState<ListHandoffsResponse>();
   const [supervised,setSupervised]=useState<ListHandoffsResponse>();
   const [resolved,setResolved]=useState<ListResolvedHandoffsResponse>();
+  const [slaAlerts,setSlaAlerts]=useState<ListInboxSlaAlertsResponse>();
+  const [slaAlertSeverity,setSlaAlertSeverity]=useState<""|SlaAlertSeverity>("");
+  const [slaAlertPriority,setSlaAlertPriority]=useState<""|InboxHandoff["priority"]>("");
+  const [loadingSlaAlertPage,setLoadingSlaAlertPage]=useState(false);
+  const [acknowledgingAlertId,setAcknowledgingAlertId]=useState<string>();
   const [resolvedFilters,setResolvedFilters]=useState<ResolvedFilters>(emptyResolvedFilters);
   const [appliedResolvedFilters,setAppliedResolvedFilters]=useState<ResolvedFilters>(emptyResolvedFilters);
   const [selected, setSelected] = useState<InboxSelection>();
@@ -139,12 +149,14 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const activePageFlight = useRef(false);
   const supervisedPageFlight=useRef(false);
   const resolvedPageFlight=useRef(false);
+  const slaAlertPageFlight=useRef(false);
+  const slaAlertIntent=useRef<{id:string;version:number;key:string}|undefined>(undefined);
   const navigationCallback=useRef(onNavigationStateChange);
   const [loadingQueuePage, setLoadingQueuePage] = useState(false);
   const [loadingActivePage, setLoadingActivePage] = useState(false);
   const [loadingSupervisedPage,setLoadingSupervisedPage]=useState(false);
   const [loadingResolvedPage,setLoadingResolvedPage]=useState(false);
-  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || savingAvailability || cancellingId !== undefined;
+  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || savingAvailability || cancellingId !== undefined||acknowledgingAlertId!==undefined;
   const navigationBlocked=mutationBusy||Boolean(operationLock.current)||resolveOpen||reopenOpen||transferOpen||takeoverConfirmOpen||availabilityOpen;
   const navigationDirty=draft!==""||resolveDisposition!==""||reopenReason!==""||transferTargetUserId!==""||transferReason!==""
     ||claimIntent.current!==undefined||sendIntent.current!==undefined||resolveIntent.current!==undefined
@@ -156,6 +168,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   useEffect(()=>()=>navigationCallback.current?.({blocked:false,dirty:false}),[]);
   const canSupervise=supervisedUnitIds.includes(unitId);
   const canReadHistory=historyUnitIds.includes(unitId);
+  const canReadSlaAlerts=slaAlertReadUnitIds.includes(unitId);
+  const canAcknowledgeSlaAlerts=slaAlertAcknowledgeUnitIds.includes(unitId);
   const resolvedFiltersDirty=resolvedFilters.priority!==appliedResolvedFilters.priority
     ||resolvedFilters.disposition!==appliedResolvedFilters.disposition
     ||resolvedFilters.resolvedFrom!==appliedResolvedFilters.resolvedFrom
@@ -172,6 +186,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const resolvedFirst=(capturedUnit:string)=>historyUnitIds.includes(capturedUnit)
     ?client.listResolvedInboxHandoffs(resolvedInput(capturedUnit))
     :Promise.resolve({items:[]} satisfies ListResolvedHandoffsResponse);
+  function slaAlertInput(capturedUnit:string,cursor?:string){return{unitId:capturedUnit,limit:25,...(cursor?{cursor}:{}),...(slaAlertSeverity?{severity:slaAlertSeverity}:{}),...(slaAlertPriority?{priority:slaAlertPriority}:{})}}
+  const slaAlertsFirst=(capturedUnit:string)=>slaAlertReadUnitIds.includes(capturedUnit)?client.listInboxSlaAlerts(slaAlertInput(capturedUnit)):Promise.resolve({items:[]} satisfies ListInboxSlaAlertsResponse);
 
   function queueInput(capturedUnit: string, cursor?: string,
     priority: typeof priorityFilter = priorityFilter, slaStatus: typeof slaFilter = slaFilter) {
@@ -220,16 +236,17 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     takeoverIntent.current=undefined;
     cancelIntent.current = undefined;
     availabilityIntent.current=undefined;
+    slaAlertIntent.current=undefined;
   }
 
   function purgeSensitive() {
-    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
+    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setSlaAlerts(undefined);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
     setDraft(""); setClosedNotice(undefined); setError(undefined); clearIntents();
     operationLock.current = undefined;
     refreshFlight.current = false;
-    queuePageFlight.current = false; activePageFlight.current = false;supervisedPageFlight.current=false;resolvedPageFlight.current=false;
+    queuePageFlight.current = false; activePageFlight.current = false;supervisedPageFlight.current=false;resolvedPageFlight.current=false;slaAlertPageFlight.current=false;
     setClaiming(false); setResolving(false);setResolveOpen(false);setResolveDisposition(""); setRequeueing(false);setReopening(false);setReopenOpen(false);setReopenReason(""); setTransferring(false);setTakingOver(false);setTakeoverConfirmOpen(false);setLoadingTransferCandidates(false);setTransferCandidates(undefined);setTransferTargetUserId("");setTransferReason("");setTransferOpen(false); setSending(false); setCancellingId(undefined); setRefreshing(false);
-    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setAvailabilityOpen(false);setSavingAvailability(false);
+    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setLoadingSlaAlertPage(false);setAcknowledgingAlertId(undefined);setAvailabilityOpen(false);setSavingAvailability(false);
   }
 
   function purgeSelection(notice?: string) {
@@ -278,12 +295,13 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("active", client.listActiveInboxHandoffs({ unitId, limit: 25 })),
       scoped("supervised",supervisedFirst(unitId)),
       scoped("resolved",resolvedFirst(unitId)),
+      scoped("slaAlerts",slaAlertsFirst(unitId)),
       scoped("availability",client.getInboxAvailability(unitId)),
-    ]).then(([queued, mine,others,closed,nextAvailability]) => {
-      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setAvailability(nextAvailability); }
+    ]).then(([queued, mine,others,closed,alerts,nextAvailability]) => {
+      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability); }
     }).catch((caught: unknown) => fail(caught, g));
     return () => { generation.current += 1; };
-  }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(",")]);
+  }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
 
   function openAvailability(){
     if(!availability||mutationBusy||refreshing)return;
@@ -433,6 +451,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("active", client.listActiveInboxHandoffs({ unitId: capturedUnit, limit: 25 })),
       scoped("supervised",supervisedFirst(capturedUnit)),
       scoped("resolved",resolvedFirst(capturedUnit)),
+      scoped("slaAlerts",slaAlertsFirst(capturedUnit)),
       scoped("availability",client.getInboxAvailability(capturedUnit)),
     ]);
     const selectionPromise: Promise<readonly [InboxConversation | undefined, ListInboxMessagesResponse | undefined]> = capturedSelected
@@ -442,7 +461,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ])
       : Promise.resolve([undefined, undefined] as const);
     try {
-      const [[queued, mine,others,closed,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
+      const [[queued, mine,others,closed,alerts,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
       if (g !== generation.current || capturedUnit !== unitId) return;
       let nextSelected: InboxSelection | undefined;
       if (capturedSelected) nextSelected = queued.items.find(item => item.id === capturedSelected.id)
@@ -451,7 +470,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         ?? closed.items.find(item=>item.id===capturedSelected.id)
         ?? (nextDetail?.conversationId === capturedSelected.conversationId && nextDetail.unitId === capturedUnit
           ? capturedSelected : undefined);
-      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setAvailability(nextAvailability);
+      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability);
       if (capturedSelected && (!nextSelected || !nextDetail || !nextMessages)) {
         purgeSelection("Atendimento não está mais disponível.");
       } else if (nextSelected && nextDetail && nextMessages) {
@@ -567,6 +586,29 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if(g===generation.current&&capturedUnit===unitId)setResolved(current=>current?{items:[...new Map([...current.items,...page.items].map(item=>[item.id,item])).values()],...(page.nextCursor?{nextCursor:page.nextCursor}:{})}:page);
     }catch(caught){if(g===generation.current&&capturedUnit===unitId)fail(caught,g)}finally{
       releaseOperation(operationToken);resolvedPageFlight.current=false;if(capturedUnit===unitId)setLoadingResolvedPage(false)}
+  }
+
+  async function reloadSlaAlerts(){
+    if(!canReadSlaAlerts||mutationBusy||refreshing)return;const operationToken=acquireOperation();if(!operationToken)return;
+    const capturedUnit=unitId,g=++generation.current;setError(undefined);
+    try{const page=await client.listInboxSlaAlerts(slaAlertInput(capturedUnit));if(g===generation.current&&capturedUnit===unitId)setSlaAlerts(page)}
+    catch(caught){if(g===generation.current&&capturedUnit===unitId)fail(caught,g)}finally{releaseOperation(operationToken)}
+  }
+  async function loadSlaAlertPage(){
+    const cursor=slaAlerts?.nextCursor;if(!canReadSlaAlerts||!cursor||slaAlertPageFlight.current||refreshing)return;
+    const operationToken=acquireOperation();if(!operationToken)return;slaAlertPageFlight.current=true;
+    const capturedUnit=unitId,g=generation.current;setLoadingSlaAlertPage(true);
+    try{const page=await client.listInboxSlaAlerts(slaAlertInput(capturedUnit,cursor));if(g===generation.current&&capturedUnit===unitId)setSlaAlerts(current=>current?{items:[...new Map([...current.items,...page.items].map(item=>[item.handoffId,item])).values()],...(page.nextCursor?{nextCursor:page.nextCursor}:{})}:page)}
+    catch(caught){if(g===generation.current&&capturedUnit===unitId)fail(caught,g)}finally{releaseOperation(operationToken);slaAlertPageFlight.current=false;if(capturedUnit===unitId)setLoadingSlaAlertPage(false)}
+  }
+  async function acknowledgeSlaAlert(alert:ListInboxSlaAlertsResponse["items"][number]){
+    if(!canAcknowledgeSlaAlerts||alert.acknowledgedAt||refreshFlight.current||refreshing)return;const token=acquireMutation();if(!token)return;
+    const current=slaAlertIntent.current;const intent=current?.id===alert.handoffId&&current.version===alert.version?current:{id:alert.handoffId,version:alert.version,key:crypto.randomUUID()};slaAlertIntent.current=intent;
+    const capturedUnit=unitId,g=generation.current;setAcknowledgingAlertId(alert.handoffId);setError(undefined);
+    try{const result=await client.acknowledgeInboxSlaAlert(intent.id,intent.version,intent.key);if(g!==generation.current||capturedUnit!==unitId)return;
+      setSlaAlerts(page=>page?{...page,items:page.items.map(item=>item.handoffId===result.handoffId?{...item,acknowledgedAt:result.acknowledgedAt,version:result.version}:item)}:page);slaAlertIntent.current=undefined;setClosedNotice("Alerta de SLA reconhecido.")}
+    catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){slaAlertIntent.current=undefined;try{const page=await client.listInboxSlaAlerts(slaAlertInput(capturedUnit));if(g===generation.current&&capturedUnit===unitId){setSlaAlerts(page);setClosedNotice("O alerta mudou e a lista foi atualizada.")}}catch(reconcile){fail(reconcile,g)}}else fail(caught,g)}
+    finally{releaseMutation(token);if(g===generation.current)setAcknowledgingAlertId(undefined)}
   }
 
   async function claim() {
@@ -813,6 +855,12 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     {supervised?.items.length===0&&<p>Nenhum atendimento sob supervisão.</p>}
     <ul className="handoff-list">{supervised?.items.map(item=><li key={item.id} className={selected?.id===item.id?"is-selected":undefined}><button type="button" aria-pressed={selected?.id===item.id} aria-label={`${item.contactName??"Contato"} · Sob supervisão`} disabled={actionsDisabled||mutationBusy} onClick={()=>open(item)}><strong>{item.contactName??"Contato"}</strong><span>Sob supervisão</span><span className={`priority priority-${item.priority.toLowerCase()}`}>{priorityLabel(item.priority)}</span><span className={`sla sla-${item.slaStatus?.toLowerCase()??"none"}`}>{slaLabel(item.slaStatus)}</span></button></li>)}</ul>
     {supervised?.nextCursor&&<button type="button" disabled={loadingSupervisedPage||actionsDisabled||mutationBusy} onClick={loadSupervisedPage}>{loadingSupervisedPage?"Carregando supervisionados…":"Carregar mais supervisionados"}</button>}
+    </div>}{canReadSlaAlerts&&<div className="inbox-queue-section"><div className="inbox-section-heading"><h3>Alertas de SLA</h3><span aria-label={`${slaAlerts?.items.length??0} alertas de SLA`}>{slaAlerts?.items.length??0}</span></div>
+    <fieldset><legend>Filtros dos alertas</legend><label>Estado do alerta <select value={slaAlertSeverity} disabled={mutationBusy||refreshing} onChange={event=>setSlaAlertSeverity(event.target.value as typeof slaAlertSeverity)}><option value="">Todos</option><option value="MISSING_SLA">Sem prazo de SLA</option><option value="DUE_SOON">Vence em breve</option><option value="OVERDUE">SLA vencido</option></select></label>
+    <label>Prioridade do alerta <select value={slaAlertPriority} disabled={mutationBusy||refreshing} onChange={event=>setSlaAlertPriority(event.target.value as typeof slaAlertPriority)}><option value="">Todas</option><option value="URGENT">Urgente</option><option value="HIGH">Alta</option><option value="NORMAL">Normal</option><option value="LOW">Baixa</option></select></label>
+    <button type="button" disabled={mutationBusy||refreshing||Boolean(operationLock.current)} onClick={reloadSlaAlerts}>Aplicar filtros dos alertas</button></fieldset>
+    {slaAlerts?.items.length===0&&<p>Nenhum alerta de SLA.</p>}<ul className="handoff-list">{slaAlerts?.items.map(alert=><li key={alert.handoffId}><strong>{alertLabel(alert.severity)}</strong><span>{priorityLabel(alert.priority)} · {Math.floor(alert.ageSeconds/60)} min na fila</span><span>Capacidade disponível: {alert.availableCapacity}</span>{alert.slaDueAt&&<time dateTime={alert.slaDueAt}>Prazo: {new Date(alert.slaDueAt).toLocaleString("pt-BR")}</time>}{alert.acknowledgedAt?<span>Reconhecido em {new Date(alert.acknowledgedAt).toLocaleString("pt-BR")}</span>:canAcknowledgeSlaAlerts&&<button type="button" disabled={mutationBusy||refreshing} onClick={()=>acknowledgeSlaAlert(alert)}>{acknowledgingAlertId===alert.handoffId?"Reconhecendo…":"Reconhecer alerta"}</button>}</li>)}</ul>
+    {slaAlerts?.nextCursor&&<button type="button" disabled={loadingSlaAlertPage||mutationBusy||refreshing} onClick={loadSlaAlertPage}>{loadingSlaAlertPage?"Carregando alertas…":"Carregar mais alertas"}</button>}
     </div>}{canReadHistory&&<div className="inbox-queue-section"><div className="inbox-section-heading"><h3>Encerrados</h3><span aria-label={`${resolved?.items.length??0} atendimentos encerrados`}>{resolved?.items.length??0}</span></div>
     <fieldset><legend>Filtros dos atendimentos encerrados</legend>
       <label>Prioridade dos encerrados <select value={resolvedFilters.priority} disabled={mutationBusy||refreshing}

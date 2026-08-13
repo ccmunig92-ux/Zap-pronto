@@ -609,6 +609,18 @@ duplo clique sem criar tráfego externo. Prova verde: 318/318 testes automatizad
 E2E OIDC, banco limpo, upgrade legado com privilégios 0051 verificados, `typecheck:all`,
 OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
 
+Checkpoint local consolidado em 2026-08-12, migrations `0052`–`0054`: as fronteiras SQL de
+disponibilidade revalidam contexto, tenant, conta, unidade e membership inclusive no replay; o
+catálogo de transferência voltou a excluir papéis não operacionais. A Inbox ganhou uma projeção
+ao vivo de alertas `MISSING_SLA`, `DUE_SOON` e `OVERDUE`, vinculada a unidade, filtros e relógio
+congelado, com capacidade disponível derivada do estado operacional. Apenas o reconhecimento é
+persistido, com versão do handoff, chave idempotente, replay reautorizado e audit único. Não existe
+tabela materializada de alertas, cron, scheduler, mensagem, outbox de envio, Hermes ou Meta neste
+corte. A política que define minutos de SLA continua pendente de regra de negócio e não foi
+inventada; a ausência aparece explicitamente como `MISSING_SLA`. Prova verde: 330/330 testes
+automatizados, 19/19 jornadas E2E OIDC no overlay reconstruído, banco limpo, upgrade legado,
+`typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
