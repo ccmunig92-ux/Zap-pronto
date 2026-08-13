@@ -113,6 +113,7 @@ try {
       "0057_sla_policy_idempotency_serialization.sql",
       "0058_team_availability_projection.sql",
       "0059_unit_operational_timezone.sql",
+      "0060_unit_shift_schedule.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -150,6 +151,9 @@ try {
     } finally {
       await timezoneTestClient.end();
     }
+    const shiftTestClient = new pg.Client({ connectionString: targetUrl.toString() });await shiftTestClient.connect();
+    try {await shiftTestClient.query(await readFile(resolve("database/tests", "0007_shift_schedule.sql"), "utf8"));}
+    finally {await shiftTestClient.end();}
 
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";
@@ -214,6 +218,28 @@ try {
       (SELECT count(*)::int FROM unit_operational_timezone_versions WHERE tenant_id=$1) versions,
       (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='UNIT_OPERATIONAL_TIMEZONE_CONFIGURED') audits`,[policyRaceTenant])).rows[0];
     assert.deepEqual(timezoneRaceEvidence,{commands:1,versions:1,audits:1});
+    await target.query(`INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,version,created_by_user_id)
+      SELECT $1,$2,'America/Sao_Paulo',1,$3 WHERE NOT EXISTS(SELECT 1 FROM unit_operational_timezone_versions
+        WHERE tenant_id=$1 AND unit_id=$2)`,[policyRaceTenant,policyRaceUnits[0],policyRaceActor]);
+    const shiftRaceEffective=(await target.query("SELECT (transaction_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date::text effective")).rows[0].effective;
+    const shiftRaceInput={unitId:policyRaceUnits[0],userId:policyRaceActor,effectiveFrom:shiftRaceEffective,weeklySlots:[],exceptions:[],expectedVersion:0};
+    const shiftRaceFingerprint=createHash("sha256").update(JSON.stringify(shiftRaceInput)).digest("hex");
+    const shiftRaceClients=await Promise.all([0,1].map(async()=>{const client=new pg.Client({connectionString:targetUrl.toString()});
+      await client.connect();await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
+      await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id',$3,true)",
+        [policyRaceTenant,policyRaceActor,`shift-race-${randomUUID()}`]);return client}));
+    const shiftRaceCalls=shiftRaceClients.map((client,index)=>client.query(
+      "SELECT * FROM set_unit_shift_schedule($1,$2,$3::date,'[]'::jsonb,'[]'::jsonb,0,$4,$5)",
+      [shiftRaceInput.unitId,shiftRaceInput.userId,shiftRaceInput.effectiveFrom,`shift-race-key-${index}`,shiftRaceFingerprint]));
+    const firstShiftRace=await Promise.race(shiftRaceCalls.map((call,index)=>call.then(result=>({index,result}))));
+    assert.equal(firstShiftRace.result.rows[0].replayed,false);await shiftRaceClients[firstShiftRace.index].query("COMMIT");
+    const losingShiftRace=firstShiftRace.index===0?1:0;await assert.rejects(shiftRaceCalls[losingShiftRace],/SHIFT_SCHEDULE_CONFLICT/);
+    await shiftRaceClients[losingShiftRace].query("ROLLBACK");await Promise.all(shiftRaceClients.map(client=>client.end()));
+    const shiftRaceEvidence=(await target.query(`SELECT
+      (SELECT count(*)::int FROM unit_shift_schedule_commands WHERE tenant_id=$1) commands,
+      (SELECT count(*)::int FROM unit_shift_schedule_versions WHERE tenant_id=$1) versions,
+      (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='SHIFT_SCHEDULE_PUBLISHED') audits`,[policyRaceTenant])).rows[0];
+    assert.deepEqual(shiftRaceEvidence,{commands:1,versions:1,audits:1});
     const teamQuery=async(actorId,unitId,limit=101,status=null,anchorName=null,anchorId=null)=>{const client=new pg.Client({connectionString:targetUrl.toString()});
       await client.connect();try{await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
         await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','team-test',true)",[policyRaceTenant,actorId]);
@@ -302,6 +328,7 @@ try {
     globalHiddenTables.push("handoff_sla_acknowledgements","handoff_sla_acknowledge_commands");
     globalHiddenTables.push("unit_sla_policy_publish_commands","unit_sla_policy_targets","unit_sla_policy_versions");
     globalHiddenTables.push("unit_operational_timezone_commands","unit_operational_timezone_versions");
+    globalHiddenTables.push("unit_shift_schedule_commands","unit_shift_schedule_versions");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -392,6 +419,7 @@ try {
       "handoff_sla_acknowledgements", "handoff_sla_acknowledge_commands",
       "unit_sla_policy_versions", "unit_sla_policy_targets", "unit_sla_policy_publish_commands",
       "unit_operational_timezone_versions", "unit_operational_timezone_commands",
+      "unit_shift_schedule_versions", "unit_shift_schedule_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
@@ -526,6 +554,15 @@ try {
     assert.deepEqual(timezoneSecurity.rows[0],{read_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
       manage_roles:["TENANT_ADMIN","UNIT_MANAGER"],api_get:true,api_set:true,worker_get:false,app_set:false,
       get_hardened:true,set_hardened:true});
+    const shiftSecurity=await target.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='shift.read' ORDER BY role_code) read_roles,
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='shift.manage' ORDER BY role_code) manage_roles,
+      has_function_privilege('zap_pronto_api','get_unit_shift_schedule(uuid,uuid)','EXECUTE') api_get,
+      has_function_privilege('zap_pronto_api','list_unit_shift_members(uuid)','EXECUTE') api_list,
+      has_function_privilege('zap_pronto_api','set_unit_shift_schedule(uuid,uuid,date,jsonb,jsonb,integer,text,text)','EXECUTE') api_set,
+      has_function_privilege('zap_pronto_worker','list_unit_shift_members(uuid)','EXECUTE') worker_list,
+      (SELECT bool_and(provolatile='s' AND prosecdef AND proconfig @> ARRAY['search_path=pg_catalog, public','row_security=off']) FROM pg_proc WHERE oid IN('get_unit_shift_schedule(uuid,uuid)'::regprocedure,'list_unit_shift_members(uuid)'::regprocedure)) reads_hardened`);
+    assert.deepEqual(shiftSecurity.rows[0],{read_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],manage_roles:["TENANT_ADMIN","UNIT_MANAGER"],api_get:true,api_list:true,api_set:true,worker_list:false,reads_hardened:true});
     const historySecurity=await target.query(`SELECT
       ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='handoff.history.read' ORDER BY role_code) roles,
       has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)','EXECUTE') api_execute,

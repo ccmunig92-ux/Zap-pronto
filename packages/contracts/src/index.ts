@@ -29,7 +29,7 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage", "shift.read", "shift.manage",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -457,6 +457,19 @@ export const SetUnitOperationalTimezoneRequestSchema=Type.Object({expectedVersio
 export type SetUnitOperationalTimezoneRequest=Static<typeof SetUnitOperationalTimezoneRequestSchema>;
 export const SetUnitOperationalTimezoneResponseSchema=Type.Composite([UnitOperationalTimezoneSchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
 export type SetUnitOperationalTimezoneResponse=Static<typeof SetUnitOperationalTimezoneResponseSchema>;
+export const StaffScheduleParamsSchema=Type.Object({unitId:Type.String({format:"uuid"}),userId:Type.String({format:"uuid"})},{additionalProperties:false});
+export const ShiftSlotSchema=Type.Object({weekday:Type.Integer({minimum:1,maximum:7}),start:Type.String({pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$"}),end:Type.String({pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$"})},{additionalProperties:false});
+export const ShiftExceptionSlotSchema=Type.Object({start:Type.String({pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$"}),end:Type.String({pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$"})},{additionalProperties:false});
+export const ShiftExceptionSchema=Type.Union([Type.Object({date:Type.String({format:"date"}),type:Type.Literal("CLOSED")},{additionalProperties:false}),Type.Object({date:Type.String({format:"date"}),type:Type.Literal("REPLACE"),slots:Type.Array(ShiftExceptionSlotSchema,{minItems:1,maxItems:4})},{additionalProperties:false})]);
+export const StaffScheduleSchema=Type.Object({unitId:Type.String({format:"uuid"}),userId:Type.String({format:"uuid"}),timeZone:OperationalTimezoneNameSchema,effectiveFrom:Type.String({format:"date"}),weeklySlots:Type.Array(ShiftSlotSchema,{maxItems:28}),exceptions:Type.Array(ShiftExceptionSchema,{maxItems:90}),version:Type.Integer({minimum:1}),updatedAt:Type.String({format:"date-time"})},{additionalProperties:false});
+export type StaffSchedule=Static<typeof StaffScheduleSchema>;
+export const SetStaffScheduleRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:0}),effectiveFrom:Type.String({format:"date"}),weeklySlots:Type.Array(ShiftSlotSchema,{maxItems:28}),exceptions:Type.Array(ShiftExceptionSchema,{maxItems:90})},{additionalProperties:false});
+export type SetStaffScheduleRequest=Static<typeof SetStaffScheduleRequestSchema>;
+export const SetStaffScheduleResponseSchema=Type.Composite([StaffScheduleSchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
+export type SetStaffScheduleResponse=Static<typeof SetStaffScheduleResponseSchema>;
+export const ShiftMemberSchema=Type.Object({userId:Type.String({format:"uuid"}),displayName:Type.String({minLength:1,maxLength:160}),role:AppRoleSchema},{additionalProperties:false});
+export const ListShiftMembersResponseSchema=Type.Object({items:Type.Array(ShiftMemberSchema)},{additionalProperties:false});
+export type ListShiftMembersResponse=Static<typeof ListShiftMembersResponseSchema>;
 export const HandoffResolutionDispositionSchema=Type.Union([
   Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
 ],{$id:"HandoffResolutionDisposition"});

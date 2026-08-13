@@ -676,6 +676,21 @@ banco limpo, upgrade e 22/22 jornadas OIDC. A jornada isolada persiste exatament
 `America/Sao_Paulo`, um comando e uma auditoria, sem mensagem outbound, Hermes ou Meta, e o seed remove
 esse estado antes dos testes residuais. Checks remotos continuam obrigatórios antes do verde final.
 
+Checkpoint local incremental em 2026-08-13, migration `0060`: o módulo canônico `Escalas` recebeu
+grade semanal por integrante elegível, vigência e exceções `CLOSED`/`REPLACE`, sem overnight. O fuso
+é capturado no servidor a partir da configuração operacional da unidade. `shift.read` permite a
+consulta estreita e `shift.manage` autoriza publicação versionada e idempotente. Este corte é somente
+observacional: não implementa scheduler, turno atual ou qualquer alteração de availability, claim,
+responsável ou atendimento.
+
+A cadeia limpa `0001`–`0060` e todos os gates integrados passaram: 108 testes core, 83 da API, 31 do
+cliente, 176 do frontend, overlay 5/5 e execução E2E completa verde, com 21 jornadas descobertas. A
+prova de runtime registra uma versão, um comando e uma auditoria de escala, zero outbound/Hermes/Meta
+e preservação por hash de availability, handoffs, conversations e service cases. A leitura de
+supervisor está coberta por contratos e testes, mas ainda não está homologada em navegador real por
+ausência de uma identidade OIDC `SUPERVISOR` dedicada no overlay. Não houve deploy, staging, conexão
+Meta ou ativação do Hermes.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

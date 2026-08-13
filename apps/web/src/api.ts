@@ -67,6 +67,9 @@ export const apiClient = {
   setUnitOperationalTimezone(...parameters:Parameters<typeof transportClient.setUnitOperationalTimezone>){
     return transportClient.setUnitOperationalTimezone(...parameters);
   },
+  listShiftMembers(...parameters:Parameters<typeof transportClient.listShiftMembers>){return transportClient.listShiftMembers(...parameters)},
+  getStaffSchedule(...parameters:Parameters<typeof transportClient.getStaffSchedule>){return transportClient.getStaffSchedule(...parameters)},
+  setStaffSchedule(...parameters:Parameters<typeof transportClient.setStaffSchedule>){return transportClient.setStaffSchedule(...parameters)},
   revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
     return transportClient.revokeUserInvitation(...parameters);
   },

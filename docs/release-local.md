@@ -111,6 +111,24 @@ O controlador executa a jornada `America/Sao_Paulo` isoladamente e comprova uma 
 uma auditoria `UNIT_OPERATIONAL_TIMEZONE_CONFIGURED` e zero outbound, Hermes ou Meta; o reseed limpa
 esse estado antes do bloco residual. Isso não homologa staging, IdP externo, Meta, Hermes ou deploy.
 
+## Evidência incremental 0060
+
+A migration `0060_unit_shift_schedule.sql` adiciona escalas semanais versionadas por unidade e
+integrante elegível, com vigência, períodos sem overnight e exceções `CLOSED` ou `REPLACE`. O fuso é
+um snapshot da configuração operacional resolvida pelo servidor; navegador e frontend não calculam
+nem presumem timezone. A leitura usa `shift.read`, enquanto publicação exige `shift.manage`, versão
+esperada e chave idempotente. O corte permanece observacional: não existe scheduler, projeção de turno
+atual ou enforcement sobre availability, claim ou transferência.
+
+Os gates integrados verdes abrangem a cadeia limpa de migrations `0001`–`0060`, 108 testes core, 83
+da API, 31 do cliente, 176 do frontend e 5/5 do overlay. O harness descobriu 21 jornadas E2E e sua
+execução completa terminou verde. A prova isolada da escala confirma exatamente uma versão, um comando
+e uma auditoria `SHIFT_SCHEDULE_PUBLISHED`, zero outbound/Hermes/Meta e hash idêntico de availability,
+handoffs, conversations e service cases antes e depois da publicação. A leitura de supervisor está
+coberta tecnicamente, mas sua jornada real de navegador ainda não foi homologada porque o overlay não
+possui identidade OIDC `SUPERVISOR` dedicada. Nenhum deploy, staging ou integração Meta/Hermes foi
+executado.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
