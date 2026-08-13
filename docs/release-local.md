@@ -8,9 +8,8 @@ produção.
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
-- Baseline versionado até `0050_handoff_reopen_latest_episode.sql` e incremento local append-only
-  validado até `0056_unit_sla_policy.sql`.
-- Overlay OIDC exclusivamente sintético, com duas identidades operacionais locais.
+- Cadeia append-only local validada de `0001_core.sql` até `0063_assignment_policy_authorization_hardening.sql`.
+- Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
 ## Identidade do candidato
@@ -160,6 +159,20 @@ comprovou ativação e desativação com um POST por confirmação, claim fora d
 operacional preservado e zero outbound, Hermes ou Meta. Este checkpoint não inclui scheduler e não
 realizou deploy ou conexão com contas reais.
 
+## Evidência incremental 0063
+
+A migration `0063_assignment_policy_authorization_hardening.sql` move a reautorização de
+`shift.manage` para depois do fence transacional do lifecycle de membership, inclusive no replay, e
+vincula o replay ao ator que criou o comando. Outro ator usando a mesma chave recebe conflito sem
+recuperar o resultado anterior. A transferência mantém o catálogo estreito filtrado pelo turno e
+revalida atomicamente o destino após a listagem; se a escala mudar nesse intervalo, a operação falha
+sem trocar owner ou alterar conversa e caso. O takeover de supervisão continua inalterado.
+
+Os gates locais passaram com a cadeia `0001`–`0063`, 112 testes core, 91 da API, 32 do cliente, 185
+do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
+1/1. Nenhum transporte outbound, Hermes, Meta, staging ou deploy foi executado. O CI remoto deste
+novo HEAD permanece pendente.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
@@ -194,8 +207,8 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com todos os gates verdes, a declaração permitida é **candidato local validado**. O snapshot deliberado
-já existe no branch `codex/release-local-0050`, com PR draft e CI verde. A promoção à `main` exige PR,
+Com todos os gates locais verdes, a declaração permitida é **candidato local 0063 validado**. O candidato atual
+está no branch `codex/phase-4-attendant-availability`, com PR draft e CI remoto pendente para o novo HEAD. A promoção à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
 force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e

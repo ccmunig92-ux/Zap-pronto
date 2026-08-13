@@ -7,7 +7,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
 - Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
-- Fase atual: **Fase 3 — API, autenticação e RBAC**, reconstruída sobre a `main` sem migrations da Fase 4.
+- Fase atual: **Fase 4 — inbox multiusuário e produtividade**, validada localmente até a migration `0063` no branch `codex/phase-4-attendant-availability`.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -103,7 +103,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   testes, build, integração PostgreSQL e upgrade legado.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
-- Fase 3 permanece aberta; fases 4–9 não foram iniciadas.
+- O escopo técnico local da Fase 3 foi concluído; a homologação com IdP HTTPS externo permanece um gate de promoção. A Fase 4 está em desenvolvimento local e as fases 5–9 não foram iniciadas como fases completas.
 - Gate que bloqueia o primeiro endpoint da Fase 4: executar em navegador a jornada com um IdP OIDC
   externo homologado, usando ao menos um administrador e um atendente reais, e provar login, `/v1/me`,
   expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não substituem esse gate.
@@ -721,6 +721,18 @@ outbound. A cadeia limpa `0001`–`0062` e os gates integrados passaram: 112 tes
 do cliente, 184 do frontend, overlay 5/5 e E2E completo verde. Não foi implementado scheduler nem
 executado deploy, Meta ou Hermes.
 
+Checkpoint local incremental em 2026-08-13, migration `0063`: a mutação da política de atribuição
+passou a revalidar `shift.manage` somente depois do fence transacional do lifecycle de membership,
+inclusive em replay, e o replay ficou vinculado ao ator original. A mesma chave por outro ator retorna
+conflito sem reutilizar o resultado anterior. O catálogo de transferência filtra destinos fora do turno
+e a mutação revalida o destino na mesma operação após a listagem; uma mudança concorrente da escala
+nega a transferência e preserva owner, conversa e caso. O takeover permanece inalterado.
+
+Os gates locais da cadeia `0001`–`0063` passaram: 112 testes core, 91 da API, 32 do cliente, 185 do
+frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a nova jornada isolada
+1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging ou deploy. O CI remoto do novo
+HEAD permanece pendente e este checkpoint não deve ser descrito como integrado à `main`.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -733,7 +745,7 @@ executado deploy, Meta ou Hermes.
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0058`; staging deve
+   execução como evidência. A Inbox canônica já está implementada até a migration `0063`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

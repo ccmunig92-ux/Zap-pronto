@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -40,13 +40,26 @@ export function releaseGatePlan(platform = process.platform) {
 }
 
 export function migrationHashes(directory = resolve("database/migrations")) {
-  const files = readdirSync(directory).filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort();
-  const expected = Array.from({ length: 50 }, (_, index) => String(index + 1).padStart(4, "0"));
-  const selected = files.filter((name) => name.slice(0, 4) <= "0050");
-  if (selected.length !== expected.length || selected.some((name, index) => !name.startsWith(`${expected[index]}_`))) {
-    throw new Error("MIGRATION_SEQUENCE_0001_0050_INVALID");
+  const entries = readdirSync(directory).sort();
+  const malformed = entries.find((name) => /^\d{4}/.test(name) && !/^\d{4}_[a-z0-9_]+\.sql$/.test(name));
+  if (malformed) throw new Error(`MIGRATION_FILENAME_INVALID:${malformed}`);
+  const files = entries.filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort();
+  if (files.length === 0) throw new Error("MIGRATION_SEQUENCE_EMPTY");
+  for (const name of files) {
+    if (!lstatSync(resolve(directory, name)).isFile()) throw new Error(`MIGRATION_ENTRY_NOT_REGULAR_FILE:${name}`);
   }
-  return selected.map((name) => ({ name, sha256: createHash("sha256").update(readFileSync(resolve(directory, name))).digest("hex") }));
+  const numbers = files.map((name) => Number.parseInt(name.slice(0, 4), 10));
+  if (numbers.includes(0)) throw new Error("MIGRATION_SEQUENCE_ZERO_PREFIX:0000");
+  const seen = new Set();
+  for (const number of numbers) {
+    if (seen.has(number)) throw new Error(`MIGRATION_SEQUENCE_DUPLICATE:${String(number).padStart(4, "0")}`);
+    seen.add(number);
+  }
+  const latest = Math.max(...numbers);
+  for (let number = 1; number <= latest; number += 1) {
+    if (!seen.has(number)) throw new Error(`MIGRATION_SEQUENCE_GAP:${String(number).padStart(4, "0")}`);
+  }
+  return files.map((name) => ({ name, sha256: createHash("sha256").update(readFileSync(resolve(directory, name))).digest("hex") }));
 }
 
 function defaultRun(command, args, options) {

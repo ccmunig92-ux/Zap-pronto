@@ -271,6 +271,39 @@ test.describe("shell OIDC real", () => {
       expect(mutations.filter(value=>value.endsWith("/assignment-policy"))).toHaveLength(2);expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);expect(externalHosts).toEqual([]);
     }finally{await managerPage.close();await attendantPage.close()}
   });
+  test("enforcement filtra destino fora do turno e revalida a transferência após a listagem",async({browser})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a corrida de transferência sob enforcement local.");
+    const managerContext=await browser.newContext(),ownerContext=await browser.newContext(),managerPage=await managerContext.newPage(),ownerPage=await ownerContext.newPage();
+    const externalHosts:string[]=[],transferPosts:string[]=[],outboundRequests:string[]=[];
+    for(const page of[managerPage,ownerPage])page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);if(request.method()==="POST"&&url.pathname.endsWith("/transfer"))transferPosts.push(url.pathname);if(/meta|facebook|whatsapp/iu.test(url.hostname)||url.pathname==="/v1/webhooks/meta")outboundRequests.push(`${request.method()} ${url.href}`)});
+    try{
+      await login(managerPage,account("MANAGER"));await openModule(managerPage,"Escalas");
+      await managerPage.getByLabel("Aplicação").selectOption("ENFORCE_NEW_ASSIGNMENTS");await managerPage.getByRole("button",{name:"Salvar política de atribuição"}).click();
+      const policyResponse=managerPage.waitForResponse(response=>response.request().method()==="POST"&&/\/assignment-policy$/u.test(new URL(response.url()).pathname));
+      await managerPage.getByRole("button",{name:"Confirmar alteração"}).click();expect((await policyResponse).status()).toBe(200);
+
+      await login(ownerPage,account("ATTENDANT"));await ownerPage.getByRole("button",{name:"Contato · NORMAL"}).click();
+      const claimed=ownerPage.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/claim"));
+      await ownerPage.getByRole("button",{name:"Assumir atendimento"}).click();expect((await claimed).status()).toBe(200);
+      await ownerPage.getByRole("button",{name:"Transferir atendimento"}).click();const destination=ownerPage.getByLabel("Atendente de destino");
+      await expect(destination.locator("option",{hasText:"Atendente Local 2"})).toHaveCount(1);await destination.selectOption({label:"Atendente Local 2"});
+      await ownerPage.getByLabel("Motivo da transferência").selectOption("SHIFT_CHANGE");
+
+      const unitId="90000000-0000-4000-8000-000000000002",targetUserId="90000000-0000-4000-8000-000000000012";
+      const scheduleRequest=managerPage.waitForRequest(request=>request.method()==="GET"&&new URL(request.url()).pathname===`/v1/units/${unitId}/staff-schedules/${targetUserId}`);
+      await managerPage.getByLabel("Integrante").selectOption(targetUserId);const authorization=(await (await scheduleRequest).allHeaders()).authorization;if(!authorization)throw new Error("TRANSFER_RACE_AUTHORIZATION_NOT_CAPTURED");
+      const localDate=new Intl.DateTimeFormat("en-CA",{timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+      const scheduleUpdate=await managerPage.evaluate(async({unitId,targetUserId,authorization,localDate})=>{const weeklySlots=Array.from({length:7},(_,index)=>({weekday:index+1,start:"00:00",end:"23:59"}));const response=await fetch(`/v1/units/${unitId}/staff-schedules/${targetUserId}`,{method:"POST",headers:{authorization,"idempotency-key":crypto.randomUUID(),"content-type":"application/json"},body:JSON.stringify({expectedVersion:1,effectiveFrom:localDate,weeklySlots,exceptions:[{date:localDate,type:"CLOSED"}]})});return{status:response.status,body:await response.text()}},{unitId,targetUserId,authorization,localDate});
+      if(scheduleUpdate.status!==200)throw new Error(`TRANSFER_RACE_SCHEDULE_UPDATE_FAILED:${scheduleUpdate.status}:${scheduleUpdate.body.slice(0,500)}`);
+
+      const denied=ownerPage.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/transfer"));
+      await ownerPage.getByRole("button",{name:"Confirmar transferência"}).click();expect((await denied).status()).toBe(409);
+      await expect(ownerPage.getByRole("alert")).toContainText("O atendimento mudou antes da transferência.");await expect(ownerPage.getByRole("alert")).not.toContainText("OUTSIDE_SHIFT");
+      const active=ownerPage.getByRole("button",{name:"Contato · Em atendimento"});await expect(active).toBeVisible();await active.click();await ownerPage.getByRole("button",{name:"Transferir atendimento"}).click();
+      await expect(ownerPage.getByLabel("Atendente de destino").locator("option",{hasText:"Atendente Local 2"})).toHaveCount(0);
+      expect(transferPosts).toHaveLength(1);expect(outboundRequests).toEqual([]);expect(externalHosts).toEqual([]);
+    }finally{await ownerContext.close();await managerContext.close()}
+  });
   test("supervisor consulta escala efetiva sem controles nem mutações",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a leitura de supervisor local.");
     const posts:string[]=[],externalHosts:string[]=[];
