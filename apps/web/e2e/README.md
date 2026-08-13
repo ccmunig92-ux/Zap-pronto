@@ -39,6 +39,11 @@ dependem do seed local e não são executadas contra staging externo. Para permi
 externo, o environment protegido deve definir `E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED=true` e usar uma conta
 exclusiva, nunca operacional.
 
+No overlay local, a jornada de fuso operacional roda isoladamente antes do bloco residual. O
+controlador exige exatamente uma versão `America/Sao_Paulo`, um comando idempotente e uma auditoria
+`UNIT_OPERATIONAL_TIMEZONE_CONFIGURED`, além de ausência de mensagem outbound, Hermes ou evento de
+envio/Meta. Um novo seed remove comandos e versões dessa jornada antes de continuar.
+
 Execute `pnpm --filter @zap-pronto/web exec playwright install chromium` uma vez no host de teste e,
 depois, `pnpm --filter @zap-pronto/web test:e2e:oidc`. Use contas exclusivas de homologação sem MFA
 interativo. O teste de renovação permanece ignorado, a menos que `E2E_RENEW_WAIT_SECONDS` seja definido

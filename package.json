@@ -52,6 +52,7 @@
       ,"./domain/availability": { "types": "./src/domain/availability.ts", "default": "./dist/domain/availability.js" }
       ,"./domain/team-availability": { "types": "./src/domain/team-availability.ts", "default": "./dist/domain/team-availability.js" }
       ,"./domain/sla-policy": { "types": "./src/domain/sla-policy.ts", "default": "./dist/domain/sla-policy.js" }
+      ,"./domain/unit-operational-timezone": { "types": "./src/domain/unit-operational-timezone.ts", "default": "./dist/domain/unit-operational-timezone.js" }
   },
   "types": "./src/index.ts"
 }

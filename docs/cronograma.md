@@ -667,6 +667,15 @@ filtro. O módulo Equipe é lazy e desmontável, sem polling ou mutation. Prova 
 core, 79 da API, 29 do cliente, 158 do frontend, 5 do overlay e 21/21 jornadas E2E OIDC em runtime;
 banco limpo, upgrade e checks remotos deste novo corte permanecem obrigatórios antes do verde final.
 
+Checkpoint local incremental em 2026-08-13, migration `0059`: cada unidade pode receber um fuso IANA
+explícito e versionado, sob `unit_timezone.read` e `unit_timezone.manage`, sem default implícito. O
+módulo lazy `Escalas` expõe somente `Fuso operacional`; ainda não existem turnos, recorrência,
+exceções, feriados ou enforcement de claim. A publicação é idempotente, auditada e isolada por tenant
+e unidade. Prova local verde: 101 testes core, 81 da API, 31 do cliente, 168 do frontend, 5 do overlay,
+banco limpo, upgrade e 22/22 jornadas OIDC. A jornada isolada persiste exatamente uma versão
+`America/Sao_Paulo`, um comando e uma auditoria, sem mensagem outbound, Hermes ou Meta, e o seed remove
+esse estado antes dos testes residuais. Checks remotos continuam obrigatórios antes do verde final.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

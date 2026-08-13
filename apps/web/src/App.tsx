@@ -11,6 +11,7 @@ import { InboxPanel,type InboxClient } from "./InboxPanel.js";
 import { UnitMembershipPanel,type UnitMembershipClient } from "./UnitMembershipPanel.js";
 import { UnitSlaPolicyPanel,type UnitSlaPolicyClient } from "./UnitSlaPolicyPanel.js";
 import{TeamAvailabilityPanel,type TeamAvailabilityClient}from"./TeamAvailabilityPanel.js";
+import{UnitOperationalTimezonePanel,type UnitOperationalTimezoneClient}from"./UnitOperationalTimezonePanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -19,19 +20,20 @@ type SessionState =
   | { status: "error"; message: string; correlationId?: string };
 
 export type NavigationState = { readonly blocked: boolean; readonly dirty: boolean };
-type ModuleId = "INBOX" | "TEAM_AVAILABILITY" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "OVERVIEW";
-type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy";
+type ModuleId = "INBOX" | "TEAM_AVAILABILITY" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "UNIT_OPERATIONAL_TIMEZONE" | "OVERVIEW";
+type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy" | "unit-operational-timezone";
 const emptyNavigationState: NavigationState = { blocked: false, dirty: false };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  unitMembershipClient=apiClient,slaPolicyClient=apiClient,teamAvailabilityClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
+  unitMembershipClient=apiClient,slaPolicyClient=apiClient,teamAvailabilityClient=apiClient,operationalTimezoneClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
   retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
   readonly unitMembershipClient?:UnitMembershipClient;
   readonly slaPolicyClient?:UnitSlaPolicyClient;
   readonly teamAvailabilityClient?:TeamAvailabilityClient;
+  readonly operationalTimezoneClient?:UnitOperationalTimezoneClient;
   readonly acceptanceClient?: AcceptanceClient;
   readonly routingClient?:RoutingRequiredClient;
   readonly inboxClient?:InboxClient;
@@ -48,7 +50,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const [selectedModule, setSelectedModule] = useState<ModuleId>();
   const [navigationStates, setNavigationStates] = useState<Record<string, NavigationState>>({});
   const moduleContentRef = useRef<HTMLDivElement>(null);
-  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships","unit-sla-policy"] as const)
+  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships","unit-sla-policy","unit-operational-timezone"] as const)
     .map(panel=>[panel,(state:NavigationState)=>setNavigationStates(current=>{
       const previous=current[panel];if(previous?.blocked===state.blocked&&previous.dirty===state.dirty)return current;
       return {...current,[panel]:state};
@@ -116,6 +118,8 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId)).map(membership=>membership.unitId);
   const inboxUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="conversation.read"&&g.scope==="UNIT"&&g.unitId===m.unitId)).map(m=>({id:m.unitId,name:m.unitName}));
   const teamAvailabilityUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="availability.supervise"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
+  const timezoneUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="unit_timezone.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId))||g.permission==="unit_timezone.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
+  const manageableTimezoneUnitIds=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="unit_timezone.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId);
   const canReadRouting=currentUser.grants.some(grant=>grant.permission==="inbound.routing.read"&&grant.scope==="TENANT");
   const modules:readonly {id:ModuleId;label:string}[]=[
     ...(inboxUnits.length>0?[{id:"INBOX" as const,label:"Inbox"}]:[]),
@@ -124,11 +128,12 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     ...(canManageTenantUsers?[{id:"TENANT_ACCESS" as const,label:"Acessos"}]:[]),
     ...(!canManageTenantUsers&&managedUnits.length>0?[{id:"UNIT_MEMBERSHIPS" as const,label:"Vínculos"}]:[]),
     ...(slaPolicyUnits.length>0?[{id:"UNIT_SLA_POLICY" as const,label:"Política de SLA"}]:[]),
+    ...(timezoneUnits.length>0?[{id:"UNIT_OPERATIONAL_TIMEZONE" as const,label:"Escalas"}]:[]),
     {id:"OVERVIEW",label:"Visão geral"},
   ];
   const activeModule=modules.some(module=>module.id===selectedModule)?selectedModule!:modules[0]!.id;
   const activePanels:readonly PanelId[]=activeModule==="INBOX"?["inbox"]:activeModule==="ROUTING"?["routing"]:
-    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:activeModule==="UNIT_SLA_POLICY"?["unit-sla-policy"]:[];
+    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:activeModule==="UNIT_SLA_POLICY"?["unit-sla-policy"]:activeModule==="UNIT_OPERATIONAL_TIMEZONE"?["unit-operational-timezone"]:[];
   const activeNavigationState=Object.entries(navigationStates).filter(([key])=>activePanels.includes(key as PanelId))
     .reduce<NavigationState>((state,[,value])=>({blocked:state.blocked||value.blocked,dirty:state.dirty||value.dirty}),emptyNavigationState);
   function navigate(moduleId:ModuleId):void{
@@ -163,6 +168,9 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     {activeModule==="UNIT_SLA_POLICY"&&slaPolicyUnits.length>0&&<UnitSlaPolicyPanel client={slaPolicyClient}
       readableUnits={slaPolicyUnits} manageableUnitIds={manageableSlaPolicyUnitIds} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-sla-policy"]}/>}
+    {activeModule==="UNIT_OPERATIONAL_TIMEZONE"&&timezoneUnits.length>0&&<UnitOperationalTimezonePanel client={operationalTimezoneClient}
+      readableUnits={timezoneUnits} manageableUnitIds={manageableTimezoneUnitIds} onAuthenticationRequired={invalidateAuthentication}
+      onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-operational-timezone"]}/>}
     {activeModule==="ROUTING"&&canReadRouting&&
       <RoutingRequiredPanel client={routingClient}
         canResolve={currentUser.grants.some(grant=>grant.permission==="inbound.routing.resolve"&&grant.scope==="TENANT")}

@@ -72,6 +72,7 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   assert.match(seed, /local-e2e-routing-account'[\s\S]*NULL,'UNROUTED','MULTIPLE_ACTIVE_UNITS'/);
   assert.match(seed, /DELETE FROM inbound_routing_commands[\s\S]*DELETE FROM inbound_channel_events/);
   assert.match(seed,/DELETE FROM attendant_availability_commands[\s\S]*INSERT INTO attendant_unit_availability[\s\S]*'AVAILABLE',100,NULL,NULL,1/);
+  assert.match(seed,/DELETE FROM unit_operational_timezone_commands[\s\S]*DELETE FROM unit_operational_timezone_versions/);
   assert.match(seed,/DELETE FROM handoff_sla_acknowledge_commands[\s\S]*SLA_ALERT_ACKNOWLEDGED[\s\S]*DELETE FROM handoff_sla_acknowledgements/);
   assert.match(seed,/sla_due_at=NULL[\s\S]*queued_at=clock_timestamp\(\)-interval '30 minutes'/);
 });
@@ -113,7 +114,10 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/--grep','gestor reconhece alerta de SLA uma única vez por versão'/);
   assert.match(controller,/--grep','gestor configura a primeira política de SLA uma única vez'/);
   assert.match(controller,/unit_sla_policy_versions[\s\S]*unit_sla_policy_targets[\s\S]*unit_sla_policy_publish_commands[\s\S]*SLA_POLICY_PUBLISHED[\s\S]*LOCAL_OIDC_SLA_POLICY_STATE_INVALID/);
+  assert.match(controller,/--grep','gestor configura o fuso operacional uma única vez sem efeitos externos'[\s\S]*unit_operational_timezone_versions[\s\S]*unit_operational_timezone_commands[\s\S]*UNIT_OPERATIONAL_TIMEZONE_CONFIGURED[\s\S]*LOCAL_OIDC_OPERATIONAL_TIMEZONE_STATE_INVALID/);
+  assert.match(controller,/LOCAL_OIDC_OPERATIONAL_TIMEZONE_STATE_INVALID[\s\S]*Compose @\('run','--rm','local-seed'\)[\s\S]*--grep','gestor reconhece alerta de SLA/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor configura a primeira política de SLA uma única vez/);
+  assert.match(controller,/--grep-invert'[\s\S]*gestor configura o fuso operacional uma única vez sem efeitos externos/);
   assert.match(controller,/handoff_sla_acknowledgements[\s\S]*handoff_version IN\(1,3\)[\s\S]*handoff_sla_acknowledge_commands[\s\S]*expected_version IN\(1,3\)[\s\S]*SLA_ALERT_ACKNOWLEDGED/);
   assert.match(controller,/status='QUEUED' AND version=3 AND assigned_user_id IS NULL AND claimed_at IS NULL/);
   assert.match(controller,/LOCAL_OIDC_SLA_ALERT_ACKNOWLEDGEMENT_STATE_INVALID/);

@@ -61,6 +61,12 @@ export const apiClient = {
   setUnitSlaPolicy(...parameters:Parameters<typeof transportClient.setUnitSlaPolicy>){
     return transportClient.setUnitSlaPolicy(...parameters);
   },
+  getUnitOperationalTimezone(...parameters:Parameters<typeof transportClient.getUnitOperationalTimezone>){
+    return transportClient.getUnitOperationalTimezone(...parameters);
+  },
+  setUnitOperationalTimezone(...parameters:Parameters<typeof transportClient.setUnitOperationalTimezone>){
+    return transportClient.setUnitOperationalTimezone(...parameters);
+  },
   revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
     return transportClient.revokeUserInvitation(...parameters);
   },

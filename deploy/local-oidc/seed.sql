@@ -24,6 +24,12 @@ INSERT INTO user_units (tenant_id,user_id,unit_id,role) VALUES
 ('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000012','90000000-0000-4000-8000-000000000002','UNIT_MANAGER')
 ON CONFLICT (tenant_id,user_id,unit_id) DO UPDATE SET role=EXCLUDED.role,status='ACTIVE',
 version=user_units.version+1,state_changed_at=clock_timestamp(),revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL;
+DELETE FROM unit_operational_timezone_commands
+WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+  AND unit_id IN('90000000-0000-4000-8000-000000000002','90000000-0000-4000-8000-000000000003');
+DELETE FROM unit_operational_timezone_versions
+WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+  AND unit_id IN('90000000-0000-4000-8000-000000000002','90000000-0000-4000-8000-000000000003');
 DELETE FROM attendant_availability_commands
 WHERE tenant_id='90000000-0000-4000-8000-000000000001'
   AND unit_id='90000000-0000-4000-8000-000000000002'

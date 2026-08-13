@@ -112,6 +112,7 @@ try {
       "0056_unit_sla_policy.sql",
       "0057_sla_policy_idempotency_serialization.sql",
       "0058_team_availability_projection.sql",
+      "0059_unit_operational_timezone.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -141,6 +142,13 @@ try {
       await slaPolicyTestClient.query(await readFile(resolve("database/tests", "0005_sla_policy.sql"), "utf8"));
     } finally {
       await slaPolicyTestClient.end();
+    }
+    const timezoneTestClient = new pg.Client({ connectionString: targetUrl.toString() });
+    await timezoneTestClient.connect();
+    try {
+      await timezoneTestClient.query(await readFile(resolve("database/tests", "0006_unit_operational_timezone.sql"), "utf8"));
+    } finally {
+      await timezoneTestClient.end();
     }
 
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
@@ -188,6 +196,24 @@ try {
       (SELECT count(*)::int FROM unit_sla_policy_targets WHERE tenant_id=$1) targets,
       (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='SLA_POLICY_PUBLISHED') audits`,[policyRaceTenant])).rows[0];
     assert.deepEqual(policyRaceEvidence,{commands:1,versions:1,targets:4,audits:1});
+    const timezoneRaceClients=await Promise.all([0,1].map(async()=>{const client=new pg.Client({connectionString:targetUrl.toString()});
+      await client.connect();await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
+      await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id',$3,true)",
+        [policyRaceTenant,policyRaceActor,`timezone-race-${randomUUID()}`]);return client}));
+    const timezoneRaceCalls=timezoneRaceClients.map((client,index)=>{const input={unitId:policyRaceUnits[index],timeZone:"America/Sao_Paulo",expectedVersion:0};
+      const fingerprint=createHash("sha256").update(JSON.stringify(input)).digest("hex");return client.query(
+        "SELECT * FROM set_unit_operational_timezone($1,$2,0,'timezone-shared-race-key',$3)",[input.unitId,input.timeZone,fingerprint])});
+    const firstTimezoneRace=await Promise.race(timezoneRaceCalls.map((call,index)=>call.then(result=>({index,result}))));
+    assert.equal(firstTimezoneRace.result.rows.length,1);assert.equal(firstTimezoneRace.result.rows[0].replayed,false);
+    await timezoneRaceClients[firstTimezoneRace.index].query("COMMIT");
+    const losingTimezoneRaceIndex=firstTimezoneRace.index===0?1:0;
+    await assert.rejects(timezoneRaceCalls[losingTimezoneRaceIndex],/UNIT_OPERATIONAL_TIMEZONE_IDEMPOTENCY_CONFLICT/);
+    await timezoneRaceClients[losingTimezoneRaceIndex].query("ROLLBACK");await Promise.all(timezoneRaceClients.map(client=>client.end()));
+    const timezoneRaceEvidence=(await target.query(`SELECT
+      (SELECT count(*)::int FROM unit_operational_timezone_commands WHERE tenant_id=$1) commands,
+      (SELECT count(*)::int FROM unit_operational_timezone_versions WHERE tenant_id=$1) versions,
+      (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='UNIT_OPERATIONAL_TIMEZONE_CONFIGURED') audits`,[policyRaceTenant])).rows[0];
+    assert.deepEqual(timezoneRaceEvidence,{commands:1,versions:1,audits:1});
     const teamQuery=async(actorId,unitId,limit=101,status=null,anchorName=null,anchorId=null)=>{const client=new pg.Client({connectionString:targetUrl.toString()});
       await client.connect();try{await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
         await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','team-test',true)",[policyRaceTenant,actorId]);
@@ -275,6 +301,7 @@ try {
       "handoff_takeover_commands","handoff_reopen_commands","membership_lifecycle_commands"];
     globalHiddenTables.push("handoff_sla_acknowledgements","handoff_sla_acknowledge_commands");
     globalHiddenTables.push("unit_sla_policy_publish_commands","unit_sla_policy_targets","unit_sla_policy_versions");
+    globalHiddenTables.push("unit_operational_timezone_commands","unit_operational_timezone_versions");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -364,6 +391,7 @@ try {
       "membership_lifecycle_commands",
       "handoff_sla_acknowledgements", "handoff_sla_acknowledge_commands",
       "unit_sla_policy_versions", "unit_sla_policy_targets", "unit_sla_policy_publish_commands",
+      "unit_operational_timezone_versions", "unit_operational_timezone_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
@@ -484,6 +512,20 @@ try {
         FROM pg_proc WHERE oid='list_unit_team_availability(uuid,integer,text,text,uuid)'::regprocedure) pure_hardened`);
     assert.deepEqual(teamAvailabilitySecurity.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
       api_execute:true,worker_execute:false,app_execute:false,pure_hardened:true});
+    const timezoneSecurity=await target.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='unit_timezone.read' ORDER BY role_code) read_roles,
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='unit_timezone.manage' ORDER BY role_code) manage_roles,
+      has_function_privilege('zap_pronto_api','get_unit_operational_timezone(uuid)','EXECUTE') api_get,
+      has_function_privilege('zap_pronto_api','set_unit_operational_timezone(uuid,text,integer,text,text)','EXECUTE') api_set,
+      has_function_privilege('zap_pronto_worker','get_unit_operational_timezone(uuid)','EXECUTE') worker_get,
+      has_function_privilege('zap_pronto_app','set_unit_operational_timezone(uuid,text,integer,text,text)','EXECUTE') app_set,
+      (SELECT provolatile='s' AND prosecdef AND proconfig @> ARRAY['search_path=pg_catalog, public','row_security=off']
+        FROM pg_proc WHERE oid='get_unit_operational_timezone(uuid)'::regprocedure) get_hardened,
+      (SELECT provolatile='v' AND prosecdef AND proconfig @> ARRAY['search_path=pg_catalog, public','row_security=off']
+        FROM pg_proc WHERE oid='set_unit_operational_timezone(uuid,text,integer,text,text)'::regprocedure) set_hardened`);
+    assert.deepEqual(timezoneSecurity.rows[0],{read_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
+      manage_roles:["TENANT_ADMIN","UNIT_MANAGER"],api_get:true,api_set:true,worker_get:false,app_set:false,
+      get_hardened:true,set_hardened:true});
     const historySecurity=await target.query(`SELECT
       ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='handoff.history.read' ORDER BY role_code) roles,
       has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)','EXECUTE') api_execute,

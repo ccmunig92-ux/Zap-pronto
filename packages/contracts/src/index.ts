@@ -29,7 +29,7 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -449,6 +449,14 @@ export const SetUnitSlaPolicyRequestSchema=Type.Object({expectedVersion:Type.Int
 export type SetUnitSlaPolicyRequest=Static<typeof SetUnitSlaPolicyRequestSchema>;
 export const SetUnitSlaPolicyResponseSchema=Type.Composite([UnitSlaPolicySchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
 export type SetUnitSlaPolicyResponse=Static<typeof SetUnitSlaPolicyResponseSchema>;
+export const UnitOperationalTimezoneParamsSchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export const OperationalTimezoneNameSchema=Type.String({minLength:1,maxLength:100,pattern:"^[^\\s]+$"});
+export const UnitOperationalTimezoneSchema=Type.Object({unitId:Type.String({format:"uuid"}),timeZone:OperationalTimezoneNameSchema,version:Type.Integer({minimum:1}),updatedAt:Type.String({format:"date-time"})},{additionalProperties:false});
+export type UnitOperationalTimezone=Static<typeof UnitOperationalTimezoneSchema>;
+export const SetUnitOperationalTimezoneRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:0}),timeZone:OperationalTimezoneNameSchema},{additionalProperties:false});
+export type SetUnitOperationalTimezoneRequest=Static<typeof SetUnitOperationalTimezoneRequestSchema>;
+export const SetUnitOperationalTimezoneResponseSchema=Type.Composite([UnitOperationalTimezoneSchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
+export type SetUnitOperationalTimezoneResponse=Static<typeof SetUnitOperationalTimezoneResponseSchema>;
 export const HandoffResolutionDispositionSchema=Type.Union([
   Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
 ],{$id:"HandoffResolutionDisposition"});
