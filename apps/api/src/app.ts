@@ -15,6 +15,7 @@ import { registerInboxRoutingRequiredRoutes } from "./routes/inbox-routing-requi
 import { registerInboxConversationRoutes } from "./routes/inbox-conversations.js";
 import { registerInboxAvailabilityRoutes } from "./routes/inbox-availability.js";
 import { registerInboxSlaAlertRoutes } from "./routes/inbox-sla-alerts.js";
+import { registerUnitSlaPolicyRoutes } from "./routes/unit-sla-policy.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -91,6 +92,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerInboxConversationRoutes(app, options.pool ?? unavailablePool);
   registerInboxAvailabilityRoutes(app, options.pool ?? unavailablePool);
   registerInboxSlaAlertRoutes(app, options.pool ?? unavailablePool);
+  registerUnitSlaPolicyRoutes(app, options.pool ?? unavailablePool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }

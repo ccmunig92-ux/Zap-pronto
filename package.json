@@ -50,6 +50,7 @@
       ,"./domain/inbound-routing": { "types": "./src/domain/inbound-routing.ts", "default": "./dist/domain/inbound-routing.js" }
       ,"./domain/inbox-conversations": { "types": "./src/domain/inbox-conversations.ts", "default": "./dist/domain/inbox-conversations.js" }
       ,"./domain/availability": { "types": "./src/domain/availability.ts", "default": "./dist/domain/availability.js" }
+      ,"./domain/sla-policy": { "types": "./src/domain/sla-policy.ts", "default": "./dist/domain/sla-policy.js" }
   },
   "types": "./src/index.ts"
 }

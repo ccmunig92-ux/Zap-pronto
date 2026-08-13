@@ -29,7 +29,7 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -428,6 +428,15 @@ export const AcknowledgeInboxSlaAlertRequestSchema=Type.Object({expectedVersion:
 export type AcknowledgeInboxSlaAlertRequest=Static<typeof AcknowledgeInboxSlaAlertRequestSchema>;
 export const AcknowledgeInboxSlaAlertResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),acknowledgedAt:Type.String({format:"date-time"}),acknowledgedByUserId:Type.String({format:"uuid"}),version:Type.Integer({minimum:1}),replayed:Type.Boolean()},{$id:"AcknowledgeInboxSlaAlertResponse",additionalProperties:false});
 export type AcknowledgeInboxSlaAlertResponse=Static<typeof AcknowledgeInboxSlaAlertResponseSchema>;
+export const UnitSlaPolicyParamsSchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export const UnitSlaTargetSchema=Type.Object({priority:HandoffPrioritySchema,targetMinutes:Type.Integer({minimum:1,maximum:10080})},{additionalProperties:false});
+export type UnitSlaTarget=Static<typeof UnitSlaTargetSchema>;
+export const UnitSlaPolicySchema=Type.Object({unitId:Type.String({format:"uuid"}),version:Type.Integer({minimum:1}),effectiveAt:Type.String({format:"date-time"}),targets:Type.Array(UnitSlaTargetSchema,{minItems:4,maxItems:4})},{additionalProperties:false});
+export type UnitSlaPolicy=Static<typeof UnitSlaPolicySchema>;
+export const SetUnitSlaPolicyRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:0}),targets:Type.Array(UnitSlaTargetSchema,{minItems:4,maxItems:4})},{additionalProperties:false});
+export type SetUnitSlaPolicyRequest=Static<typeof SetUnitSlaPolicyRequestSchema>;
+export const SetUnitSlaPolicyResponseSchema=Type.Composite([UnitSlaPolicySchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
+export type SetUnitSlaPolicyResponse=Static<typeof SetUnitSlaPolicyResponseSchema>;
 export const HandoffResolutionDispositionSchema=Type.Union([
   Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
 ],{$id:"HandoffResolutionDisposition"});

@@ -633,6 +633,20 @@ além de banco vazio, upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:a
 `git diff --check`. O corte não cria política de minutos, mensagem, transporte Meta, resposta Hermes
 ou deploy; CI remoto e homologação externa ainda não fazem parte desta evidência.
 
+Checkpoint local incremental em 2026-08-13, migration `0056`: a política de SLA passou a ser
+configuração versionada por tenant, unidade e prioridade (`LOW`, `NORMAL`, `HIGH` e `URGENT`), sem
+valores padrão inventados. Cada publicação cria uma versão append-only com concorrência otimista,
+idempotência e auditoria; supervisores podem consultar, enquanto somente gerentes da unidade e
+administradores do tenant podem publicar. A versão vigente é aplicada apenas ao nascimento de novos
+episódios operacionais e à reabertura, gravando no handoff tanto o prazo calculado quanto a versão da
+política usada; episódios históricos não são recalculados. Sem política publicada, o prazo permanece
+ausente e a projeção continua expondo `MISSING_SLA`. A configuração foi integrada à mesma API, cliente
+gerado e Inbox canônicos, sem serviço, banco ou fluxo paralelo. Prova local verde: 95 testes core, 79
+da API, 28 do cliente, 149 do frontend, 5 do overlay e 20/20 jornadas E2E OIDC em runtime, além de
+banco vazio, upgrade legado, `typecheck:all`, `test:all`, `api:check`, `build:all`, overlay Verify e
+`git diff --check`. O overlay limpo executa a cadeia append-only `0001`-`0056`. Esta evidência não
+comprova CI remoto da 0056, staging, deploy, produção, Hermes ou Meta real.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

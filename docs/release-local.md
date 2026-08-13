@@ -1,15 +1,15 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma e não autoriza merge ou deploy. O candidato está versionado no branch
-`codex/release-local-0050` e permanece em PR draft; isso não homologa Meta, Hermes, IdP externo ou
+Ele não substitui o cronograma e não autoriza merge ou deploy. O incremento atual está no branch
+`codex/phase-4-attendant-availability` e permanece em PR draft; isso não homologa Meta, Hermes, IdP externo ou
 produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
 - Baseline versionado até `0050_handoff_reopen_latest_episode.sql` e incremento local append-only
-  validado até `0055_sla_acknowledgement_episodes.sql`.
+  validado até `0056_unit_sla_policy.sql`.
 - Overlay OIDC exclusivamente sintético, com duas identidades operacionais locais.
 - Outbound externo e Hermes desativados.
 
@@ -60,6 +60,21 @@ Evidência executada no checkout local: 92 testes core, 77 da API, 137 do fronte
 19/19 jornadas E2E OIDC em runtime, além de banco vazio, upgrade legado, `typecheck:all`,
 `api:check`, `build:all` e `git diff --check` verdes. Essas contagens não comprovam CI remoto,
 staging, deploy, produção, Hermes ou Meta real.
+
+## Evidência local incremental 0056
+
+A migration `0056_unit_sla_policy.sql` introduz política de SLA versionada por tenant, unidade e
+prioridade, sem preencher prazos por convenção ou default. A publicação é append-only, idempotente,
+auditada e protegida por versão esperada. A política vigente é capturada somente quando nasce um novo
+episódio operacional ou quando um handoff é reaberto: o prazo e a versão aplicada ficam persistidos no
+próprio episódio, portanto uma política posterior não recalcula o histórico. Na ausência de política,
+o SLA permanece nulo e o alerta `MISSING_SLA` continua explícito.
+
+Evidência executada no checkout local: 95 testes core, 79 da API, 28 do cliente, 149 do frontend, 5
+do overlay e 20/20 jornadas E2E OIDC em runtime. Também passaram banco vazio com migrations
+`0001`-`0056`, upgrade legado, `typecheck:all`, `test:all`, `api:check`, `build:all`, overlay Verify e
+`git diff --check`. Essas contagens não comprovam CI remoto da 0056, staging, deploy, produção,
+Hermes ou Meta real.
 
 ## Gates obrigatórios
 

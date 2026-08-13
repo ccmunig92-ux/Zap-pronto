@@ -273,12 +273,16 @@ export async function requestHandoff(
   if (!["LOW", "NORMAL", "HIGH", "URGENT"].includes(input.priority)) {
     throw new Error("INVALID_HANDOFF_PRIORITY");
   }
-  const slaDueAt = input.slaDueAt === undefined ? null : input.slaDueAt.toISOString();
+  // SLA is selected from the unit's published policy. The caller field remains
+  // accepted only for source compatibility and is never trusted for new rows.
+  const legacySlaDueAt = input.slaDueAt === undefined ? null : input.slaDueAt.toISOString();
   const requestFingerprint = createHash("sha256").update(JSON.stringify({
     serviceCaseId,
     reason,
     priority: input.priority,
-    slaDueAt,
+  })).digest("hex");
+  const legacyRequestFingerprint = createHash("sha256").update(JSON.stringify({
+    serviceCaseId, reason, priority: input.priority, slaDueAt: legacySlaDueAt,
   })).digest("hex");
 
   await client.query(
@@ -296,9 +300,9 @@ export async function requestHandoff(
     const replay = existing.rows[0]!;
     const legacyMatches = replay.serviceCaseId.toLowerCase() === serviceCaseId
       && replay.reason === reason && replay.priority === input.priority
-      && (replay.slaDueAt === null ? null : new Date(replay.slaDueAt).toISOString()) === slaDueAt;
+      && (replay.slaDueAt === null ? null : new Date(replay.slaDueAt).toISOString()) === legacySlaDueAt;
     if (replay.requestFingerprint !== null
-      ? replay.requestFingerprint !== requestFingerprint
+      ? replay.requestFingerprint !== requestFingerprint && replay.requestFingerprint !== legacyRequestFingerprint
       : !legacyMatches) {
       throw new Error("IDEMPOTENCY_KEY_REUSED");
     }
@@ -327,14 +331,21 @@ export async function requestHandoff(
   `, [current.conversation_id, current.unit_id]);
   if (conversation.rowCount !== 1) throw new Error("CONVERSATION_ROUTING_MISMATCH");
 
+  const policy = await query<{ policyVersionId:string;targetMinutes:number }>(client, `
+    SELECT policy_version_id AS "policyVersionId",target_minutes AS "targetMinutes"
+    FROM resolve_unit_sla_policy_target($1,$2)
+  `,[current.unit_id,input.priority]);
+  const selectedPolicy=policy.rows[0]??null;
+
   const created = await query<{ id: string; version: number }>(client, `
     INSERT INTO human_handoffs
       (tenant_id, conversation_id, service_case_id, unit_id, reason, priority,
-       status, queued_at, sla_due_at, idempotency_key, request_fingerprint)
-    VALUES (current_app_tenant_id(), $1, $2, $3, $4, $5, 'QUEUED', now(), $6, $7, $8)
+       status, queued_at, sla_due_at, sla_policy_version_id, idempotency_key, request_fingerprint)
+    VALUES (current_app_tenant_id(), $1, $2, $3, $4, $5, 'QUEUED', now(),
+      CASE WHEN $6::integer IS NULL THEN NULL ELSE now()+make_interval(mins=>$6) END,$7,$8,$9)
     RETURNING id, version
   `, [current.conversation_id, serviceCaseId, current.unit_id, reason, input.priority,
-    slaDueAt, idempotencyKey, requestFingerprint]);
+    selectedPolicy?.targetMinutes??null,selectedPolicy?.policyVersionId??null,idempotencyKey,requestFingerprint]);
   const handoff = created.rows[0]!;
 
   const waitingCase = await query<{ version: number }>(client, `

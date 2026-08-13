@@ -9,6 +9,7 @@ import { AcceptInvitationPanel, type AcceptanceClient } from "./AcceptInvitation
 import { RoutingRequiredPanel,type RoutingRequiredClient } from "./RoutingRequiredPanel.js";
 import { InboxPanel,type InboxClient } from "./InboxPanel.js";
 import { UnitMembershipPanel,type UnitMembershipClient } from "./UnitMembershipPanel.js";
+import { UnitSlaPolicyPanel,type UnitSlaPolicyClient } from "./UnitSlaPolicyPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -17,17 +18,18 @@ type SessionState =
   | { status: "error"; message: string; correlationId?: string };
 
 export type NavigationState = { readonly blocked: boolean; readonly dirty: boolean };
-type ModuleId = "INBOX" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "OVERVIEW";
-type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships";
+type ModuleId = "INBOX" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "OVERVIEW";
+type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy";
 const emptyNavigationState: NavigationState = { blocked: false, dirty: false };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  unitMembershipClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
+  unitMembershipClient=apiClient,slaPolicyClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
   retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
   readonly unitMembershipClient?:UnitMembershipClient;
+  readonly slaPolicyClient?:UnitSlaPolicyClient;
   readonly acceptanceClient?: AcceptanceClient;
   readonly routingClient?:RoutingRequiredClient;
   readonly inboxClient?:InboxClient;
@@ -44,7 +46,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const [selectedModule, setSelectedModule] = useState<ModuleId>();
   const [navigationStates, setNavigationStates] = useState<Record<string, NavigationState>>({});
   const moduleContentRef = useRef<HTMLDivElement>(null);
-  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships"] as const)
+  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships","unit-sla-policy"] as const)
     .map(panel=>[panel,(state:NavigationState)=>setNavigationStates(current=>{
       const previous=current[panel];if(previous?.blocked===state.blocked&&previous.dirty===state.dirty)return current;
       return {...current,[panel]:state};
@@ -102,6 +104,10 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const managedUnits=currentUser.memberships.filter(membership=>currentUser.grants.some(grant=>
     grant.permission==="unit.members.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
     .map(membership=>({id:membership.unitId,name:membership.unitName}));
+  const canManageTenantSlaPolicy=currentUser.grants.some(grant=>grant.permission==="sla_policy.manage"&&grant.scope==="TENANT");
+  const slaPolicyUnits=currentUser.memberships.filter(membership=>canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+    grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
+    .map(membership=>({id:membership.unitId,name:membership.unitName}));
   const inboxUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="conversation.read"&&g.scope==="UNIT"&&g.unitId===m.unitId)).map(m=>({id:m.unitId,name:m.unitName}));
   const canReadRouting=currentUser.grants.some(grant=>grant.permission==="inbound.routing.read"&&grant.scope==="TENANT");
   const modules:readonly {id:ModuleId;label:string}[]=[
@@ -109,11 +115,12 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     ...(canReadRouting?[{id:"ROUTING" as const,label:"Roteamento"}]:[]),
     ...(canManageTenantUsers?[{id:"TENANT_ACCESS" as const,label:"Acessos"}]:[]),
     ...(!canManageTenantUsers&&managedUnits.length>0?[{id:"UNIT_MEMBERSHIPS" as const,label:"Vínculos"}]:[]),
+    ...(slaPolicyUnits.length>0?[{id:"UNIT_SLA_POLICY" as const,label:"Política de SLA"}]:[]),
     {id:"OVERVIEW",label:"Visão geral"},
   ];
   const activeModule=modules.some(module=>module.id===selectedModule)?selectedModule!:modules[0]!.id;
   const activePanels:readonly PanelId[]=activeModule==="INBOX"?["inbox"]:activeModule==="ROUTING"?["routing"]:
-    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:[];
+    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:activeModule==="UNIT_SLA_POLICY"?["unit-sla-policy"]:[];
   const activeNavigationState=Object.entries(navigationStates).filter(([key])=>activePanels.includes(key as PanelId))
     .reduce<NavigationState>((state,[,value])=>({blocked:state.blocked||value.blocked,dirty:state.dirty||value.dirty}),emptyNavigationState);
   function navigate(moduleId:ModuleId):void{
@@ -144,6 +151,9 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     {activeModule==="UNIT_MEMBERSHIPS"&&!canManageTenantUsers&&managedUnits.length>0&&<UnitMembershipPanel client={unitMembershipClient}
       authorizedUnits={managedUnits} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-memberships"]}/>}
+    {activeModule==="UNIT_SLA_POLICY"&&slaPolicyUnits.length>0&&<UnitSlaPolicyPanel client={slaPolicyClient}
+      authorizedUnits={slaPolicyUnits} onAuthenticationRequired={invalidateAuthentication}
+      onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-sla-policy"]}/>}
     {activeModule==="ROUTING"&&canReadRouting&&
       <RoutingRequiredPanel client={routingClient}
         canResolve={currentUser.grants.some(grant=>grant.permission==="inbound.routing.resolve"&&grant.scope==="TENANT")}

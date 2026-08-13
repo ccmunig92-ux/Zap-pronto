@@ -55,6 +55,12 @@ export const apiClient = {
   listUnitMemberships(...parameters:Parameters<typeof transportClient.listUnitMemberships>){
     return transportClient.listUnitMemberships(...parameters);
   },
+  getUnitSlaPolicy(...parameters:Parameters<typeof transportClient.getUnitSlaPolicy>){
+    return transportClient.getUnitSlaPolicy(...parameters);
+  },
+  setUnitSlaPolicy(...parameters:Parameters<typeof transportClient.setUnitSlaPolicy>){
+    return transportClient.setUnitSlaPolicy(...parameters);
+  },
   revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
     return transportClient.revokeUserInvitation(...parameters);
   },
