@@ -158,8 +158,9 @@ try {
     await target.query(`INSERT INTO users(id,tenant_id,email,display_name) VALUES
       ($2,$1,'team-supervisor@test.local','ana'),($3,$1,'team-attendant@test.local','Ana'),($4,$1,'team-revoked@test.local','Zed')`,
       [policyRaceTenant,teamSupervisor,teamAttendant,teamRevoked]);
-    await target.query(`INSERT INTO user_units(tenant_id,user_id,unit_id,role,status) VALUES
-      ($1,$2,$5,'SUPERVISOR','ACTIVE'),($1,$3,$5,'ATTENDANT','ACTIVE'),($1,$4,$5,'SUPERVISOR','REVOKED')`,
+    await target.query(`INSERT INTO user_units(tenant_id,user_id,unit_id,role,status,revoked_at,revoked_by_user_id,revocation_reason) VALUES
+      ($1,$2,$5,'SUPERVISOR','ACTIVE',NULL,NULL,NULL),($1,$3,$5,'ATTENDANT','ACTIVE',NULL,NULL,NULL),
+      ($1,$4,$5,'SUPERVISOR','REVOKED',now(),$2,'SECURITY_REVIEW')`,
       [policyRaceTenant,teamSupervisor,teamAttendant,teamRevoked,policyRaceUnits[0]]);
     await target.query("UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=2 WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
       [policyRaceTenant,teamSupervisor,policyRaceUnits[0]]);
