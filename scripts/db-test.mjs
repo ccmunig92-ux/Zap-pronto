@@ -2052,6 +2052,8 @@ try {
       await target.query("DELETE FROM attendant_availability_commands WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
       await target.query("DELETE FROM attendant_unit_availability WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
       await target.query("DELETE FROM user_units WHERE user_id=$1 AND unit_id=$2",[actorAId,inconsistentUnitId]);
+      await target.query("DELETE FROM unit_assignment_policy_commands WHERE unit_id=$1",[inconsistentUnitId]);
+      await target.query("DELETE FROM unit_assignment_policies WHERE unit_id=$1",[inconsistentUnitId]);
       await target.query("DELETE FROM units WHERE id=$1",[inconsistentUnitId]);
       const candidates=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates"},client=>listTransferCandidates(client,handoffA.rows[0].id));
       assert.deepEqual(candidates,{items:[{id:transferTargetId,displayName:"Transfer Target"}]});
