@@ -98,7 +98,7 @@ describe("authenticated shell", () => {
       routingClient={{listRoutingRequired,async resolveRoutingRequired(){return{replayed:false}}}}/>);
     expect(await screen.findByRole("heading",{name:"Inbox"})).toBeTruthy();
     expect(screen.getByRole("button",{name:"Inbox"}).getAttribute("aria-current")).toBe("page");
-    expect(listQueue).toHaveBeenCalledOnce();expect(listActive).toHaveBeenCalledOnce();expect(listRoutingRequired).not.toHaveBeenCalled();
+    await waitFor(()=>{expect(listQueue).toHaveBeenCalledOnce();expect(listActive).toHaveBeenCalledOnce()});expect(listRoutingRequired).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button",{name:"Roteamento"}));
     expect(await screen.findByRole("heading",{name:"Aguardando unidade"})).toBeTruthy();
     await waitFor(()=>expect(listRoutingRequired).toHaveBeenCalledOnce());
