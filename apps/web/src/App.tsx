@@ -13,6 +13,7 @@ import { UnitSlaPolicyPanel,type UnitSlaPolicyClient } from "./UnitSlaPolicyPane
 import{TeamAvailabilityPanel,type TeamAvailabilityClient}from"./TeamAvailabilityPanel.js";
 import{UnitOperationalTimezonePanel,type UnitOperationalTimezoneClient}from"./UnitOperationalTimezonePanel.js";
 import{StaffSchedulePanel,type StaffScheduleClient}from"./StaffSchedulePanel.js";
+import{UnitAssignmentPolicyPanel,type UnitAssignmentPolicyClient}from"./UnitAssignmentPolicyPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -22,17 +23,18 @@ type SessionState =
 
 export type NavigationState = { readonly blocked: boolean; readonly dirty: boolean };
 type ModuleId = "INBOX" | "TEAM_AVAILABILITY" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "UNIT_OPERATIONAL_TIMEZONE" | "OVERVIEW";
-type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy" | "unit-operational-timezone" | "unit-shift-schedule";
+type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy" | "unit-assignment-policy" | "unit-operational-timezone" | "unit-shift-schedule";
 const emptyNavigationState: NavigationState = { blocked: false, dirty: false };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  unitMembershipClient=apiClient,slaPolicyClient=apiClient,teamAvailabilityClient=apiClient,operationalTimezoneClient=apiClient,staffScheduleClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
+  unitMembershipClient=apiClient,slaPolicyClient=apiClient,assignmentPolicyClient=apiClient,teamAvailabilityClient=apiClient,operationalTimezoneClient=apiClient,staffScheduleClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
   retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
   readonly unitMembershipClient?:UnitMembershipClient;
   readonly slaPolicyClient?:UnitSlaPolicyClient;
+  readonly assignmentPolicyClient?:UnitAssignmentPolicyClient;
   readonly teamAvailabilityClient?:TeamAvailabilityClient;
   readonly operationalTimezoneClient?:UnitOperationalTimezoneClient;
   readonly staffScheduleClient?:StaffScheduleClient;
@@ -58,7 +60,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     async getStaffSchedule(unitId,userId){const value=await apiClient.getStaffSchedule(unitId,userId);return value?{...value,weeklySlots:[...value.weeklySlots],exceptions:value.exceptions.map(exception=>({date:exception.date,kind:exception.type,slots:exception.type==="REPLACE"?[...exception.slots]:[]}))}:null},
     async setStaffSchedule(unitId,userId,input,key){const value=await apiClient.setStaffSchedule(unitId,userId,{...input,exceptions:input.exceptions.map(exception=>exception.kind==="CLOSED"?{date:exception.date,type:"CLOSED" as const}:{date:exception.date,type:"REPLACE" as const,slots:exception.slots})},key);return{...value,weeklySlots:[...value.weeklySlots],exceptions:value.exceptions.map(exception=>({date:exception.date,kind:exception.type,slots:exception.type==="REPLACE"?[...exception.slots]:[]}))}},
   },[staffScheduleClient]);
-  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships","unit-sla-policy","unit-operational-timezone","unit-shift-schedule"] as const)
+  const navigationReporters=useMemo(()=>Object.fromEntries((["inbox","routing","invitation","administration","unit-memberships","unit-sla-policy","unit-assignment-policy","unit-operational-timezone","unit-shift-schedule"] as const)
     .map(panel=>[panel,(state:NavigationState)=>setNavigationStates(current=>{
       const previous=current[panel];if(previous?.blocked===state.blocked&&previous.dirty===state.dirty)return current;
       return {...current,[panel]:state};
@@ -128,7 +130,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const teamAvailabilityUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="availability.supervise"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
   const timezoneUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="unit_timezone.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId))||g.permission==="unit_timezone.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
   const manageableTimezoneUnitIds=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="unit_timezone.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId);
-  const shiftUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>(g.permission==="shift.read"||g.permission==="shift.manage")&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
+  const shiftUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="shift.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
   const manageableShiftUnitIds=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="shift.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId);
   const canReadRouting=currentUser.grants.some(grant=>grant.permission==="inbound.routing.read"&&grant.scope==="TENANT");
   const modules:readonly {id:ModuleId;label:string}[]=[
@@ -143,7 +145,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   ];
   const activeModule=modules.some(module=>module.id===selectedModule)?selectedModule!:modules[0]!.id;
   const activePanels:readonly PanelId[]=activeModule==="INBOX"?["inbox"]:activeModule==="ROUTING"?["routing"]:
-    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:activeModule==="UNIT_SLA_POLICY"?["unit-sla-policy"]:activeModule==="UNIT_OPERATIONAL_TIMEZONE"?["unit-operational-timezone","unit-shift-schedule"]:[];
+    activeModule==="TENANT_ACCESS"?["invitation","administration"]:activeModule==="UNIT_MEMBERSHIPS"?["unit-memberships"]:activeModule==="UNIT_SLA_POLICY"?["unit-sla-policy"]:activeModule==="UNIT_OPERATIONAL_TIMEZONE"?["unit-operational-timezone","unit-shift-schedule","unit-assignment-policy"]:[];
   const activeNavigationState=Object.entries(navigationStates).filter(([key])=>activePanels.includes(key as PanelId))
     .reduce<NavigationState>((state,[,value])=>({blocked:state.blocked||value.blocked,dirty:state.dirty||value.dirty}),emptyNavigationState);
   function navigate(moduleId:ModuleId):void{
@@ -184,6 +186,9 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     {activeModule==="UNIT_OPERATIONAL_TIMEZONE"&&shiftUnits.length>0&&<StaffSchedulePanel client={scheduleClient} units={shiftUnits}
       manageableUnitIds={manageableShiftUnitIds} onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters["unit-shift-schedule"]}/>}
+    {activeModule==="UNIT_OPERATIONAL_TIMEZONE"&&shiftUnits.length>0&&<UnitAssignmentPolicyPanel client={assignmentPolicyClient} units={shiftUnits}
+      manageableUnitIds={manageableShiftUnitIds} onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
+      onNavigationStateChange={navigationReporters["unit-assignment-policy"]}/>}
     {activeModule==="ROUTING"&&canReadRouting&&
       <RoutingRequiredPanel client={routingClient}
         canResolve={currentUser.grants.some(grant=>grant.permission==="inbound.routing.resolve"&&grant.scope==="TENANT")}

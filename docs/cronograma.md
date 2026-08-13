@@ -706,6 +706,21 @@ availability, handoffs, conversations e service cases permaneceram idênticos. A
 frontend, overlay 5/5 e E2E completo verde. O corte não aplica enforcement em claim, transferência ou
 takeover, não executa scheduler e não realizou deploy, Meta ou Hermes.
 
+Checkpoint local incremental em 2026-08-13, migration `0062`: cada unidade recebeu uma política
+versionada e idempotente com os modos `OBSERVE` e `ENFORCE_NEW_ASSIGNMENTS`. A ativação exige fuso
+operacional e escala vigente para todos os integrantes operacionais. No modo de enforcement, somente
+novas atribuições são condicionadas ao estado `IN_SHIFT`: o claim revalida o próprio atendente e a
+transferência filtra e revalida o destino na mesma operação canônica. Atendimentos já ativos,
+availability, envio, resolução e devolução à fila não são alterados.
+
+O takeover de supervisão permaneceu com o contrato anterior e não é condicionado pela escala neste
+corte; ele continua sujeito às verificações normais de disponibilidade, capacidade, autorização,
+concorrência e auditoria. A jornada OIDC provou ativação e desativação pelo gestor com um POST por
+confirmação, negação do claim fora do turno sem retirar o atendimento da fila e ausência de efeitos
+outbound. A cadeia limpa `0001`–`0062` e os gates integrados passaram: 112 testes core, 91 da API, 32
+do cliente, 184 do frontend, overlay 5/5 e E2E completo verde. Não foi implementado scheduler nem
+executado deploy, Meta ou Hermes.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

@@ -16,12 +16,16 @@ export class InboxHandoffRequestError extends Error {
     }
     if (["HANDOFF_REQUEUE_CONFLICT","HANDOFF_REQUEUE_IDEMPOTENCY_CONFLICT","HANDOFF_REQUEUE_PENDING_OUTBOUND"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
     if (["HANDOFF_REOPEN_CONFLICT","HANDOFF_REOPEN_IDEMPOTENCY_CONFLICT"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
-    if (["HANDOFF_TRANSFER_CONFLICT","HANDOFF_TRANSFER_IDEMPOTENCY_CONFLICT","ASSIGNEE_NOT_ELIGIBLE","ASSIGNEE_NOT_AVAILABLE"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
-    if (["HANDOFF_TAKEOVER_CONFLICT","HANDOFF_TAKEOVER_IDEMPOTENCY_CONFLICT","HANDOFF_TAKEOVER_PENDING_OUTBOUND","ASSIGNEE_NOT_AVAILABLE"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
+    if (["HANDOFF_TRANSFER_CONFLICT","HANDOFF_TRANSFER_IDEMPOTENCY_CONFLICT","ASSIGNEE_NOT_ELIGIBLE","ASSIGNEE_NOT_AVAILABLE","ASSIGNEE_OUTSIDE_SHIFT"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
+    if (["HANDOFF_TAKEOVER_CONFLICT","HANDOFF_TAKEOVER_IDEMPOTENCY_CONFLICT","HANDOFF_TAKEOVER_PENDING_OUTBOUND","ASSIGNEE_NOT_AVAILABLE","ASSIGNEE_OUTSIDE_SHIFT"].includes(code)) throw new InboxHandoffRequestError(409,"HANDOFF_CONFLICT");
     throw error;
   }
 
   static notFound(): InboxHandoffRequestError {
     return new InboxHandoffRequestError(404, "RESOURCE_NOT_FOUND");
+  }
+
+  static outsideShift(): InboxHandoffRequestError {
+    return new InboxHandoffRequestError(409, "ASSIGNMENT_OUTSIDE_SHIFT");
   }
 }

@@ -147,6 +147,19 @@ A cadeia limpa `0001`–`0061` passou com 110 testes core, 84 da API, 31 do clie
 overlay 5/5 e execução E2E completa verde. Este checkpoint não implementa enforcement de claim,
 transferência ou takeover, não altera disponibilidade e não executa scheduler, deploy, Meta ou Hermes.
 
+Checkpoint local `0062`, validado em 2026-08-13: a política por unidade alterna de forma versionada e
+idempotente entre `OBSERVE` e `ENFORCE_NEW_ASSIGNMENTS`. O segundo modo exige turno `IN_SHIFT` apenas
+para novos claims e novos destinos de transferência; não redistribui atendimentos ativos, não altera
+availability e não interfere em envio, resolução ou devolução à fila. O takeover de supervisão não
+foi alterado e permanece fora do enforcement de escala neste corte, sujeito às regras existentes de
+disponibilidade, capacidade, autorização, concorrência e auditoria.
+
+A cadeia de migrations `0001`–`0062` passou limpa. Os resultados registrados são 112 testes core, 91
+da API, 32 do cliente, 184 do frontend, overlay 5/5 e execução E2E OIDC completa verde. O navegador
+comprovou ativação e desativação com um POST por confirmação, claim fora do turno negado com o estado
+operacional preservado e zero outbound, Hermes ou Meta. Este checkpoint não inclui scheduler e não
+realizou deploy ou conexão com contas reais.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:

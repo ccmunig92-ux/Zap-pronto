@@ -169,12 +169,30 @@ try {
   assert.match(firstRun, /applied 0059_unit_operational_timezone\.sql/);
   assert.match(firstRun, /applied 0060_unit_shift_schedule\.sql/);
   assert.match(firstRun, /applied 0061_effective_staff_shift\.sql/);
+  assert.match(firstRun, /applied 0062_unit_assignment_shift_enforcement\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
   try {
     const migrations = await verify.query("SELECT filename FROM schema_migrations ORDER BY filename");
     assert.deepEqual(migrations.rows.map((row) => row.filename), migrationFiles);
+    const assignmentPolicyUpgrade=await verify.query(`SELECT
+      (SELECT count(*)::integer FROM unit_assignment_policies) policy_count,
+      (SELECT count(*)::integer FROM units) unit_count,
+      NOT EXISTS(SELECT 1 FROM unit_assignment_policies WHERE mode<>'OBSERVE' OR version<>1) defaults_observe,
+      has_function_privilege('zap_pronto_api','get_unit_assignment_policy(uuid)','EXECUTE') get_api,
+      has_function_privilege('zap_pronto_api','set_unit_assignment_policy(uuid,text,integer,text,text)','EXECUTE') set_api,
+      has_function_privilege('zap_pronto_worker','get_unit_assignment_policy(uuid)','EXECUTE') get_worker,
+      has_function_privilege('zap_pronto_api','evaluate_unit_staff_shift_internal(uuid,uuid,uuid,timestamptz)','EXECUTE') evaluator_api,
+      has_function_privilege('zap_pronto_api','assert_new_assignment_shift_internal(uuid,uuid)','EXECUTE') assignment_internal_api,
+      has_function_privilege('zap_pronto_api','assert_actor_new_claim_shift(uuid)','EXECUTE') claim_gate_api,
+      has_table_privilege('zap_pronto_api','unit_assignment_policies','SELECT') table_api,
+      (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='unit_assignment_policies'::regclass) rls_forced,
+      pg_get_functiondef('transfer_inbox_handoff(uuid,integer,uuid,text,text,text)'::regprocedure) LIKE '%assert_new_assignment_shift_internal%' transfer_gated,
+      pg_get_functiondef('takeover_inbox_handoff(uuid,integer,text,text)'::regprocedure) NOT LIKE '%assert_new_assignment_shift_internal%' takeover_unchanged`);
+    assert.deepEqual(assignmentPolicyUpgrade.rows[0],{policy_count:assignmentPolicyUpgrade.rows[0].unit_count,
+      unit_count:assignmentPolicyUpgrade.rows[0].unit_count,defaults_observe:true,get_api:true,set_api:true,get_worker:false,
+      evaluator_api:false,assignment_internal_api:false,claim_gate_api:true,table_api:false,rls_forced:true,transfer_gated:true,takeover_unchanged:true});
     const transferReplayUpgrade=await verify.query(`SELECT
       (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
         AND table_name='handoff_transfer_commands' AND column_name='unit_id') unit_nullable,
