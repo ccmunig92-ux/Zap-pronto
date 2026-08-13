@@ -320,8 +320,8 @@ try {
     const identityUpgrade = await verify.query(`SELECT
       (SELECT count(*)::integer FROM app_roles) AS role_count,
       (SELECT count(*)::integer FROM app_permissions) AS permission_count,
-      EXISTS(SELECT 1 FROM app_permissions WHERE permission = 'sla_policy.read') AS sla_policy_read_exists,
-      EXISTS(SELECT 1 FROM app_permissions WHERE permission = 'sla_policy.manage') AS sla_policy_manage_exists,
+      EXISTS(SELECT 1 FROM app_permissions WHERE code = 'sla_policy.read') AS sla_policy_read_exists,
+      EXISTS(SELECT 1 FROM app_permissions WHERE code = 'sla_policy.manage') AS sla_policy_manage_exists,
       (SELECT count(*)::integer FROM oidc_providers) AS provider_count,
       (SELECT count(*)::integer FROM user_oidc_identities) AS identity_count,
       (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count,
