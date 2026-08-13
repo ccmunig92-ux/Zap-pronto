@@ -97,6 +97,20 @@ mutation. Evidência local até aqui: 98 testes core, 79 da API, 29 do cliente, 
 overlay, `typecheck:all`, `test:all`, `api:check`, build, diff-check e 21/21 jornadas E2E OIDC em
 runtime verdes. Banco limpo/upgrade e CI remoto do 0058 ainda precisam passar.
 
+## Evidência incremental 0059
+
+A migration `0059_unit_operational_timezone.sql` adiciona configuração IANA explícita, versionada e
+unitária do fuso operacional, sem criar turnos, recorrência ou enforcement de claim. Supervisores
+autorizados recebem leitura; somente gerentes e administradores com `unit_timezone.manage` recebem o
+editor. A ausência continua neutra e a UI não presume fuso. O módulo lazy `Escalas` confirma que a
+mudança apenas prepara escalas futuras e não altera atendimentos ou responsáveis.
+
+Os gates locais verdes incluem 101 testes core, 81 da API, 31 do cliente, 168 do frontend, 5 do
+overlay, `typecheck:all`, `test:all`, `api:check`, build, banco limpo, upgrade e 22/22 jornadas OIDC.
+O controlador executa a jornada `America/Sao_Paulo` isoladamente e comprova uma versão, um comando,
+uma auditoria `UNIT_OPERATIONAL_TIMEZONE_CONFIGURED` e zero outbound, Hermes ou Meta; o reseed limpa
+esse estado antes do bloco residual. Isso não homologa staging, IdP externo, Meta, Hermes ou deploy.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:

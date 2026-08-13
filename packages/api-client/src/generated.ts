@@ -528,6 +528,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/units/{unitId}/operational-timezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getUnitOperationalTimezone"];
+        put?: never;
+        post: operations["setUnitOperationalTimezone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -651,11 +667,11 @@ export interface operations {
                             role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                         }[];
                         grants: ({
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
                             /** @enum {string} */
                             scope: "TENANT";
                         } | {
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
                             /** @enum {string} */
                             scope: "UNIT";
                             /** Format: uuid */
@@ -2123,11 +2139,11 @@ export interface operations {
                                 role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                             }[];
                             grants: ({
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
                                 /** @enum {string} */
                                 scope: "TENANT";
                             } | {
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
                                 /** @enum {string} */
                                 scope: "UNIT";
                                 /** Format: uuid */
@@ -5725,6 +5741,284 @@ export interface operations {
                             priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
                             targetMinutes: number;
                         }[];
+                        replayed: boolean;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    getUnitOperationalTimezone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unitId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        unitId: string;
+                        timeZone: string;
+                        version: number;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    setUnitOperationalTimezone: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
+            path: {
+                unitId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedVersion: number;
+                    timeZone: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        unitId: string;
+                        timeZone: string;
+                        version: number;
+                        /** Format: date-time */
+                        updatedAt: string;
                         replayed: boolean;
                     };
                 };

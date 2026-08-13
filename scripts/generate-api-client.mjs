@@ -50,6 +50,7 @@ if(document.paths?.["/v1/inbox/conversations/{conversationId}/messages/{messageI
 if(document.paths?.["/v1/inbox/availability"]?.get?.operationId!=="getInboxAvailability"
   ||document.paths?.["/v1/inbox/availability"]?.post?.operationId!=="setInboxAvailability")throw new Error("OPENAPI_INBOX_AVAILABILITY_MISSING");
 if(document.paths?.["/v1/inbox/sla-alerts"]?.get?.operationId!=="listInboxSlaAlerts"||document.paths?.["/v1/inbox/sla-alerts/{handoffId}/acknowledge"]?.post?.operationId!=="acknowledgeInboxSlaAlert")throw new Error("OPENAPI_INBOX_SLA_ALERTS_MISSING");
+if(document.paths?.["/v1/units/{unitId}/operational-timezone"]?.get?.operationId!=="getUnitOperationalTimezone"||document.paths?.["/v1/units/{unitId}/operational-timezone"]?.post?.operationId!=="setUnitOperationalTimezone")throw new Error("OPENAPI_UNIT_OPERATIONAL_TIMEZONE_MISSING");
 const source = `// Generated from the canonical OpenAPI document. Do not edit manually.\n${astToString(await openapiTS(document))}`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8").catch(() => "");

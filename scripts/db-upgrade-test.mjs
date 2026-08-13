@@ -166,6 +166,7 @@ try {
   assert.match(firstRun, /applied 0056_unit_sla_policy\.sql/);
   assert.match(firstRun, /applied 0057_sla_policy_idempotency_serialization\.sql/);
   assert.match(firstRun, /applied 0058_team_availability_projection\.sql/);
+  assert.match(firstRun, /applied 0059_unit_operational_timezone\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
