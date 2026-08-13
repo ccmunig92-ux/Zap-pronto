@@ -18,6 +18,7 @@ import { registerInboxTeamAvailabilityRoute } from "./routes/inbox-team-availabi
 import { registerInboxSlaAlertRoutes } from "./routes/inbox-sla-alerts.js";
 import { registerUnitSlaPolicyRoutes } from "./routes/unit-sla-policy.js";
 import { registerUnitOperationalTimezoneRoutes } from "./routes/unit-operational-timezone.js";
+import { registerStaffScheduleRoutes } from "./routes/staff-schedules.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -97,6 +98,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerInboxSlaAlertRoutes(app, options.pool ?? unavailablePool);
   registerUnitSlaPolicyRoutes(app, options.pool ?? unavailablePool);
   registerUnitOperationalTimezoneRoutes(app, options.pool ?? unavailablePool);
+  registerStaffScheduleRoutes(app, options.pool ?? unavailablePool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }

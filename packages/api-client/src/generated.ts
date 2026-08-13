@@ -544,6 +544,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/units/{unitId}/staff-schedules/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listShiftMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/units/{unitId}/staff-schedules/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getStaffSchedule"];
+        put?: never;
+        post: operations["setStaffSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -667,11 +699,11 @@ export interface operations {
                             role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                         }[];
                         grants: ({
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage" | "shift.read" | "shift.manage";
                             /** @enum {string} */
                             scope: "TENANT";
                         } | {
-                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
+                            permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage" | "shift.read" | "shift.manage";
                             /** @enum {string} */
                             scope: "UNIT";
                             /** Format: uuid */
@@ -2139,11 +2171,11 @@ export interface operations {
                                 role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                             }[];
                             grants: ({
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage" | "shift.read" | "shift.manage";
                                 /** @enum {string} */
                                 scope: "TENANT";
                             } | {
-                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage";
+                                permission: "tenant.users.manage" | "unit.members.manage" | "handoff.read" | "handoff.history.read" | "handoff.claim" | "handoff.resolve" | "handoff.reopen" | "handoff.requeue" | "handoff.transfer" | "handoff.takeover" | "conversation.read" | "conversation.supervise" | "quote.read" | "quote.review" | "quote.publish" | "medical_order.read" | "medical_order.review" | "inbound.routing.read" | "inbound.routing.resolve" | "message.send" | "message.cancel" | "sla_alert.read" | "sla_alert.acknowledge" | "sla_policy.read" | "sla_policy.manage" | "availability.supervise" | "unit_timezone.read" | "unit_timezone.manage" | "shift.read" | "shift.manage";
                                 /** @enum {string} */
                                 scope: "UNIT";
                                 /** Format: uuid */
@@ -6016,6 +6048,489 @@ export interface operations {
                         /** Format: uuid */
                         unitId: string;
                         timeZone: string;
+                        version: number;
+                        /** Format: date-time */
+                        updatedAt: string;
+                        replayed: boolean;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    listShiftMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unitId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** Format: uuid */
+                            userId: string;
+                            displayName: string;
+                            role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
+                        }[];
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    getStaffSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                unitId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        unitId: string;
+                        /** Format: uuid */
+                        userId: string;
+                        timeZone: string;
+                        /** Format: date */
+                        effectiveFrom: string;
+                        weeklySlots: {
+                            weekday: number;
+                            start: string;
+                            end: string;
+                        }[];
+                        exceptions: ({
+                            /** Format: date */
+                            date: string;
+                            /** @enum {string} */
+                            type: "CLOSED";
+                        } | {
+                            /** Format: date */
+                            date: string;
+                            /** @enum {string} */
+                            type: "REPLACE";
+                            slots: {
+                                start: string;
+                                end: string;
+                            }[];
+                        })[];
+                        version: number;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    setStaffSchedule: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
+            path: {
+                unitId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedVersion: number;
+                    /** Format: date */
+                    effectiveFrom: string;
+                    weeklySlots: {
+                        weekday: number;
+                        start: string;
+                        end: string;
+                    }[];
+                    exceptions: ({
+                        /** Format: date */
+                        date: string;
+                        /** @enum {string} */
+                        type: "CLOSED";
+                    } | {
+                        /** Format: date */
+                        date: string;
+                        /** @enum {string} */
+                        type: "REPLACE";
+                        slots: {
+                            start: string;
+                            end: string;
+                        }[];
+                    })[];
+                };
+            };
+        };
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        unitId: string;
+                        /** Format: uuid */
+                        userId: string;
+                        timeZone: string;
+                        /** Format: date */
+                        effectiveFrom: string;
+                        weeklySlots: {
+                            weekday: number;
+                            start: string;
+                            end: string;
+                        }[];
+                        exceptions: ({
+                            /** Format: date */
+                            date: string;
+                            /** @enum {string} */
+                            type: "CLOSED";
+                        } | {
+                            /** Format: date */
+                            date: string;
+                            /** @enum {string} */
+                            type: "REPLACE";
+                            slots: {
+                                start: string;
+                                end: string;
+                            }[];
+                        })[];
                         version: number;
                         /** Format: date-time */
                         updatedAt: string;

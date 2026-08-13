@@ -53,6 +53,7 @@
       ,"./domain/team-availability": { "types": "./src/domain/team-availability.ts", "default": "./dist/domain/team-availability.js" }
       ,"./domain/sla-policy": { "types": "./src/domain/sla-policy.ts", "default": "./dist/domain/sla-policy.js" }
       ,"./domain/unit-operational-timezone": { "types": "./src/domain/unit-operational-timezone.ts", "default": "./dist/domain/unit-operational-timezone.js" }
+      ,"./domain/shift-schedule": { "types": "./src/domain/shift-schedule.ts", "default": "./dist/domain/shift-schedule.js" }
   },
   "types": "./src/index.ts"
 }

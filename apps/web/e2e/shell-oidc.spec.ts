@@ -253,6 +253,14 @@ test.describe("shell OIDC real", () => {
     expect(posts).toHaveLength(1);expect(mutations).toEqual([`POST ${posts[0]}`]);expect(externalHosts).toEqual([]);
   });
 
+  test("gestor publica uma escala semanal observacional uma única vez",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a escala local.");await login(page,account("MANAGER"));const posts:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);if(request.method()==="POST"&&/^\/v1\/units\/[^/]+\/staff-schedules\/[^/]+$/u.test(url.pathname))posts.push(url.pathname)});
+    const futureDate=(days:number)=>new Date(Date.now()+days*86_400_000).toISOString().slice(0,10),effectiveFrom=futureDate(7),exceptionDate=futureDate(10);
+    await openModule(page,"Escalas");await expect(page.getByRole("heading",{name:"Grade semanal e exceções"})).toBeVisible();await page.getByLabel("Integrante").selectOption({label:"Atendente Local · ATTENDANT"});await expect(page.getByText("Nenhuma escala configurada. O fuso será definido pelo servidor a partir da unidade.")).toBeVisible();
+    await page.getByLabel("Vigência a partir de").fill(effectiveFrom);await page.getByRole("button",{name:"Adicionar período"}).click();await page.getByLabel("Início").fill("08:00");await page.getByLabel("Fim").fill("12:00");await page.getByRole("button",{name:"Adicionar exceção"}).click();await page.getByLabel("Data").fill(exceptionDate);await page.getByRole("button",{name:"Salvar escala"}).click();const saved=page.waitForResponse(response=>response.request().method()==="POST"&&/^\/v1\/units\/[^/]+\/staff-schedules\/[^/]+$/u.test(new URL(response.url()).pathname));await page.getByRole("button",{name:"Confirmar alteração"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await saved).status()).toBe(200);await expect(page.getByText("Escala semanal atualizada.")).toBeVisible();await expect(page.getByText(/Fuso da versão:/)).toBeVisible();await expect(page.getByText("America/Sao_Paulo",{exact:true})).toBeVisible();
+    await page.reload();await openModule(page,"Escalas");await page.getByLabel("Integrante").selectOption({label:"Atendente Local · ATTENDANT"});await expect(page.getByText(/Versão 1/)).toBeVisible();await expect(page.getByLabel("Vigência a partir de")).toHaveValue(effectiveFrom);expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);
+  });
+
   test("gestor consulta disponibilidade da equipe sob demanda sem mutações",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a equipe local.");await login(page,account("MANAGER"));
     const gets:string[]=[];const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
