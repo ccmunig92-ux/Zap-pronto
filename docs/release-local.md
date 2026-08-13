@@ -184,8 +184,8 @@ paginação, severidade, reconhecimento, política SLA, claim, transferência e 
 
 Os gates locais passaram com a cadeia limpa `0001`–`0064`, 112 testes core, 91 da API, 32 do cliente,
 185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
-1/1. Nenhum transporte outbound, Hermes, Meta, staging, merge ou deploy foi executado. O CI remoto do
-novo HEAD permanece pendente.
+1/1. Nenhum transporte outbound, Hermes, Meta, staging, merge ou deploy foi executado. Os runs remotos
+de push `31685855991` e pull request `31685860112` passaram integralmente, incluindo banco limpo e upgrade.
 
 ## Gates obrigatórios
 
@@ -221,8 +221,8 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **candidato local 0064 validado**. O candidato atual
-está no branch `codex/phase-4-attendant-availability`, com PR draft e CI remoto pendente para o novo HEAD. A promoção à `main` exige PR,
+Com os gates locais e remotos verdes, a declaração permitida é **candidato 0064 validado**. O candidato atual
+está no branch `codex/phase-4-attendant-availability`, com PR draft. A promoção à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
 force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e

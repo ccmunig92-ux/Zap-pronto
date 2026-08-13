@@ -743,8 +743,8 @@ transferência ou takeover.
 
 Os gates locais da cadeia limpa `0001`–`0064` passaram: 112 testes core, 91 da API, 32 do cliente,
 185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
-1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging, merge ou deploy. O CI remoto
-do novo HEAD permanece pendente.
+1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging, merge ou deploy. Os runs remotos
+de push `31685855991` e pull request `31685860112` passaram integralmente, incluindo banco limpo e upgrade.
 
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
