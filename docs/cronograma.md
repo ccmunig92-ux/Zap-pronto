@@ -601,12 +601,14 @@ automatizados, 17/17 jornadas E2E OIDC, banco limpo, upgrade legado, `typecheck:
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
-2. Publicar o mesmo artefato imutável em staging e preparar o
-   environment `oidc-homologation` com reviewer obrigatório, política restrita à `main`, domínio HTTPS,
-   IdP real, segredos escopados e duas contas sintéticas exclusivas; executar a jornada real de navegador
-   e registrar SHA e execução como evidência.
-3. Expor o primeiro fluxo vertical da inbox somente depois do gate externo, reutilizando contratos,
-   API e domínio canônicos; a UI continuará sem acesso direto ao banco.
+2. O environment `oidc-homologation` está protegido no GitHub com reviewer obrigatório distinto,
+   prevenção de autoaprovação, bypass administrativo desabilitado e deployments restritos à branch
+   `main`. Preservar essas regras e não cadastrar valores sintéticos como configuração externa.
+3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
+   HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
+   sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
+   execução como evidência. A Inbox canônica já está implementada até a migration `0050`; staging deve
+   homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da
 fase correspondente. A interface local e a Inbox já estão implementadas e permanecem restritas ao
