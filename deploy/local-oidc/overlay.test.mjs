@@ -72,6 +72,8 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   assert.match(seed, /local-e2e-routing-account'[\s\S]*NULL,'UNROUTED','MULTIPLE_ACTIVE_UNITS'/);
   assert.match(seed, /DELETE FROM inbound_routing_commands[\s\S]*DELETE FROM inbound_channel_events/);
   assert.match(seed,/DELETE FROM attendant_availability_commands[\s\S]*INSERT INTO attendant_unit_availability[\s\S]*'AVAILABLE',100,NULL,NULL,1/);
+  assert.match(seed,/DELETE FROM handoff_sla_acknowledge_commands[\s\S]*SLA_ALERT_ACKNOWLEDGED[\s\S]*DELETE FROM handoff_sla_acknowledgements/);
+  assert.match(seed,/sla_due_at=NULL[\s\S]*queued_at=clock_timestamp\(\)-interval '30 minutes'/);
 });
 
 test("controlador isola volumes pelo project name local fixo", async () => {
@@ -107,6 +109,9 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/transfere atendimento entre dois atendentes/);
   assert.match(controller,/LOCAL_OIDC_HANDOFF_TRANSFER_STATE_INVALID/);
   assert.match(controller,/--grep','gestor consulta atendimento encerrado'/);
+  assert.match(controller,/--grep','gestor reconhece alerta de SLA uma única vez'/);
+  assert.match(controller,/handoff_sla_acknowledgements[\s\S]*handoff_sla_acknowledge_commands[\s\S]*SLA_ALERT_ACKNOWLEDGED/);
+  assert.match(controller,/LOCAL_OIDC_SLA_ALERT_ACKNOWLEDGEMENT_STATE_INVALID/);
   assert.match(controller,/LOCAL_OIDC_HANDOFF_HISTORY_MUTATED_STATE/);
   assert.match(controller,/--grep','gestor reabre atendimento encerrado uma única vez'/);
   assert.match(controller,/handoff_reopen_commands[\s\S]*HANDOFF_REOPENED[\s\S]*handoff\.reopened[\s\S]*MANAGER_REOPENED[\s\S]*LOCAL_OIDC_HANDOFF_REOPEN_STATE_INVALID/);

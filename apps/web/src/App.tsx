@@ -153,6 +153,8 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       units={inboxUnits}
       supervisedUnitIds={currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="handoff.takeover"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId)}
       historyUnitIds={currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="handoff.history.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId)}
+      slaAlertReadUnitIds={currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="sla_alert.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId)}
+      slaAlertAcknowledgeUnitIds={currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="sla_alert.acknowledge"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId)}
       onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.inbox}/>}
     </div>

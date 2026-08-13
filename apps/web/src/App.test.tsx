@@ -14,6 +14,7 @@ function emptyInboxClient(overrides:Partial<InboxClient>={}):InboxClient{return{
   listInboxHandoffTransferCandidates:async()=>({items:[]}),transferInboxHandoff:async()=>({}),takeoverInboxHandoff:async()=>({}),
   listActiveInboxHandoffs:async()=>({items:[]}),listSupervisedInboxHandoffs:async()=>({items:[]}),
   listResolvedInboxHandoffs:async()=>({items:[]}),getInboxConversation:async()=>{throw new Error("not called")},
+  listInboxSlaAlerts:async()=>({items:[]}),acknowledgeInboxSlaAlert:async()=>{throw new Error("not called")},
   listInboxConversationMessages:async()=>({items:[]}),sendHumanTextMessage:async()=>({}),cancelHumanTextMessage:async()=>({}),...overrides};}
 
 afterEach(cleanup);
@@ -90,6 +91,7 @@ describe("authenticated shell", () => {
       grants:[{permission:"inbound.routing.read" as const,scope:"TENANT" as const}]}}}}
       routingClient={{listRoutingRequired,async resolveRoutingRequired(){return{replayed:false}}}}/>);
     expect(await screen.findByRole("heading",{name:"Aguardando unidade"})).toBeTruthy();await vi.waitFor(()=>expect(listRoutingRequired).toHaveBeenCalledOnce());});
+  it("deriva leitura e reconhecimento de alertas SLA de grants unitários explícitos",async()=>{const unitId="33333333-3333-4333-8333-333333333333",list=vi.fn(async()=>({items:[{handoffId:"10000000-0000-4000-8000-000000000001",unitId,priority:"HIGH"as const,severity:"MISSING_SLA"as const,slaDueAt:null,queuedAt:"2026-08-12T18:00:00.000Z",ageSeconds:600,availableCapacity:2,acknowledgedAt:null,version:1}]}));render(<App client={{async getCurrentUser(){return{user:{id:"22222222-2222-4222-8222-222222222222",email:"supervisor@test",displayName:"Supervisor"},tenant:{id:"11111111-1111-4111-8111-111111111111",name:"Clínica"},memberships:[{unitId,unitCode:"CENTRO",unitName:"Centro",role:"SUPERVISOR"as const}],grants:[{permission:"conversation.read"as const,scope:"UNIT"as const,unitId},{permission:"sla_alert.read"as const,scope:"UNIT"as const,unitId},{permission:"sla_alert.acknowledge"as const,scope:"UNIT"as const,unitId}]}}}} inboxClient={emptyInboxClient({listInboxSlaAlerts:list})}/>);expect(await screen.findByRole("heading",{name:"Alertas de SLA"})).toBeTruthy();expect(screen.getAllByText("Sem prazo de SLA")).toHaveLength(2);expect(screen.getByRole("button",{name:"Reconhecer alerta"})).toBeTruthy();expect(list).toHaveBeenCalledWith({unitId,limit:25})});
   it("mounts only the highest-priority authorized module and starts inactive clients only after navigation",async()=>{
     const listQueue=vi.fn(async()=>({items:[]}));const listActive=vi.fn(async()=>({items:[]}));
     const listRoutingRequired=vi.fn(async()=>({items:[]}));

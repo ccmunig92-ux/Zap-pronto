@@ -126,6 +126,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
   assert.deepEqual(policies.sort((left, right) => String(left).localeCompare(String(right))), [
     ["GET", "/v1/inbox/active", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/availability", "permission", "conversation.read", "unit"],
+    ["GET", "/v1/inbox/sla-alerts", "permission", "sla_alert.read", "unit"],
     ["GET", "/v1/inbox/conversations/:conversationId", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/conversations/:conversationId/messages", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/handoffs", "permission", "handoff.read", "unit"],
@@ -141,6 +142,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
     ["POST", "/v1/auth/invitations/accept", "preProvisioning", null, null],
     ["POST", "/v1/inbox/handoffs/:handoffId/claim", "permission", "handoff.claim", "unit"],
     ["POST", "/v1/inbox/availability", "permission", "conversation.read", "unit"],
+    ["POST", "/v1/inbox/sla-alerts/:handoffId/acknowledge", "permission", "sla_alert.acknowledge", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/requeue", "permission", "handoff.requeue", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/reopen", "permission", "handoff.reopen", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/resolve", "permission", "handoff.resolve", "unit"],
@@ -675,4 +677,28 @@ test("unit membership catalog denies missing unit permission before reading memb
   assert.equal(response.statusCode,403);assert.equal(response.headers["cache-control"],"no-store");
   assert.ok(!database.queries.some(query=>query.includes("list_unit_memberships")));
   await app.close();
+});
+
+test("SLA alerts expose an integer handoff version and map invalid input and conflicts",async()=>{
+  const unitId="33333333-3333-4333-8333-333333333333",handoffId="44444444-4444-4444-8444-444444444444";
+  let conflict=false;const queries:string[]=[];const pool:TenantTransactionPool={async connect(){return{async query(sql){queries.push(sql);
+    if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};
+    if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};
+    if(sql.includes("list_inbox_sla_alerts"))return{rows:[{handoffId,unitId,priority:"HIGH",slaStatus:"OVERDUE",slaDueAt:new Date("2026-08-12T10:00:00Z"),queuedAt:new Date("2026-08-12T09:00:00Z"),ageSeconds:3600,availableCapacity:1,acknowledgedAt:null,acknowledgementVersion:4}]};
+    if(sql.includes("resolve_inbox_sla_alert_ack_unit"))return{rows:[{unitId}]};
+    if(sql.includes("acknowledge_inbox_sla_alert")&&conflict)throw new Error("SLA_ALERT_ACKNOWLEDGEMENT_IDEMPOTENCY_CONFLICT");return{rows:[]};
+  },release(){}}}};const verifier={async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}};
+  const app=await buildApp({pool,identityVerifier:verifier});const headers={authorization:"Bearer token"};
+  const listed=await app.inject({method:"GET",url:`/v1/inbox/sla-alerts?unitId=${unitId}`,headers});assert.equal(listed.statusCode,200);assert.equal(listed.json().items[0].version,4);assert.equal(Number.isInteger(listed.json().items[0].version),true);
+  const invalid=await app.inject({method:"GET",url:`/v1/inbox/sla-alerts?unitId=${unitId}&cursor=not-a-cursor`,headers});assert.equal(invalid.statusCode,400);assert.equal(invalid.json().detail,"INVALID_REQUEST");
+  conflict=true;const rejected=await app.inject({method:"POST",url:`/v1/inbox/sla-alerts/${handoffId}/acknowledge`,headers:{...headers,"idempotency-key":"sla-conflict-key"},payload:{expectedVersion:4}});assert.equal(rejected.statusCode,409);assert.equal(rejected.json().detail,"SLA_ALERT_CONFLICT");
+  assert.ok(queries.some(sql=>sql.includes("resolve_inbox_sla_alert_ack_unit")));await app.close();
+});
+
+test("SLA acknowledgement resolver makes cross-unit and nonexistent ids equally invisible",async()=>{
+  const ids=["44444444-4444-4444-8444-444444444444","55555555-5555-4555-8555-555555555555"];
+  const resolverCalls:Array<readonly unknown[]>=[];const pool:TenantTransactionPool={async connect(){return{async query(sql,values){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("resolve_inbox_sla_alert_ack_unit")){resolverCalls.push(values??[]);return{rows:[{unitId:null}]}};return{rows:[]}},release(){}}}};
+  const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});
+  for(const id of ids){const response=await app.inject({method:"POST",url:`/v1/inbox/sla-alerts/${id}/acknowledge`,headers:{authorization:"Bearer token","idempotency-key":`ack-${id}`},payload:{expectedVersion:1}});assert.equal(response.statusCode,404);assert.equal(response.json().detail,"RESOURCE_NOT_FOUND");assert.doesNotMatch(response.body,/unit|tenant|permission/i)}
+  assert.equal(resolverCalls.length,2);assert.deepEqual(resolverCalls.map(values=>values[0]),ids);await app.close();
 });

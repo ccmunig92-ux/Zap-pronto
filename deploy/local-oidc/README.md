@@ -44,6 +44,11 @@ O harness também recria um atendimento sintético, faz um gestor assumir um ate
 supervisão e prova que somente a propriedade do handoff e da conversa muda: os estados permanecem
 ativos, há um comando, um audit, um outbox e duas transições canônicas, sem mensagem outbound,
 Hermes ou Meta. O fixture é restaurado depois da jornada.
+O mesmo atendimento é restaurado com SLA ausente e trinta minutos de fila para provar a operação de
+alertas. O gestor reconhece o alerta com clique duplo, o navegador emite exatamente um `POST` e, após
+reload, o reconhecimento continua visível. O controlador exige exatamente um acknowledgement, um
+comando idempotente e um audit `SLA_ALERT_ACKNOWLEDGED`, além de zero mensagem outbound, Hermes ou
+evento Meta/outbound. O seed remove essa evidência ao final e devolve o handoff à fila sintética.
 Na sequência do encerramento e da leitura histórica, o harness usa o mesmo episódio sintético para provar
 a reabertura unit-scoped pelo gestor. A operação preserva o handoff encerrado como histórico, cria exatamente
 um novo handoff em `QUEUED`, reabre caso e conversa em `WAITING_HUMAN`/`HUMAN_QUEUED`, registra um comando,
