@@ -24,6 +24,16 @@ INSERT INTO user_units (tenant_id,user_id,unit_id,role) VALUES
 ('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000012','90000000-0000-4000-8000-000000000002','UNIT_MANAGER')
 ON CONFLICT (tenant_id,user_id,unit_id) DO UPDATE SET role=EXCLUDED.role,status='ACTIVE',
 version=user_units.version+1,state_changed_at=clock_timestamp(),revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL;
+DELETE FROM attendant_availability_commands
+WHERE tenant_id='90000000-0000-4000-8000-000000000001'
+  AND unit_id='90000000-0000-4000-8000-000000000002'
+  AND user_id IN('90000000-0000-4000-8000-000000000010','90000000-0000-4000-8000-000000000011','90000000-0000-4000-8000-000000000012');
+INSERT INTO attendant_unit_availability(tenant_id,unit_id,user_id,status,max_active,pause_reason,paused_until,version,updated_at) VALUES
+('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000002','90000000-0000-4000-8000-000000000010','AVAILABLE',100,NULL,NULL,1,clock_timestamp()),
+('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000002','90000000-0000-4000-8000-000000000011','AVAILABLE',100,NULL,NULL,1,clock_timestamp()),
+('90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000002','90000000-0000-4000-8000-000000000012','AVAILABLE',100,NULL,NULL,1,clock_timestamp())
+ON CONFLICT(tenant_id,user_id,unit_id) DO UPDATE SET status='AVAILABLE',max_active=100,pause_reason=NULL,paused_until=NULL,
+version=1,updated_at=clock_timestamp();
 INSERT INTO oidc_providers (id,tenant_id,code,issuer,audience,organization_claim,organization_value,status,config_reference)
 VALUES ('90000000-0000-4000-8000-000000000020','90000000-0000-4000-8000-000000000001','local',:'oidc_issuer',
 'zap-pronto-local','org_id','local-tenant','ACTIVE','local-only://keycloak')

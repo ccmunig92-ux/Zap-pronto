@@ -598,6 +598,17 @@ pós-commit; o navegador confirma reload e replay divergente. Prova verde: 306/3
 automatizados, 17/17 jornadas E2E OIDC, banco limpo, upgrade legado, `typecheck:all`, OpenAPI/cliente,
 `build:all`, overlay Verify e `git diff --check`.
 
+Checkpoint local consolidado em 2026-08-12, migration `0051`: disponibilidade operacional do
+atendente passou a ser estado próprio por tenant, unidade e usuário, separado do lifecycle do
+vínculo. A Inbox permite `AVAILABLE`, `PAUSED` e `OFFLINE`, capacidade máxima e pausa operacional,
+com versão esperada, idempotência, reconciliação e horário local convertido para instante UTC
+canônico. Claim, transferência e takeover falham fechado quando o destino está indisponível ou sem
+capacidade; trabalho ativo impede pausa, saída ou redução incompatível. O seed OIDC restaura apenas
+as identidades sintéticas operacionais como disponíveis e a jornada real altera disponibilidade com
+duplo clique sem criar tráfego externo. Prova verde: 318/318 testes automatizados, 18/18 jornadas
+E2E OIDC, banco limpo, upgrade legado com privilégios 0051 verificados, `typecheck:all`,
+OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -610,7 +621,7 @@ automatizados, 17/17 jornadas E2E OIDC, banco limpo, upgrade legado, `typecheck:
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0050`; staging deve
+   execução como evidência. A Inbox canônica já está implementada até a migration `0051`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

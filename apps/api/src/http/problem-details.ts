@@ -7,6 +7,7 @@ import { RateLimitExceededError } from "./rate-limit.js";
 import { InboxHandoffRequestError } from "../routes/inbox-handoffs-errors.js";
 import { InboxRoutingRequiredError } from "../routes/inbox-routing-required-errors.js";
 import { InboxConversationRequestError } from "../routes/inbox-conversations-errors.js";
+import { AvailabilityError } from "../routes/inbox-availability.js";
 
 export function registerProblemDetailsHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
@@ -26,7 +27,8 @@ export function registerProblemDetailsHandler(app: FastifyInstance): void {
     if (error instanceof AuthenticationError || error instanceof IdentityProviderUnavailableError
       || error instanceof AuthorizationDeniedError || error instanceof AccountNotAssignedError
       || error instanceof InvitationRequestError || error instanceof InboxHandoffRequestError
-      || error instanceof InboxRoutingRequiredError || error instanceof InboxConversationRequestError) {
+      || error instanceof InboxRoutingRequiredError || error instanceof InboxConversationRequestError
+      || error instanceof AvailabilityError) {
       void reply.status(error.statusCode).type("application/problem+json").send({
         type: `urn:zap-pronto:error:${error.code.toLowerCase().replaceAll("_", "-")}`,
         title: error.statusCode === 401 ? "Unauthorized"

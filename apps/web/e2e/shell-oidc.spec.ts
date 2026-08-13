@@ -203,6 +203,20 @@ test.describe("shell OIDC real", () => {
     await expect(page.getByRole("heading", { name: "Convidar usuário" })).toHaveCount(0);
   });
 
+  test("atendente altera a própria disponibilidade na unidade selecionada",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar disponibilidade local.");await login(page,account("ATTENDANT"));
+    const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
+      if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+      if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
+    await page.reload();await expect(page.getByRole("heading",{name:"Minha disponibilidade"})).toBeVisible();
+    await expect(page.getByText(/Status:\s*Disponível/u)).toBeVisible();await page.getByRole("button",{name:"Alterar disponibilidade"}).click();
+    await page.getByLabel("Status da disponibilidade").selectOption("PAUSED");await page.getByLabel("Motivo da pausa").selectOption("BREAK");
+    await page.getByLabel("Máximo de atendimentos ativos").fill("7");const changed=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname==="/v1/inbox/availability");
+    await page.getByRole("button",{name:"Confirmar alteração"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await changed).status()).toBe(200);
+    await expect(page.getByText("Disponibilidade atualizada.")).toBeVisible();await expect(page.getByText(/Status:\s*Pausado/u)).toBeVisible();
+    expect(mutations).toEqual(["POST /v1/inbox/availability"]);expect(externalHosts).toEqual([]);
+  });
+
   test("inbound materializado permite claim e devolução segura à fila",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");await login(page,account("ATTENDANT"));
     const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
@@ -226,7 +240,7 @@ test.describe("shell OIDC real", () => {
     await page.getByRole("button",{name:"Assumir atendimento"}).click();const editor=page.getByRole("textbox",{name:"Mensagem"});await expect(editor).toBeVisible();await editor.fill("  draft preservado byte a byte\n");observeRefresh=true;
     const refresh=page.getByRole("button",{name:"Atualizar Inbox"});await refresh.evaluate((element:HTMLButtonElement)=>{element.click();element.click()});await expect(page.getByRole("button",{name:"Atualizando…"})).toBeVisible();await expect(refresh).toBeVisible();observeRefresh=false;
     await expect(editor).toHaveValue("  draft preservado byte a byte\n");expect(refreshGets.filter(path=>path==="/v1/inbox/handoffs")).toHaveLength(1);expect(refreshGets.filter(path=>path==="/v1/inbox/active")).toHaveLength(1);
-    expect(refreshGets).toHaveLength(4);expect(refreshGets.filter(path=>/^\/v1\/inbox\/conversations\/[^/]+(?:\/messages)?$/u.test(path))).toHaveLength(2);expect(mutations.filter(value=>!value.endsWith("/claim"))).toEqual([]);
+    expect(refreshGets).toHaveLength(5);expect(refreshGets.filter(path=>path==="/v1/inbox/availability")).toHaveLength(1);expect(refreshGets.filter(path=>/^\/v1\/inbox\/conversations\/[^/]+(?:\/messages)?$/u.test(path))).toHaveLength(2);expect(mutations.filter(value=>!value.endsWith("/claim"))).toEqual([]);
     await editor.fill("Resposta humana sintética");
     await page.getByRole("button",{name:"Enviar"}).click();await expect(page.getByText("Resposta humana sintética")).toBeVisible();await expect(page.getByText("Pendente de envio")).toBeVisible();expect(messagePosts).toHaveLength(1);
     await page.reload();await page.getByRole("button",{name:"Contato · Em atendimento"}).click();await expect(page.getByText("Resposta humana sintética")).toBeVisible();await expect(page.getByText("Pendente de envio")).toBeVisible();

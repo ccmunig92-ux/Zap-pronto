@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff } from "@zap-pronto/contracts";
+import type { InboxAvailability, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 
 function DeliveryLabel({ message }: { readonly message: InboxMessage }) {
@@ -38,6 +38,8 @@ function dispositionLabel(disposition: ResolvedInboxHandoff["disposition"]): str
 }
 
 export interface InboxClient {
+  getInboxAvailability(unitId:string):Promise<InboxAvailability>;
+  setInboxAvailability(input:SetInboxAvailabilityRequest,idempotencyKey:string):Promise<SetInboxAvailabilityResponse>;
   listHandoffs(input:{unitId:string;limit?:number;cursor?:string;priority?:"LOW"|"NORMAL"|"HIGH"|"URGENT";slaStatus?:"ON_TRACK"|"DUE_SOON"|"OVERDUE"}):Promise<ListHandoffsResponse>;
   claimHandoff(handoffId: string, expectedVersion: number, idempotencyKey: string): Promise<unknown>;
   resolveHandoff(handoffId: string, expectedVersion: number, disposition: ResolveDisposition, idempotencyKey: string): Promise<unknown>;
@@ -59,11 +61,12 @@ export interface InboxClient {
 type TransferReason = "SHIFT_CHANGE" | "LOAD_BALANCING" | "SPECIALIZED_SUPPORT" | "OPERATIONAL_CONTINUITY";
 type ResolveDisposition = "RESOLVED" | "DUPLICATE" | "CUSTOMER_WITHDREW" | "EXTERNAL_REFERRAL";
 
-type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "detail" | "messages"; readonly cause: unknown };
+type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "detail" | "messages" | "availability"; readonly cause: unknown };
 type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
 const maximumHistorySpanMs=366*24*60*60*1000;
+function instantToLocalDateTime(value:string):string{const date=new Date(value),pad=(part:number)=>String(part).padStart(2,"0");return`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`}
 function historicalMessages(page:ListInboxMessagesResponse,resolvedAt:string):ListInboxMessagesResponse{
   return {...page,items:page.items.filter(message=>message.createdAt<=resolvedAt).map(message=>({...message,allowedActions:[]}))};
 }
@@ -112,6 +115,14 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [sending, setSending] = useState(false);
   const [cancellingId, setCancellingId] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
+  const [availability,setAvailability]=useState<InboxAvailability>();
+  const [availabilityOpen,setAvailabilityOpen]=useState(false);
+  const [availabilityStatus,setAvailabilityStatus]=useState<InboxAvailability["status"]>("OFFLINE");
+  const [availabilityMaxActive,setAvailabilityMaxActive]=useState("5");
+  const [availabilityPauseReason,setAvailabilityPauseReason]=useState<NonNullable<InboxAvailability["pauseReason"]>>("BREAK");
+  const [availabilityPausedUntil,setAvailabilityPausedUntil]=useState("");
+  const [savingAvailability,setSavingAvailability]=useState(false);
+  const availabilityIntent=useRef<{input:SetInboxAvailabilityRequest;key:string}|undefined>(undefined);
   const generation = useRef(0);
   const claimIntent = useRef<{ id: string; version: number; key: string } | undefined>(undefined);
   const sendIntent = useRef<{ id: string; version: number; body: string; key: string } | undefined>(undefined);
@@ -133,12 +144,12 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [loadingActivePage, setLoadingActivePage] = useState(false);
   const [loadingSupervisedPage,setLoadingSupervisedPage]=useState(false);
   const [loadingResolvedPage,setLoadingResolvedPage]=useState(false);
-  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || cancellingId !== undefined;
-  const navigationBlocked=mutationBusy||Boolean(operationLock.current)||resolveOpen||reopenOpen||transferOpen||takeoverConfirmOpen;
+  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || savingAvailability || cancellingId !== undefined;
+  const navigationBlocked=mutationBusy||Boolean(operationLock.current)||resolveOpen||reopenOpen||transferOpen||takeoverConfirmOpen||availabilityOpen;
   const navigationDirty=draft!==""||resolveDisposition!==""||reopenReason!==""||transferTargetUserId!==""||transferReason!==""
     ||claimIntent.current!==undefined||sendIntent.current!==undefined||resolveIntent.current!==undefined
     ||requeueIntent.current!==undefined||reopenIntent.current!==undefined||transferIntent.current!==undefined||takeoverIntent.current!==undefined
-    ||cancelIntent.current!==undefined;
+    ||cancelIntent.current!==undefined||availabilityIntent.current!==undefined||availabilityOpen;
   useEffect(()=>{navigationCallback.current=onNavigationStateChange},[onNavigationStateChange]);
   useEffect(()=>{onNavigationStateChange?.({blocked:navigationBlocked,dirty:navigationDirty})},
     [onNavigationStateChange,navigationBlocked,navigationDirty]);
@@ -208,16 +219,17 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     transferIntent.current=undefined;
     takeoverIntent.current=undefined;
     cancelIntent.current = undefined;
+    availabilityIntent.current=undefined;
   }
 
   function purgeSensitive() {
-    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
+    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
     setDraft(""); setClosedNotice(undefined); setError(undefined); clearIntents();
     operationLock.current = undefined;
     refreshFlight.current = false;
     queuePageFlight.current = false; activePageFlight.current = false;supervisedPageFlight.current=false;resolvedPageFlight.current=false;
     setClaiming(false); setResolving(false);setResolveOpen(false);setResolveDisposition(""); setRequeueing(false);setReopening(false);setReopenOpen(false);setReopenReason(""); setTransferring(false);setTakingOver(false);setTakeoverConfirmOpen(false);setLoadingTransferCandidates(false);setTransferCandidates(undefined);setTransferTargetUserId("");setTransferReason("");setTransferOpen(false); setSending(false); setCancellingId(undefined); setRefreshing(false);
-    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);
+    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setAvailabilityOpen(false);setSavingAvailability(false);
   }
 
   function purgeSelection(notice?: string) {
@@ -266,11 +278,39 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("active", client.listActiveInboxHandoffs({ unitId, limit: 25 })),
       scoped("supervised",supervisedFirst(unitId)),
       scoped("resolved",resolvedFirst(unitId)),
-    ]).then(([queued, mine,others,closed]) => {
-      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed); }
+      scoped("availability",client.getInboxAvailability(unitId)),
+    ]).then(([queued, mine,others,closed,nextAvailability]) => {
+      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setAvailability(nextAvailability); }
     }).catch((caught: unknown) => fail(caught, g));
     return () => { generation.current += 1; };
   }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(",")]);
+
+  function openAvailability(){
+    if(!availability||mutationBusy||refreshing)return;
+    setAvailabilityStatus(availability.status);setAvailabilityMaxActive(String(availability.maxActive));
+    setAvailabilityPauseReason(availability.pauseReason??"BREAK");
+    setAvailabilityPausedUntil(availability.pausedUntil?instantToLocalDateTime(availability.pausedUntil):"");
+    availabilityIntent.current=undefined;setAvailabilityOpen(true);
+  }
+  function invalidateAvailability(){availabilityIntent.current=undefined}
+  async function saveAvailability(){
+    if(!availability||!unitId)return;const maxActive=Number(availabilityMaxActive);
+    if(!Number.isInteger(maxActive)||maxActive<1||maxActive>100){setError("Informe entre 1 e 100 atendimentos ativos.");return}
+    const pausedUntil=availabilityStatus==="PAUSED"&&availabilityPausedUntil?new Date(availabilityPausedUntil).toISOString():null;
+    const input:SetInboxAvailabilityRequest={unitId,status:availabilityStatus,maxActive,expectedVersion:availability.version,
+      pauseReason:availabilityStatus==="PAUSED"?availabilityPauseReason:null,pausedUntil};
+    const current=availabilityIntent.current;
+    if(current&&JSON.stringify(current.input)!==JSON.stringify(input))availabilityIntent.current=undefined;
+    const intent=availabilityIntent.current??{input,key:crypto.randomUUID()};availabilityIntent.current=intent;
+    const token=acquireMutation();if(!token)return;const g=generation.current,capturedUnit=unitId;setSavingAvailability(true);setError(undefined);setClosedNotice(undefined);
+    try{const result=await client.setInboxAvailability(intent.input,intent.key);if(g!==generation.current||capturedUnit!==unitId)return;
+      setAvailability(result);availabilityIntent.current=undefined;setAvailabilityOpen(false);setClosedNotice("Disponibilidade atualizada.");
+    }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;
+      if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
+        try{const currentAvailability=await client.getInboxAvailability(capturedUnit);if(g===generation.current&&capturedUnit===unitId){setAvailability(currentAvailability);availabilityIntent.current=undefined;setAvailabilityOpen(false);setClosedNotice("A disponibilidade mudou e foi atualizada.")}}catch(reconcileError){fail(reconcileError,g)}
+      }else fail(caught,g);
+    }finally{releaseMutation(token);if(g===generation.current)setSavingAvailability(false)}
+  }
 
   async function changeQueueFilters(priority: typeof priorityFilter, slaStatus: typeof slaFilter) {
     if (!unitId || mutationBusy || refreshing) return;
@@ -393,6 +433,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("active", client.listActiveInboxHandoffs({ unitId: capturedUnit, limit: 25 })),
       scoped("supervised",supervisedFirst(capturedUnit)),
       scoped("resolved",resolvedFirst(capturedUnit)),
+      scoped("availability",client.getInboxAvailability(capturedUnit)),
     ]);
     const selectionPromise: Promise<readonly [InboxConversation | undefined, ListInboxMessagesResponse | undefined]> = capturedSelected
       ? Promise.all([
@@ -401,7 +442,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ])
       : Promise.resolve([undefined, undefined] as const);
     try {
-      const [[queued, mine,others,closed], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
+      const [[queued, mine,others,closed,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
       if (g !== generation.current || capturedUnit !== unitId) return;
       let nextSelected: InboxSelection | undefined;
       if (capturedSelected) nextSelected = queued.items.find(item => item.id === capturedSelected.id)
@@ -410,7 +451,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         ?? closed.items.find(item=>item.id===capturedSelected.id)
         ?? (nextDetail?.conversationId === capturedSelected.conversationId && nextDetail.unitId === capturedUnit
           ? capturedSelected : undefined);
-      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);
+      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setAvailability(nextAvailability);
       if (capturedSelected && (!nextSelected || !nextDetail || !nextMessages)) {
         purgeSelection("Atendimento não está mais disponível.");
       } else if (nextSelected && nextDetail && nextMessages) {
@@ -739,6 +780,19 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
       <button className="inbox-refresh" type="button" onClick={refresh} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div>
+    <section aria-labelledby="availability-title"><h3 id="availability-title">Minha disponibilidade</h3>
+      {!availability?<p>Carregando disponibilidade…</p>:<><p>Status: <strong>{availability.status==="AVAILABLE"?"Disponível":availability.status==="PAUSED"?"Pausado":"Offline"}</strong> · {availability.activeCount} de {availability.maxActive} ativos</p>
+      {!availabilityOpen&&<button type="button" disabled={mutationBusy||refreshing} onClick={openAvailability}>Alterar disponibilidade</button>}</>}
+      {availability&&availabilityOpen&&<fieldset><legend>Confirmar disponibilidade</legend>
+        <label>Status <select aria-label="Status da disponibilidade" value={availabilityStatus} disabled={savingAvailability} onChange={event=>{setAvailabilityStatus(event.target.value as InboxAvailability["status"]);invalidateAvailability()}}><option value="AVAILABLE">Disponível</option><option value="PAUSED">Pausado</option><option value="OFFLINE">Offline</option></select></label>
+        <label>Máximo de atendimentos ativos <input type="number" min="1" max="100" value={availabilityMaxActive} disabled={savingAvailability} onChange={event=>{setAvailabilityMaxActive(event.target.value);invalidateAvailability()}}/></label>
+        {availabilityStatus==="PAUSED"&&<><label>Motivo da pausa <select value={availabilityPauseReason} disabled={savingAvailability} onChange={event=>{setAvailabilityPauseReason(event.target.value as NonNullable<InboxAvailability["pauseReason"]>);invalidateAvailability()}}><option value="BREAK">Intervalo</option><option value="TRAINING">Treinamento</option><option value="MEETING">Reunião</option><option value="OTHER_OPERATIONAL">Outra atividade operacional</option></select></label>
+        <label>Pausado até (opcional) <input type="datetime-local" value={availabilityPausedUntil} disabled={savingAvailability} onChange={event=>{setAvailabilityPausedUntil(event.target.value);invalidateAvailability()}}/></label></>}
+        <p>A alteração vale apenas para a unidade selecionada e pode afetar a distribuição de novos atendimentos.</p>
+        <button type="button" disabled={savingAvailability} onClick={saveAvailability}>{savingAvailability?"Salvando…":"Confirmar alteração"}</button>
+        <button type="button" disabled={savingAvailability} onClick={()=>{setAvailabilityOpen(false);availabilityIntent.current=undefined}}>Cancelar alteração</button>
+      </fieldset>}
+    </section>
     <div className="inbox-toolbar"><label>Unidade <select value={unitId} disabled={mutationBusy || refreshing} onChange={event => switchUnit(event.target.value)}>{units.map(unit => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label>
     <label>Prioridade <select value={priorityFilter} disabled={mutationBusy || refreshing} onChange={event => changeQueueFilters(event.target.value as typeof priorityFilter, slaFilter)}>
       <option value="">Todas</option><option value="URGENT">Urgente</option><option value="HIGH">Alta</option><option value="NORMAL">Normal</option><option value="LOW">Baixa</option>

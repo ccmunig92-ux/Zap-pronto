@@ -4,12 +4,13 @@ import { Value } from "@sinclair/typebox/value";
 import { AcceptUserInvitationResponseSchema, AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusResponseSchema,
   CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema, ReissueInvitationResponseSchema,ChangeUnitMembershipResponseSchema,UnitMembershipsPageSchema,
   RevokeInvitationResponseSchema,
+  InboxAvailabilitySchema,SetInboxAvailabilityResponseSchema,
   ListRoutingRequiredResponseSchema,ResolveRoutingRequiredResponseSchema,InboxConversationSchema,ListInboxMessagesResponseSchema,ListHandoffsResponseSchema,ListResolvedHandoffsResponseSchema,ClaimHandoffResponseSchema,ResolveHandoffResponseSchema,RequeueHandoffResponseSchema,ReopenHandoffResponseSchema,ListInboxTransferCandidatesResponseSchema,TransferHandoffResponseSchema,TakeoverHandoffResponseSchema,SendHumanTextMessageResponseSchema,CancelHumanTextMessageResponseSchema,
   UserInvitationOptionsSchema, type CreateUserInvitationRequest, type CreateUserInvitationResponse,
   type AcceptUserInvitationResponse, type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
   type ChangeUserStatusResponse,type ChangeUnitMembershipRequest,type ChangeUnitMembershipResponse,type UnitMembershipsPage, type CurrentUser, type ProblemDetails, type ReissueInvitationRequest,
   type ReissueInvitationResponse, type RevokeInvitationRequest, type RevokeInvitationResponse,
-  type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse } from "@zap-pronto/contracts";
+  type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse,type InboxAvailability,type SetInboxAvailabilityRequest,type SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
 import type { paths } from "./generated.js";
 
 if (!FormatRegistry.Has("uuid")) FormatRegistry.Set("uuid", (value) =>
@@ -136,6 +137,12 @@ export function createApiClient(options: ApiClientOptions) {
     const{data,error,response}=await client.POST("/v1/inbox/routing-required/{receiptId}/resolve",{params:{path:{receiptId},
       header:{"idempotency-key":idempotencyKey}},body:{unitId},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});
     if(!response.ok)mapFailure(error,response);if(!Value.Check(ResolveRoutingRequiredResponseSchema,data))throw new InvalidApiResponse();return data;
+  },async getInboxAvailability(unitId:string):Promise<InboxAvailability>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();
+    const{data,error,response}=await client.GET("/v1/inbox/availability",{params:{query:{unitId}},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});
+    if(!response.ok)mapFailure(error,response);if(!Value.Check(InboxAvailabilitySchema,data))throw new InvalidApiResponse();return data;
+  },async setInboxAvailability(input:SetInboxAvailabilityRequest,idempotencyKey:string):Promise<SetInboxAvailabilityResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();
+    const{data,error,response}=await client.POST("/v1/inbox/availability",{params:{header:{"idempotency-key":idempotencyKey}},body:input,headers:{authorization:`Bearer ${token}`,accept:"application/json"}});
+    if(!response.ok)mapFailure(error,response);if(!Value.Check(SetInboxAvailabilityResponseSchema,data))throw new InvalidApiResponse();return data;
   },async listHandoffs(input:{unitId:string;limit?:number;cursor?:string;priority?:"LOW"|"NORMAL"|"HIGH"|"URGENT";slaStatus?:"ON_TRACK"|"DUE_SOON"|"OVERDUE"}):Promise<ListHandoffsResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();
     const{data,error,response}=await client.GET("/v1/inbox/handoffs",{params:{query:input},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});
     if(!response.ok)mapFailure(error,response);if(!Value.Check(ListHandoffsResponseSchema,data))throw new InvalidApiResponse();return data;

@@ -399,6 +399,24 @@ export type CancelHumanTextMessageRequest=Static<typeof CancelHumanTextMessageRe
 export const CancelHumanTextMessageResponseSchema=Type.Object({messageId:Type.String({format:"uuid"}),conversationId:Type.String({format:"uuid"}),
   conversationVersion:Type.Integer({minimum:1}),deliveryStatus:Type.Literal("CANCELLED"),replayed:Type.Boolean()},{additionalProperties:false});
 export type CancelHumanTextMessageResponse=Static<typeof CancelHumanTextMessageResponseSchema>;
+export const InboxAvailabilityStatusSchema=Type.Union([Type.Literal("AVAILABLE"),Type.Literal("PAUSED"),Type.Literal("OFFLINE")],{$id:"InboxAvailabilityStatus"});
+export const InboxAvailabilityPauseReasonSchema=Type.Union([Type.Literal("BREAK"),Type.Literal("TRAINING"),Type.Literal("MEETING"),Type.Literal("OTHER_OPERATIONAL")],{$id:"InboxAvailabilityPauseReason"});
+export const InboxAvailabilityQuerySchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type InboxAvailabilityQuery=Static<typeof InboxAvailabilityQuerySchema>;
+export const InboxAvailabilitySchema=Type.Object({unitId:Type.String({format:"uuid"}),userId:Type.String({format:"uuid"}),status:InboxAvailabilityStatusSchema,
+  maxActive:Type.Integer({minimum:1,maximum:100}),pauseReason:Type.Union([InboxAvailabilityPauseReasonSchema,Type.Null()]),
+  pausedUntil:Type.Union([Type.String({format:"date-time"}),Type.Null()]),activeCount:Type.Integer({minimum:0}),version:Type.Integer({minimum:1}),
+  updatedAt:Type.String({format:"date-time"})},{$id:"InboxAvailability",additionalProperties:false});
+export type InboxAvailability=Static<typeof InboxAvailabilitySchema>;
+export const SetInboxAvailabilityRequestSchema=Type.Object({unitId:Type.String({format:"uuid"}),status:InboxAvailabilityStatusSchema,
+  maxActive:Type.Integer({minimum:1,maximum:100}),pauseReason:Type.Optional(Type.Union([InboxAvailabilityPauseReasonSchema,Type.Null()])),
+  pausedUntil:Type.Optional(Type.Union([Type.String({format:"date-time"}),Type.Null()])),expectedVersion:Type.Integer({minimum:1})},
+{additionalProperties:false});
+export type SetInboxAvailabilityRequest=Static<typeof SetInboxAvailabilityRequestSchema>;
+export const SetInboxAvailabilityResponseSchema=Type.Object({unitId:Type.String({format:"uuid"}),userId:Type.String({format:"uuid"}),status:InboxAvailabilityStatusSchema,
+  maxActive:Type.Integer({minimum:1,maximum:100}),pauseReason:Type.Union([InboxAvailabilityPauseReasonSchema,Type.Null()]),pausedUntil:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
+  activeCount:Type.Integer({minimum:0}),version:Type.Integer({minimum:1}),updatedAt:Type.String({format:"date-time"}),replayed:Type.Boolean()},{$id:"SetInboxAvailabilityResponse",additionalProperties:false});
+export type SetInboxAvailabilityResponse=Static<typeof SetInboxAvailabilityResponseSchema>;
 export const HandoffResolutionDispositionSchema=Type.Union([
   Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
 ],{$id:"HandoffResolutionDisposition"});
