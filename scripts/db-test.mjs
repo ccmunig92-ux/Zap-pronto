@@ -145,10 +145,12 @@ try {
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";
     const policyRaceUnits=["94000000-0000-4000-8000-000000000003","94000000-0000-4000-8000-000000000004"];
-    await target.query(`INSERT INTO tenants(id,name) VALUES($1,'SLA policy race');
-      INSERT INTO units(id,tenant_id,code,name) VALUES($2,$1,'RACE-A','Race A'),($3,$1,'RACE-B','Race B');
-      INSERT INTO users(id,tenant_id,email,display_name) VALUES($4,$1,'sla-race@test.local','SLA Race Manager');
-      INSERT INTO user_units(tenant_id,user_id,unit_id,role) VALUES($1,$4,$2,'UNIT_MANAGER'),($1,$4,$3,'UNIT_MANAGER')`,
+    await target.query("INSERT INTO tenants(id,name) VALUES($1,'SLA policy race')",[policyRaceTenant]);
+    await target.query("INSERT INTO units(id,tenant_id,code,name) VALUES($2,$1,'RACE-A','Race A'),($3,$1,'RACE-B','Race B')",
+      [policyRaceTenant,...policyRaceUnits]);
+    await target.query("INSERT INTO users(id,tenant_id,email,display_name) VALUES($2,$1,'sla-race@test.local','SLA Race Manager')",
+      [policyRaceTenant,policyRaceActor]);
+    await target.query("INSERT INTO user_units(tenant_id,user_id,unit_id,role) VALUES($1,$4,$2,'UNIT_MANAGER'),($1,$4,$3,'UNIT_MANAGER')",
       [policyRaceTenant,...policyRaceUnits,policyRaceActor]);
     const policyRaceClients=await Promise.all([0,1].map(async()=>{const client=new pg.Client({connectionString:targetUrl.toString()});
       await client.connect();await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
