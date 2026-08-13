@@ -82,7 +82,9 @@ o respectivo gate verde.
 ## Limite da declaração
 
 Com todos os gates verdes, a declaração permitida é **candidato local validado**. O snapshot deliberado
-já existe no branch `codex/release-local-0050`, com PR draft e CI verde. Staging continua bloqueado até
+já existe no branch `codex/release-local-0050`, com PR draft e CI verde. A promoção à `main` exige PR,
+check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
+force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
 homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
 gates externos correspondentes.
