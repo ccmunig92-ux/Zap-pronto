@@ -168,6 +168,7 @@ try {
   assert.match(firstRun, /applied 0058_team_availability_projection\.sql/);
   assert.match(firstRun, /applied 0059_unit_operational_timezone\.sql/);
   assert.match(firstRun, /applied 0060_unit_shift_schedule\.sql/);
+  assert.match(firstRun, /applied 0061_effective_staff_shift\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();

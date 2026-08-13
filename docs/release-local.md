@@ -129,6 +129,24 @@ coberta tecnicamente, mas sua jornada real de navegador ainda não foi homologad
 possui identidade OIDC `SUPERVISOR` dedicada. Nenhum deploy, staging ou integração Meta/Hermes foi
 executado.
 
+## Evidência incremental 0061
+
+A migration `0061_effective_staff_shift.sql` adiciona uma avaliação efetiva somente leitura da escala
+por unidade e integrante. O servidor resolve a versão aplicável, o snapshot de timezone, o dia e
+horário locais, a grade semanal e a precedência das exceções, retornando `IN_SHIFT`, `OUTSIDE_SHIFT`,
+`CLOSED`, `NOT_EFFECTIVE` ou `UNCONFIGURED`. O avaliador usa `shift.read`, resposta `no-store`,
+isolamento por tenant e escopo sanitizado; os testes cobrem bordas de período, exceções e timezone/DST.
+
+A interface apresenta estado, motivo, data, horário e fuso sem calcular a decisão no navegador. O
+overlay agora possui `supervisor.local` como identidade OIDC `SUPERVISOR` dedicada e reconciliável em
+realm Keycloak persistido. A jornada real provou leitura sem editor, sem `POST /v1` e sem host externo.
+Os hashes de availability, handoffs, conversations e service cases antes e depois permaneceram
+idênticos.
+
+A cadeia limpa `0001`–`0061` passou com 110 testes core, 84 da API, 31 do cliente, 179 do frontend,
+overlay 5/5 e execução E2E completa verde. Este checkpoint não implementa enforcement de claim,
+transferência ou takeover, não altera disponibilidade e não executa scheduler, deploy, Meta ou Hermes.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:

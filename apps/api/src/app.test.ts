@@ -140,6 +140,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
       ["GET", "/v1/units/:unitId/operational-timezone", "permission", "unit_timezone.read", "unit"],
       ["GET", "/v1/units/:unitId/staff-schedules/members", "permission", "shift.read", "unit"],
       ["GET", "/v1/units/:unitId/staff-schedules/:userId", "permission", "shift.read", "unit"],
+      ["GET", "/v1/units/:unitId/staff-schedules/:userId/effective", "permission", "shift.read", "unit"],
     ["GET", "/v1/users", "permission", "tenant.users.manage", "tenant"],
     ["GET", "/v1/users/invitations", "permission", "tenant.users.manage", "tenant"],
     ["GET", "/v1/users/invitations/options", "permission", "tenant.users.manage", "tenant"],

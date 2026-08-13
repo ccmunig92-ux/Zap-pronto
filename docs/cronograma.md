@@ -691,6 +691,21 @@ supervisor está coberta por contratos e testes, mas ainda não está homologada
 ausência de uma identidade OIDC `SUPERVISOR` dedicada no overlay. Não houve deploy, staging, conexão
 Meta ou ativação do Hermes.
 
+Checkpoint local incremental em 2026-08-13, migration `0061`: a escala passou a expor uma avaliação
+efetiva somente leitura por unidade e integrante, calculada no servidor a partir da versão aplicável,
+do snapshot de timezone, da grade semanal e das exceções. Os estados `IN_SHIFT`, `OUTSIDE_SHIFT`,
+`CLOSED`, `NOT_EFFECTIVE` e `UNCONFIGURED` são retornados sem alterar disponibilidade, atendimento ou
+responsável. A avaliação cobre limites de período e timezone/DST, usa `shift.read`, resposta
+`no-store` e mantém erros de escopo sanitizados.
+
+O overlay recebeu a identidade OIDC sintética dedicada `supervisor.local`, reconciliada de forma
+idempotente também sobre realm Keycloak persistido. A jornada real confirmou que o supervisor lê o
+estado efetivo, motivo, data, horário e fuso sem receber editor ou emitir `POST /v1`; os hashes de
+availability, handoffs, conversations e service cases permaneceram idênticos. A cadeia limpa
+`0001`–`0061` e os gates integrados passaram: 110 testes core, 84 da API, 31 do cliente, 179 do
+frontend, overlay 5/5 e E2E completo verde. O corte não aplica enforcement em claim, transferência ou
+takeover, não executa scheduler e não realizou deploy, Meta ou Hermes.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

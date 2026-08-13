@@ -20,10 +20,10 @@ test("realm local usa SPA publica com PKCE e redirects exatos", async () => {
   assert.deepEqual(client.redirectUris, ["${LOCAL_OIDC_ORIGIN}/"]);
   assert.deepEqual(client.webOrigins, ["${LOCAL_OIDC_ORIGIN}"]);
   assert.equal(JSON.stringify(client).includes("*"), false);
-  assert.equal(realm.users.length, 3);
+  assert.equal(realm.users.length, 4);
   for (const user of realm.users) {
     assert.match(user.email, /@example\.test$/);
-    assert.match(user.credentials[0].value, /^\$\{LOCAL_OIDC_(ADMIN|ATTENDANT|ATTENDANT_TWO)_PASSWORD\}$/);
+    assert.match(user.credentials[0].value, /^\$\{LOCAL_OIDC_(ADMIN|ATTENDANT|ATTENDANT_TWO|SUPERVISOR)_PASSWORD\}$/);
   }
 });
 
@@ -38,6 +38,7 @@ test("edge preserva variaveis nginx e nunca registra query OAuth", async () => {
   assert.match(compose,/worker:[\s\S]*profiles: \["local-worker-disabled"\]/);
   assert.match(compose, /GET \/health\/ready HTTP\/1\.1/);
   assert.match(compose, /LOCAL_OIDC_ATTENDANT_TWO_PASSWORD: \$\{LOCAL_OIDC_ATTENDANT_TWO_PASSWORD:\?required\}/);
+  assert.match(compose, /LOCAL_OIDC_SUPERVISOR_PASSWORD: \$\{LOCAL_OIDC_SUPERVISOR_PASSWORD:\?required\}/);
   assert.match(compose, /\/dev\/tcp\/127\.0\.0\.1\/9000/);
   assert.match(edge, /log_format zap_local_safe/);
   assert.match(edge, /\$request_method \$uri \$server_protocol/);
@@ -68,6 +69,7 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   assert.match(seed,/set_config\('session_replication_role','replica',true\)[\s\S]*set_config\('session_replication_role','origin',true\)/);
   assert.match(seed,/UPDATE human_handoffs SET status='QUEUED'[\s\S]*UPDATE conversations SET status='OPEN',closed_at=NULL,automation_status='HUMAN_QUEUED'/);
   assert.match(seed, /'90000000-0000-4000-8000-000000000012'[\s\S]*'90000000-0000-4000-8000-000000000002','UNIT_MANAGER'/);
+  assert.match(seed, /supervisor\.local@example\.test'[\s\S]*'90000000-0000-4000-8000-000000000002','SUPERVISOR'/);
   assert.match(seed, /'CORPORATE','local-e2e-routing-account','ACTIVE'/);
   assert.match(seed, /local-e2e-routing-account'[\s\S]*NULL,'UNROUTED','MULTIPLE_ACTIVE_UNITS'/);
   assert.match(seed, /DELETE FROM inbound_routing_commands[\s\S]*DELETE FROM inbound_channel_events/);
@@ -122,6 +124,7 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/--grep-invert'[\s\S]*gestor configura a primeira política de SLA uma única vez/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor configura o fuso operacional uma única vez sem efeitos externos/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor publica uma escala semanal observacional uma única vez/);
+  assert.match(controller,/--grep-invert'[\s\S]*supervisor consulta escala efetiva sem controles nem mutações/);
   assert.match(controller,/handoff_sla_acknowledgements[\s\S]*handoff_version IN\(1,3\)[\s\S]*handoff_sla_acknowledge_commands[\s\S]*expected_version IN\(1,3\)[\s\S]*SLA_ALERT_ACKNOWLEDGED/);
   assert.match(controller,/status='QUEUED' AND version=3 AND assigned_user_id IS NULL AND claimed_at IS NULL/);
   assert.match(controller,/LOCAL_OIDC_SLA_ALERT_ACKNOWLEDGEMENT_STATE_INVALID/);
@@ -134,8 +137,15 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/E2E_MANAGER_USERNAME='attendant\.two\.local'/);
   assert.match(controller,/E2E_OIDC_TARGET='local'/);
   assert.match(controller,/E2E_MANAGER_PASSWORD=\$v\.LOCAL_OIDC_ATTENDANT_TWO_PASSWORD/);
+  assert.match(controller,/E2E_SUPERVISOR_USERNAME='supervisor\.local'/);
+  assert.match(controller,/E2E_SUPERVISOR_PASSWORD=\$v\.LOCAL_OIDC_SUPERVISOR_PASSWORD/);
+  assert.match(controller,/Reconcile-SyntheticSupervisor[\s\S]*kcadm\.sh[\s\S]*supervisor\.local[\s\S]*set-password[\s\S]*LOCAL_OIDC_SYNTHETIC_SUPERVISOR_RECONCILIATION_FAILED/);
+  assert.match(controller,/function Up[\s\S]*Compose @\('up','-d','--remove-orphans','--wait'\)[\s\S]*Reconcile-SyntheticSupervisor \$upValues[\s\S]*Compose @\('run','--rm','local-seed'\)[\s\S]*Sync-SyntheticSupervisorSubject \$supervisorSubject/);
+  assert.match(controller,/function E2E[\s\S]*Compose @\('run','--rm','local-seed'\);Sync-SyntheticSupervisorSubject \$supervisorSubject[\s\S]*gestor consulta disponibilidade/);
+  assert.match(controller,/--grep','supervisor consulta escala efetiva sem controles nem mutações'/);
   assert.match(controller,/Compose @\('run','--rm','local-seed'\)[\s\S]*--grep','gestor administra vínculos da unidade'/);
   assert.match(controller,/LOCAL_OIDC_SYNTHETIC_MANAGER_MEMBERSHIP_INVALID/);
+  assert.match(controller,/LOCAL_OIDC_SYNTHETIC_SUPERVISOR_MEMBERSHIP_INVALID/);
   assert.match(controller,/--grep','admin encaminha entrada sem unidade'/);
   assert.match(controller,/routing_status='ROUTED'[\s\S]*event_type='channel\.inbound\.received'[\s\S]*LOCAL_OIDC_INBOUND_ROUTING_STATE_INVALID/);
   assert.match(controller,/finally\{Compose @\('run','--rm','local-seed'\)/);
