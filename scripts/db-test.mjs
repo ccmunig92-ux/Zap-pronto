@@ -115,6 +115,7 @@ try {
       "0059_unit_operational_timezone.sql",
       "0060_unit_shift_schedule.sql",
       "0061_effective_staff_shift.sql",
+      "0062_unit_assignment_shift_enforcement.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
