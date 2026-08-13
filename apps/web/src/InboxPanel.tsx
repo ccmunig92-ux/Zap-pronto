@@ -623,16 +623,16 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     try {
       await client.claimHandoff(intent.id, intent.version, intent.key); if (g !== generation.current) return;
       claimIntent.current = undefined; setDetail(undefined); setMessages(undefined);
-      const [queued, mine, nextDetail, nextMessages] = await Promise.all([client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 }), client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 })]);
-      if (g !== generation.current) return; setQueue(queued); setActive(mine); setSelected(mine.items.find(item => item.id === selected.id)); setDetail(nextDetail); setMessages(nextMessages); claimIntent.current = undefined;
+      const [queued, mine, alerts, nextDetail, nextMessages] = await Promise.all([client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 }), slaAlertsFirst(unitId), client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 })]);
+      if (g !== generation.current) return; setQueue(queued); setActive(mine); setSlaAlerts(alerts); setSelected(mine.items.find(item => item.id === selected.id)); setDetail(nextDetail); setMessages(nextMessages); claimIntent.current = undefined;
     } catch (caught) {
       if (g !== generation.current) return;
       if (!claimIntent.current) failCommittedReconciliation(caught, g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
         claimIntent.current = undefined; setError(`Outro atendimento venceu esta disputa. Correlação: ${caught.problem.correlationId}`);
         try {
-          const [queued, mine, nextDetail, nextMessages] = await Promise.all([client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 }), client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 })]);
-          if (g === generation.current) { setQueue(queued); setActive(mine); setSelected(queued.items.find(item => item.id === selected.id) ?? mine.items.find(item => item.id === selected.id)); setDetail(nextDetail); setMessages(nextMessages); }
+          const [queued, mine, alerts, nextDetail, nextMessages] = await Promise.all([client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 }), slaAlertsFirst(unitId), client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 })]);
+          if (g === generation.current) { setQueue(queued); setActive(mine); setSlaAlerts(alerts); setSelected(queued.items.find(item => item.id === selected.id) ?? mine.items.find(item => item.id === selected.id)); setDetail(nextDetail); setMessages(nextMessages); }
         } catch (refreshError) { fail(refreshError, g); }
       }
       else fail(caught, g);
@@ -651,16 +651,16 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     try {
       await client.resolveHandoff(intent.id, intent.version,intent.disposition, intent.key); if (g !== generation.current||capturedUnit!==unitId) return;
       resolveIntent.current=undefined;purgeSelection();
-      const [queued, mine,others,closed] = await Promise.all([client.listHandoffs(queueInput(capturedUnit)), client.listActiveInboxHandoffs({ unitId:capturedUnit, limit: 25 }),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit)]);
-      if (g !== generation.current||capturedUnit!==unitId) return; setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed); purgeSelection(); resolveIntent.current = undefined; setClosedNotice("Atendimento encerrado.");
+      const [queued, mine,others,closed,alerts] = await Promise.all([client.listHandoffs(queueInput(capturedUnit)), client.listActiveInboxHandoffs({ unitId:capturedUnit, limit: 25 }),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+      if (g !== generation.current||capturedUnit!==unitId) return; setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts); purgeSelection(); resolveIntent.current = undefined; setClosedNotice("Atendimento encerrado.");
     } catch (caught) {
       if (g !== generation.current||capturedUnit!==unitId) return;
       if (!resolveIntent.current) failCommittedReconciliation(caught,g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
         resolveIntent.current = undefined;purgeSelection(); setError(`O atendimento mudou antes do encerramento. Correlação: ${caught.problem.correlationId}`);
         try {
-          const [queued, mine,others,closed] = await Promise.all([client.listHandoffs(queueInput(capturedUnit)), client.listActiveInboxHandoffs({ unitId:capturedUnit, limit: 25 }),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit)]);
-          if (g === generation.current&&capturedUnit===unitId) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed); }
+          const [queued, mine,others,closed,alerts] = await Promise.all([client.listHandoffs(queueInput(capturedUnit)), client.listActiveInboxHandoffs({ unitId:capturedUnit, limit: 25 }),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+          if (g === generation.current&&capturedUnit===unitId) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts); }
         } catch (refreshError) { fail(refreshError, g); }
       }
       else fail(caught, g);
@@ -679,12 +679,12 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     try{
       await client.requeueHandoff(intent.id,intent.version,intent.key);if(g!==generation.current)return;
       requeueIntent.current=undefined;purgeSelection();
-      const[queued,mine,others]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit)]);
-      if(g!==generation.current||capturedUnit!==unitId)return;setQueue(queued);setActive(mine);setSupervised(others);purgeSelection();requeueIntent.current=undefined;setClosedNotice("Atendimento devolvido à fila.");
+      const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+      if(g!==generation.current||capturedUnit!==unitId)return;setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);purgeSelection();requeueIntent.current=undefined;setClosedNotice("Atendimento devolvido à fila.");
     }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(!requeueIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
       requeueIntent.current=undefined;purgeSelection();
-      try{const[queued,mine,others]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit)]);
-        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setError(`O atendimento mudou antes da devolução. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+      try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError(`O atendimento mudou antes da devolução. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
     }else fail(caught,g);}finally{releaseMutation(lockToken);if(g===generation.current)setRequeueing(false);}
   }
 
@@ -702,10 +702,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       await client.reopenInboxHandoff(intent.id,intent.version,intent.reason,intent.key);
       if(g!==generation.current||capturedUnit!==unitId)return;
       reopenIntent.current=undefined;
-      const[queued,mine,others,closed]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit)]);
+      const[queued,mine,others,closed,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
       if(g!==generation.current||capturedUnit!==unitId)return;
       const historical=closed.items.find(item=>item.id===selected.id);
-      setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setReopenOpen(false);setReopenReason("");
+      setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setReopenOpen(false);setReopenReason("");
       if(historical)setSelected(historical);else purgeSelection();
       setClosedNotice("Atendimento reaberto na fila humana.");
     }catch(caught){
@@ -713,8 +713,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if(!reopenIntent.current){purgeSelection();failCommittedReconciliation(caught,g)}
       else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
         reopenIntent.current=undefined;purgeSelection();
-        try{const[queued,mine,others,closed]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit)]);
-          if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setError(`O atendimento mudou antes da reabertura. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+        try{const[queued,mine,others,closed,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+          if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setError(`O atendimento mudou antes da reabertura. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
       }else fail(caught,g);
     }finally{releaseMutation(lockToken);if(g===generation.current)setReopening(false)}
   }
@@ -733,12 +733,12 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ?transferIntent.current:{id:target.handoffId,version:target.expectedVersion,targetUserId:transferTargetUserId,reason:transferReason,key:crypto.randomUUID()};transferIntent.current=intent;
     try{await client.transferInboxHandoff(intent.id,intent.version,intent.targetUserId,intent.reason,intent.key);if(g!==generation.current||capturedUnit!==unitId)return;
       transferIntent.current=undefined;purgeSelection();
-      const[queued,mine,others]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit)]);if(g!==generation.current||capturedUnit!==unitId)return;
-      setQueue(queued);setActive(mine);setSupervised(others);purgeSelection();transferIntent.current=undefined;setClosedNotice("Atendimento transferido.")
+      const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);if(g!==generation.current||capturedUnit!==unitId)return;
+      setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);purgeSelection();transferIntent.current=undefined;setClosedNotice("Atendimento transferido.")
     }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(!transferIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
       transferIntent.current=undefined;purgeSelection();
-      try{const[queued,mine,others]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit)]);
-        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setError(`O atendimento mudou antes da transferência. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+      try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
+        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError(`O atendimento mudou antes da transferência. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
     }else fail(caught,g)}finally{releaseMutation(lockToken);if(g===generation.current)setTransferring(false)}}
 
   async function takeover(){const target=detail?.takeoverTarget;
@@ -748,16 +748,16 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ?takeoverIntent.current:{id:target.handoffId,version:target.expectedVersion,key:crypto.randomUUID()};takeoverIntent.current=intent;
     try{await client.takeoverInboxHandoff(intent.id,intent.version,intent.key);if(g!==generation.current)return;
       takeoverIntent.current=undefined;setDetail(undefined);setMessages(undefined);setTakeoverConfirmOpen(false);
-      const[queued,mine,others,nextDetail,nextMessages]=await Promise.all([client.listHandoffs(queueInput(unitId)),
-        client.listActiveInboxHandoffs({unitId,limit:25}),supervisedFirst(unitId),client.getInboxConversation(selected.conversationId),
+      const[queued,mine,others,alerts,nextDetail,nextMessages]=await Promise.all([client.listHandoffs(queueInput(unitId)),
+        client.listActiveInboxHandoffs({unitId,limit:25}),supervisedFirst(unitId),slaAlertsFirst(unitId),client.getInboxConversation(selected.conversationId),
         client.listInboxConversationMessages(selected.conversationId,{limit:25})]);if(g!==generation.current)return;
-      const nextSelected=mine.items.find(item=>item.id===selected.id);setQueue(queued);setActive(mine);setSupervised(others);
+      const nextSelected=mine.items.find(item=>item.id===selected.id);setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);
       takeoverIntent.current=undefined;setTakeoverConfirmOpen(false);setClosedNotice("Atendimento assumido pela supervisão.");
       if(nextSelected){setSelected(nextSelected);setDetail(nextDetail);setMessages(nextMessages)}else purgeSelection("Atendimento assumido; atualize a lista para abri-lo.");
     }catch(caught){if(g!==generation.current)return;if(!takeoverIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
       takeoverIntent.current=undefined;setError(`O atendimento mudou antes da assunção. Correlação: ${caught.problem.correlationId}`);
-      try{const[queued,mine,others]=await Promise.all([client.listHandoffs(queueInput(unitId)),client.listActiveInboxHandoffs({unitId,limit:25}),supervisedFirst(unitId)]);
-        if(g===generation.current){setQueue(queued);setActive(mine);setSupervised(others);purgeSelection()}}catch(refreshError){fail(refreshError,g)}}else fail(caught,g)
+      try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(unitId)),client.listActiveInboxHandoffs({unitId,limit:25}),supervisedFirst(unitId),slaAlertsFirst(unitId)]);
+        if(g===generation.current){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);purgeSelection()}}catch(refreshError){fail(refreshError,g)}}else fail(caught,g)
     }finally{releaseMutation(lockToken);if(g===generation.current)setTakingOver(false)}}
 
   async function sendText() {

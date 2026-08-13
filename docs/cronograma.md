@@ -621,6 +621,18 @@ inventada; a ausência aparece explicitamente como `MISSING_SLA`. Prova verde: 3
 automatizados, 19/19 jornadas E2E OIDC no overlay reconstruído, banco limpo, upgrade legado,
 `typecheck:all`, OpenAPI/cliente, `build:all`, overlay Verify e `git diff --check`.
 
+Checkpoint local incremental em 2026-08-13, migration `0055`: o reconhecimento de alerta de SLA
+passou a pertencer ao episódio operacional identificado pela versão do handoff. A chave primária
+append-only inclui tenant, handoff e versão; a projeção exibe como reconhecido somente o alerta da
+versão corrente, preserva o replay histórico da versão anterior e exige um novo reconhecimento quando
+claim, devolução à fila ou outra mutação produz novo episódio. A Inbox passou a reconciliar a projeção
+de SLA junto das listas operacionais após claim, requeue, transferência, takeover, resolução e
+reabertura, sem reaproveitar intenção ou chave idempotente de uma versão anterior. A prova local passou
+por 92 testes core, 77 da API, 137 do frontend, 5 do overlay e 19/19 jornadas E2E OIDC em runtime,
+além de banco vazio, upgrade legado, `typecheck:all`, OpenAPI/cliente, `build:all` e
+`git diff --check`. O corte não cria política de minutos, mensagem, transporte Meta, resposta Hermes
+ou deploy; CI remoto e homologação externa ainda não fazem parte desta evidência.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

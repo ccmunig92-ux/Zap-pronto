@@ -109,8 +109,9 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/transfere atendimento entre dois atendentes/);
   assert.match(controller,/LOCAL_OIDC_HANDOFF_TRANSFER_STATE_INVALID/);
   assert.match(controller,/--grep','gestor consulta atendimento encerrado'/);
-  assert.match(controller,/--grep','gestor reconhece alerta de SLA uma única vez'/);
-  assert.match(controller,/handoff_sla_acknowledgements[\s\S]*handoff_sla_acknowledge_commands[\s\S]*SLA_ALERT_ACKNOWLEDGED/);
+  assert.match(controller,/--grep','gestor reconhece alerta de SLA uma única vez por versão'/);
+  assert.match(controller,/handoff_sla_acknowledgements[\s\S]*handoff_version IN\(1,3\)[\s\S]*handoff_sla_acknowledge_commands[\s\S]*expected_version IN\(1,3\)[\s\S]*SLA_ALERT_ACKNOWLEDGED/);
+  assert.match(controller,/status='QUEUED' AND version=3 AND assigned_user_id IS NULL AND claimed_at IS NULL/);
   assert.match(controller,/LOCAL_OIDC_SLA_ALERT_ACKNOWLEDGEMENT_STATE_INVALID/);
   assert.match(controller,/LOCAL_OIDC_HANDOFF_HISTORY_MUTATED_STATE/);
   assert.match(controller,/--grep','gestor reabre atendimento encerrado uma única vez'/);

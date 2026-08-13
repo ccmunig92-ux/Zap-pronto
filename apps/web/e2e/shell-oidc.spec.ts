@@ -217,7 +217,7 @@ test.describe("shell OIDC real", () => {
     expect(mutations).toEqual(["POST /v1/inbox/availability"]);expect(externalHosts).toEqual([]);
   });
 
-  test("gestor reconhece alerta de SLA uma única vez e persiste após reload",async({page})=>{
+  test("gestor reconhece alerta de SLA uma única vez por versão e persiste após reload",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar alertas SLA locais.");await login(page,account("MANAGER"));
     const posts:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());
       if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
@@ -228,7 +228,13 @@ test.describe("shell OIDC real", () => {
     await page.getByRole("button",{name:"Reconhecer alerta"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await acknowledged).status()).toBe(200);
     expect(posts).toHaveLength(1);await expect(page.getByText(/Reconhecido em/u)).toBeVisible();await page.reload();
     await expect(page.getByText(/Reconhecido em/u)).toBeVisible();await expect(page.getByRole("button",{name:"Reconhecer alerta"})).toHaveCount(0);
-    expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);await expect(page.getByText("Enviado",{exact:true})).toHaveCount(0);
+    await page.getByRole("button",{name:"Contato · NORMAL"}).click();await page.getByRole("button",{name:"Assumir atendimento"}).click();
+    await expect(page.getByRole("button",{name:"Contato · Em atendimento"})).toBeVisible();
+    await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();
+    const secondAcknowledged=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/acknowledge"));
+    await page.getByRole("button",{name:"Reconhecer alerta"}).click();expect((await secondAcknowledged).status()).toBe(200);
+    expect(posts).toHaveLength(2);await expect(page.getByText(/Reconhecido em/u)).toBeVisible();await page.reload();await expect(page.getByRole("button",{name:"Reconhecer alerta"})).toHaveCount(0);
+    expect(posts).toHaveLength(2);expect(externalHosts).toEqual([]);await expect(page.getByText("Enviado",{exact:true})).toHaveCount(0);
   });
 
   test("inbound materializado permite claim e devolução segura à fila",async({page})=>{
