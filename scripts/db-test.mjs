@@ -198,7 +198,7 @@ try {
     try{
       await assignmentRevoker.query("BEGIN");
       await assignmentRevoker.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text||':membership-lifecycle',0))",[assignmentRaceTenant]);
-      await assignmentRevoker.query("UPDATE user_units SET status='REVOKED',version=version+1 WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
+      await assignmentRevoker.query("UPDATE user_units SET status='REVOKED',version=version+1,state_changed_at=clock_timestamp(),revoked_at=clock_timestamp(),revoked_by_user_id=$2,revocation_reason='ASSIGNMENT_POLICY_AUTHORIZATION_RACE' WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
         [assignmentRaceTenant,assignmentRaceManager,assignmentRaceUnit]);
       await assignmentPolicyAfterRevoke.query("BEGIN");await assignmentPolicyAfterRevoke.query("SET LOCAL ROLE zap_pronto_api");
       await assignmentPolicyAfterRevoke.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','assignment-revocation-race',true)",
