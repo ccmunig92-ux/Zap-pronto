@@ -644,8 +644,18 @@ ausente e a projeção continua expondo `MISSING_SLA`. A configuração foi inte
 gerado e Inbox canônicos, sem serviço, banco ou fluxo paralelo. Prova local verde: 95 testes core, 79
 da API, 28 do cliente, 149 do frontend, 5 do overlay e 20/20 jornadas E2E OIDC em runtime, além de
 banco vazio, upgrade legado, `typecheck:all`, `test:all`, `api:check`, `build:all`, overlay Verify e
-`git diff --check`. O overlay limpo executa a cadeia append-only `0001`-`0056`. Esta evidência não
-comprova CI remoto da 0056, staging, deploy, produção, Hermes ou Meta real.
+`git diff --check`. O overlay limpo executa a cadeia append-only `0001`-`0056`. O HEAD `0e61817`
+também passou os dois checks remotos `validate` do push e do PR. Esta evidência não comprova staging,
+deploy, produção, Hermes ou Meta real.
+
+Checkpoint incremental em 2026-08-13, migration `0057`: a publicação da política SLA passou a
+serializar primeiro por tenant e chave idempotente e depois por tenant e unidade. Assim, a mesma chave
+usada concorrentemente em unidades distintas produz um único comando e conflito semântico sanitizado,
+nunca `unique_violation`. A interface separa `sla_policy.read` de `sla_policy.manage`: supervisores
+consultam a política em modo somente leitura, enquanto somente gestores e administradores autorizados
+recebem controles de publicação. A validação local inclui 151 testes do frontend, typecheck, OpenAPI,
+overlay Verify e diff-check; banco limpo e upgrade serão exigidos no CI antes da integração. O corte não cria
+serviço, scheduler, Hermes, Meta ou deploy.
 
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
@@ -659,7 +669,7 @@ comprova CI remoto da 0056, staging, deploy, produção, Hermes ou Meta real.
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0051`; staging deve
+   execução como evidência. A Inbox canônica já está implementada até a migration `0057`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

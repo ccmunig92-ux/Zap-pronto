@@ -163,6 +163,8 @@ try {
   assert.match(firstRun, /applied 0053_inbox_sla_alerts\.sql/);
   assert.match(firstRun, /applied 0054_sla_alert_projection_hardening\.sql/);
   assert.match(firstRun, /applied 0055_sla_acknowledgement_episodes\.sql/);
+  assert.match(firstRun, /applied 0056_unit_sla_policy\.sql/);
+  assert.match(firstRun, /applied 0057_sla_policy_idempotency_serialization\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
