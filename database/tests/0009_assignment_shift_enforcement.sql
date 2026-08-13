@@ -12,7 +12,7 @@ INSERT INTO user_units(tenant_id,user_id,unit_id,role)VALUES
 SELECT set_config('app.tenant_id','99000000-0000-4000-8000-000000000001',true),
  set_config('app.actor_id','99000000-0000-4000-8000-000000000003',true),set_config('app.correlation_id','assignment-policy-test',true);
 
-DO $$DECLARE policy record;readiness record;fp text;created record;replayed record;
+DO $$DECLARE policy record;readiness record;fp text;divergent_fp text;created record;replayed record;
 BEGIN
  SELECT * INTO policy FROM get_unit_assignment_policy('99000000-0000-4000-8000-000000000002');
  IF policy.mode<>'OBSERVE' OR policy.version<>1 THEN RAISE EXCEPTION 'ASSIGNMENT_POLICY_DEFAULT_INVALID';END IF;
@@ -24,7 +24,8 @@ BEGIN
  SELECT * INTO replayed FROM set_unit_assignment_policy('99000000-0000-4000-8000-000000000002','OBSERVE',1,'assignment-policy-key-1',fp);
  IF created.version<>2 OR created.replayed OR NOT replayed.replayed OR replayed.version<>created.version OR replayed.updated_at<>created.updated_at
    THEN RAISE EXCEPTION 'ASSIGNMENT_POLICY_REPLAY_INVALID';END IF;
- BEGIN PERFORM set_unit_assignment_policy('99000000-0000-4000-8000-000000000002','ENFORCE_NEW_ASSIGNMENTS',1,'assignment-policy-key-1',repeat('0',64));
+ divergent_fp:=encode(digest(convert_to('{"unitId":"99000000-0000-4000-8000-000000000002","mode":"ENFORCE_NEW_ASSIGNMENTS","expectedVersion":1}','UTF8'),'sha256'),'hex');
+ BEGIN PERFORM set_unit_assignment_policy('99000000-0000-4000-8000-000000000002','ENFORCE_NEW_ASSIGNMENTS',1,'assignment-policy-key-1',divergent_fp);
    RAISE EXCEPTION 'ASSIGNMENT_POLICY_DIVERGENT_REPLAY_ACCEPTED';EXCEPTION WHEN SQLSTATE 'P0001' THEN
    IF SQLERRM<>'ASSIGNMENT_POLICY_IDEMPOTENCY_CONFLICT' THEN RAISE;END IF;END;
  IF (SELECT count(*) FROM audit_events WHERE tenant_id='99000000-0000-4000-8000-000000000001' AND action='UNIT_ASSIGNMENT_POLICY_CHANGED')<>1
@@ -61,8 +62,9 @@ BEGIN
 END$$;
 
 SELECT set_config('app.actor_id','99000000-0000-4000-8000-000000000005',true);
-DO $$BEGIN
- BEGIN PERFORM set_unit_assignment_policy('99000000-0000-4000-8000-000000000002','OBSERVE',3,'assignment-policy-supervisor',repeat('0',64));
+DO $$DECLARE fp text;BEGIN
+ fp:=encode(digest(convert_to('{"unitId":"99000000-0000-4000-8000-000000000002","mode":"OBSERVE","expectedVersion":3}','UTF8'),'sha256'),'hex');
+ BEGIN PERFORM set_unit_assignment_policy('99000000-0000-4000-8000-000000000002','OBSERVE',3,'assignment-policy-supervisor',fp);
   RAISE EXCEPTION 'SUPERVISOR_POLICY_MANAGE_ACCEPTED';EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'INVALID_ASSIGNMENT_POLICY_REQUEST' AND SQLERRM<>'ASSIGNMENT_POLICY_NOT_FOUND' THEN RAISE;END IF;END;
 END$$;
 
