@@ -47,10 +47,10 @@ DO $$ DECLARE listed record;first_ack record;replay_ack record;next_ack record;B
  INSERT INTO service_cases(id,tenant_id,conversation_id,unit_id,kind,status)
  VALUES('88000000-0000-4000-8000-000000000002','81000000-0000-4000-8000-000000000001','87000000-0000-4000-8000-000000000002',
    '82000000-0000-4000-8000-000000000001','SCHEDULING','IN_REVIEW');
- INSERT INTO human_handoffs(id,tenant_id,conversation_id,service_case_id,unit_id,reason,priority,status,idempotency_key,assigned_user_id,claimed_at)
+INSERT INTO human_handoffs(id,tenant_id,conversation_id,service_case_id,unit_id,reason,priority,status,idempotency_key,assigned_user_id,queued_at,claimed_at)
  VALUES('89000000-0000-4000-8000-000000000002','81000000-0000-4000-8000-000000000001','87000000-0000-4000-8000-000000000002',
    '88000000-0000-4000-8000-000000000002','82000000-0000-4000-8000-000000000001','SLA_ACTIVE','NORMAL','ACTIVE','sla-active-handoff',
-   '83000000-0000-4000-8000-000000000001','2026-01-01 09:30Z');
+   '83000000-0000-4000-8000-000000000001','2026-01-01 09:30Z','2026-01-01 09:30Z');
  SELECT * INTO listed FROM list_inbox_sla_alerts('82000000-0000-4000-8000-000000000001',10,NULL,NULL,
    '2026-01-01 10:00Z',NULL,NULL,NULL,NULL,NULL);
  IF listed.handoff_id IS NULL OR listed.available_capacity<>2 THEN RAISE EXCEPTION 'SLA_RESIDUAL_CAPACITY_INVALID';END IF;
