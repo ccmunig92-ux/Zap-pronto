@@ -619,6 +619,15 @@ try {
     const workerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     const competingWorkerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 1 });
     const concurrentMaterializerPool = new pg.Pool({ connectionString: workerUrl.toString(), max: 20 });
+    let closingPools = false;
+    const guardedPools = [runtimePool, competingRuntimePool, workerPool, competingWorkerPool,
+      concurrentMaterializerPool];
+    for (const pool of guardedPools) {
+      pool.on("error", (error) => {
+        if (closingPools && error && typeof error === "object" && "code" in error && error.code === "57P01") return;
+        process.nextTick(() => { throw error; });
+      });
+    }
     try {
       const materializeInbound = async (pool, tenantId, actorId, outboxId, leaseToken) => {
         const client=await pool.connect();
@@ -4311,6 +4320,7 @@ try {
         }
       }
     } finally {
+      closingPools = true;
       await runtimePool.end();
       await competingRuntimePool.end();
       await workerPool.end();
