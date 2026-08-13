@@ -455,6 +455,7 @@ try {
       "unit_sla_policy_versions", "unit_sla_policy_targets", "unit_sla_policy_publish_commands",
       "unit_operational_timezone_versions", "unit_operational_timezone_commands",
       "unit_shift_schedule_versions", "unit_shift_schedule_commands",
+      "unit_assignment_policies", "unit_assignment_policy_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
