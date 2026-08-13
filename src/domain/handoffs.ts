@@ -434,10 +434,10 @@ export async function claimHandoff(
   const replay = await replayedClaim(client, normalizedInput);
   if (replay) return replay;
   const aggregate = await query<{
-    id: string; conversation_id: string; service_case_id: string; version: number;
+    id: string; conversation_id: string; service_case_id: string; unit_id:string; version: number;
     handoff_status: string; case_status: string; case_version: number; automation_status: string;
   }>(client, `
-    SELECT h.id, h.conversation_id, h.service_case_id, h.version,
+    SELECT h.id, h.conversation_id, h.service_case_id, h.unit_id, h.version,
       h.status AS handoff_status, sc.status AS case_status, sc.version AS case_version,
       c.automation_status
     FROM human_handoffs h
@@ -456,6 +456,7 @@ export async function claimHandoff(
   if (current.case_status !== "WAITING_HUMAN" || current.automation_status !== "HUMAN_QUEUED") {
     throw new Error("HANDOFF_AGGREGATE_INCONSISTENT");
   }
+  await client.query("SELECT assert_actor_new_claim_shift($1)",[current.unit_id]);
 
   const claimed = await query<{ version: number }>(client, `
     UPDATE human_handoffs SET status = 'ACTIVE', assigned_user_id = current_app_actor_id(),

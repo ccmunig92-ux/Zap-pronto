@@ -158,6 +158,35 @@ try {
     const effectiveShiftTestClient=new pg.Client({connectionString:targetUrl.toString()});await effectiveShiftTestClient.connect();
     try{await effectiveShiftTestClient.query(await readFile(resolve("database/tests","0008_effective_staff_shift.sql"),"utf8"));}
     finally{await effectiveShiftTestClient.end();}
+    const assignmentPolicyTestClient=new pg.Client({connectionString:targetUrl.toString()});await assignmentPolicyTestClient.connect();
+    try{await assignmentPolicyTestClient.query(await readFile(resolve("database/tests","0009_assignment_shift_enforcement.sql"),"utf8"));}
+    finally{await assignmentPolicyTestClient.end();}
+
+    const assignmentRaceTenant="99100000-0000-4000-8000-000000000001",assignmentRaceUnit="99100000-0000-4000-8000-000000000002",
+      assignmentRaceManager="99100000-0000-4000-8000-000000000003";
+    await target.query("INSERT INTO tenants(id,name)VALUES($1,'Assignment policy race')",[assignmentRaceTenant]);
+    await target.query("INSERT INTO units(id,tenant_id,code,name)VALUES($1,$2,'ASSIGN-RACE','Assignment race')",[assignmentRaceUnit,assignmentRaceTenant]);
+    await target.query("INSERT INTO users(id,tenant_id,email,display_name)VALUES($1,$2,'assignment-race@test.local','Assignment manager')",[assignmentRaceManager,assignmentRaceTenant]);
+    await target.query("INSERT INTO user_units(tenant_id,user_id,unit_id,role)VALUES($1,$2,$3,'UNIT_MANAGER')",[assignmentRaceTenant,assignmentRaceManager,assignmentRaceUnit]);
+    await target.query("INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,version,created_by_user_id)VALUES($1,$2,'UTC',1,$3)",
+      [assignmentRaceTenant,assignmentRaceUnit,assignmentRaceManager]);
+    await target.query(`INSERT INTO unit_shift_schedule_versions(tenant_id,unit_id,user_id,version,effective_from,time_zone,weekly_slots,exceptions,created_by_user_id)
+      VALUES($1,$2,$3,1,(transaction_timestamp() AT TIME ZONE 'UTC')::date,'UTC',jsonb_build_array(jsonb_build_object('weekday',extract(isodow FROM transaction_timestamp() AT TIME ZONE 'UTC')::integer,'start','00:00','end','23:59')),'[]',$3)`,
+      [assignmentRaceTenant,assignmentRaceUnit,assignmentRaceManager]);
+    const assignmentRaceClients=await Promise.all([0,1].map(async(index)=>{const client=new pg.Client({connectionString:targetUrl.toString()});await client.connect();
+      await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id',$3,true)",
+        [assignmentRaceTenant,assignmentRaceManager,`assignment-race-${index}`]);return client}));
+    const assignmentRaceFingerprint=createHash("sha256").update(JSON.stringify({unitId:assignmentRaceUnit,mode:"ENFORCE_NEW_ASSIGNMENTS",expectedVersion:1})).digest("hex");
+    const assignmentRaceResults=await Promise.allSettled(assignmentRaceClients.map(async(client,index)=>{try{const result=await client.query(
+      "SELECT * FROM set_unit_assignment_policy($1,'ENFORCE_NEW_ASSIGNMENTS',1,$2,$3)",[assignmentRaceUnit,`assignment-race-key-${index}`,assignmentRaceFingerprint]);
+      await client.query("COMMIT");return result;}catch(error){await client.query("ROLLBACK");throw error;}finally{await client.end()}}));
+    assert.equal(assignmentRaceResults.filter(result=>result.status==="fulfilled").length,1);
+    assert.equal(assignmentRaceResults.filter(result=>result.status==="rejected"&&String(result.reason).includes("ASSIGNMENT_POLICY_CONFLICT")).length,1);
+    const assignmentRaceProof=await target.query(`SELECT
+      (SELECT count(*)::integer FROM unit_assignment_policy_commands WHERE tenant_id=$1) commands,
+      (SELECT count(*)::integer FROM audit_events WHERE tenant_id=$1 AND action='UNIT_ASSIGNMENT_POLICY_CHANGED') audits,
+      (SELECT version FROM unit_assignment_policies WHERE tenant_id=$1 AND unit_id=$2) version`,[assignmentRaceTenant,assignmentRaceUnit]);
+    assert.deepEqual(assignmentRaceProof.rows[0],{commands:1,audits:1,version:2});
 
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";

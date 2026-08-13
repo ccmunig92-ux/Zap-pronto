@@ -110,7 +110,10 @@ export function registerInboxHandoffRoutes(app: FastifyInstance, pool: TenantTra
         return { handoff: view({ ...handoff, status: result.status, version: result.version,
           automationStatus: result.automationStatus ?? "HUMAN_ACTIVE",
           assignedUserId: result.assignedUserId ?? handoff.assignedUserId }), replayed: result.replayed ?? false };
-      } catch (error) { return InboxHandoffRequestError.from(error); }
+      } catch (error) {
+        if(error instanceof Error&&error.message==="ASSIGNEE_OUTSIDE_SHIFT")throw InboxHandoffRequestError.outsideShift();
+        return InboxHandoffRequestError.from(error);
+      }
     },
   }));
   app.post("/v1/inbox/handoffs/:handoffId/resolve",protectedRoute({pool,noStore:true,
