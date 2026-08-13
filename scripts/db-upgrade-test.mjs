@@ -162,6 +162,7 @@ try {
   assert.match(firstRun, /applied 0052_availability_authorization_hardening\.sql/);
   assert.match(firstRun, /applied 0053_inbox_sla_alerts\.sql/);
   assert.match(firstRun, /applied 0054_sla_alert_projection_hardening\.sql/);
+  assert.match(firstRun, /applied 0055_sla_acknowledgement_episodes\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -223,13 +224,18 @@ try {
       has_function_privilege('zap_pronto_worker','resolve_inbox_sla_alert_ack_unit(uuid,integer,text,text)','EXECUTE') resolver_worker,
       has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0053(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') internal_list_api,
       pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
-        LIKE '%handoff.version%' projects_handoff_version,
+        LIKE '%candidate.version%' projects_handoff_version,
+      EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_sla_acknowledgements'::regclass
+        AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (tenant_id, handoff_id, handoff_version)') episode_primary_key,
+      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%ack.handoff_version%' AND pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%candidate.version%' current_episode_join,
       has_table_privilege('zap_pronto_api','handoff_sla_acknowledgements','SELECT') direct_select,
       NOT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='handoff_sla_alerts') no_alert_table`);
     assert.deepEqual(slaAlertUpgrade.rows[0],{read_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
       ack_roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],ack_table:true,command_table:true,list_api:true,
       list_worker:false,ack_api:true,ack_worker:false,resolver_api:true,resolver_worker:false,internal_list_api:false,
-      projects_handoff_version:true,direct_select:false,no_alert_table:true});
+      projects_handoff_version:true,episode_primary_key:true,current_episode_join:true,direct_select:false,no_alert_table:true});
     const conversations = await verify.query(`SELECT count(*)::integer AS count,
       count(*) FILTER (WHERE status='OPEN')::integer AS open_count,
       count(*) FILTER (WHERE status='CLOSED')::integer AS closed_count FROM conversations`);

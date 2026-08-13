@@ -108,6 +108,7 @@ try {
       "0052_availability_authorization_hardening.sql",
       "0053_inbox_sla_alerts.sql",
       "0054_sla_alert_projection_hardening.sql",
+      "0055_sla_acknowledgement_episodes.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -1692,6 +1693,16 @@ try {
         async client=>(await client.query("SELECT resolve_inbox_sla_alert_ack_unit($1,$2,$3,$4) unit_id",
           [handoffA.rows[0].id,3,slaResolverKey,slaResolverFingerprint])).rows[0].unit_id);
       assert.equal(resolvedSlaUnit,slaHandoffUnit);
+      const slaAckKey="sla-ack-version-three",slaAckFingerprint=createHash("sha256").update(
+        `{"expectedVersion":3,"handoffId":"${handoffA.rows[0].id.toLowerCase()}"}`).digest("hex");
+      const slaAckResults=await Promise.all(Array.from({length:12},(_,index)=>withTenantTransaction(
+        index%2?competingRuntimePool:runtimePool,{...claimContext,correlationId:`sla-ack-v3-${index}`},async client=>(await client.query(
+          "SELECT * FROM acknowledge_inbox_sla_alert($1,$2,$3,$4)",
+          [handoffA.rows[0].id,3,slaAckKey,slaAckFingerprint])).rows[0])));
+      assert.equal(slaAckResults.filter(result=>!result.replayed).length,1);
+      assert.ok(slaAckResults.every(result=>result.version===1));
+      assert.equal((await target.query(`SELECT count(*)::int count FROM handoff_sla_acknowledgements
+        WHERE tenant_id=$1 AND handoff_id=$2 AND handoff_version=3`,[claimContext.tenantId,handoffA.rows[0].id])).rows[0].count,1);
       await assert.rejects(withTenantTransaction(runtimePool,{tenantId:"50000000-0000-4000-8000-000000000002",
         actorId:actorBId,correlationId:"sla-resolver-cross-tenant"},client=>client.query(
         "SELECT resolve_inbox_sla_alert_ack_unit($1,$2,$3,$4)",[handoffA.rows[0].id,3,slaResolverKey,

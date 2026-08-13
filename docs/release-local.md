@@ -8,7 +8,8 @@ produção.
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
-- Migrations append-only até `0050_handoff_reopen_latest_episode.sql`.
+- Baseline versionado até `0050_handoff_reopen_latest_episode.sql` e incremento local append-only
+  validado até `0055_sla_acknowledgement_episodes.sql`.
 - Overlay OIDC exclusivamente sintético, com duas identidades operacionais locais.
 - Outbound externo e Hermes desativados.
 
@@ -46,6 +47,19 @@ Get-FileHash database/migrations/*.sql -Algorithm SHA256
 
 Não reescreva migrations publicadas. Qualquer correção de esquema posterior deve usar o próximo número
 append-only e passar tanto pelo banco vazio quanto pelo upgrade legado.
+
+## Evidência local incremental 0055
+
+A migration `0055_sla_acknowledgement_episodes.sql` altera a identidade do reconhecimento de SLA para
+`(tenant_id, handoff_id, handoff_version)`. Assim, a listagem associa somente o ACK da versão atual,
+um replay continua recuperando o episódio histórico correto e uma nova versão em fila exige novo
+reconhecimento. As mutações da Inbox reconciliam também a projeção de alertas para não manter ACK,
+versão ou ação stale após claim, requeue, transferência, takeover, resolução ou reabertura.
+
+Evidência executada no checkout local: 92 testes core, 77 da API, 137 do frontend, 5 do overlay e
+19/19 jornadas E2E OIDC em runtime, além de banco vazio, upgrade legado, `typecheck:all`,
+`api:check`, `build:all` e `git diff --check` verdes. Essas contagens não comprovam CI remoto,
+staging, deploy, produção, Hermes ou Meta real.
 
 ## Gates obrigatórios
 

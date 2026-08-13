@@ -22,3 +22,18 @@ test("SLA alert cursor preserves snapshot, filters and both independent ranks ac
 });
 test("SLA acknowledgement passes stable key and fingerprint",async()=>{let values:unknown[]=[];const client={async query(_sql:string,input?:unknown[]){values=input??[];return{rows:[{handoffId:handoff,unitId:unit,acknowledgedAt:new Date(),acknowledgedByUserId:unit,version:1,replayed:false}]}}};
   await acknowledgeSlaAlert(client,{handoffId:handoff,expectedVersion:2,idempotencyKey:" ack-command-1 "});assert.equal(values[2],"ack-command-1");assert.match(String(values[3]),/^[a-f0-9]{64}$/);});
+test("SLA acknowledgement keeps handoff episode version in the request and stable historical replay",async()=>{
+  const calls:unknown[][]=[],atV1=new Date("2026-01-01T10:00:00Z"),atV3=new Date("2026-01-01T10:30:00Z");let step=0;
+  const rows=[
+    {handoffId:handoff,unitId:unit,acknowledgedAt:atV1,acknowledgedByUserId:unit,version:1,replayed:false},
+    {handoffId:handoff,unitId:unit,acknowledgedAt:atV3,acknowledgedByUserId:unit,version:1,replayed:false},
+    {handoffId:handoff,unitId:unit,acknowledgedAt:atV1,acknowledgedByUserId:unit,version:1,replayed:true}];
+  const client={async query(_sql:string,values?:unknown[]){calls.push(values??[]);return{rows:[rows[step++]]}}};
+  const first=await acknowledgeSlaAlert(client,{handoffId:handoff,expectedVersion:1,idempotencyKey:"ack-v1-command"});
+  const current=await acknowledgeSlaAlert(client,{handoffId:handoff,expectedVersion:3,idempotencyKey:"ack-v3-command"});
+  const replay=await acknowledgeSlaAlert(client,{handoffId:handoff,expectedVersion:1,idempotencyKey:"ack-v1-command"});
+  assert.deepEqual(calls.map(values=>values.slice(0,3)),[
+    [handoff,1,"ack-v1-command"],[handoff,3,"ack-v3-command"],[handoff,1,"ack-v1-command"]]);
+  assert.equal(first.replayed,false);assert.equal(current.replayed,false);assert.equal(replay.replayed,true);
+  assert.equal(replay.acknowledgedAt,atV1);assert.equal(replay.version,first.version);
+});

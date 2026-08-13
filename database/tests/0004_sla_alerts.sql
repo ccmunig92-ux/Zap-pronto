@@ -20,7 +20,7 @@ INSERT INTO human_handoffs(id,tenant_id,conversation_id,service_case_id,unit_id,
 VALUES('89000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','87000000-0000-4000-8000-000000000001','88000000-0000-4000-8000-000000000001','82000000-0000-4000-8000-000000000001','SLA_TEST','URGENT','QUEUED','sla-test-handoff','2026-01-01 08:00Z','2026-01-01 08:00Z','2026-01-01 08:00Z','2026-01-01 09:00Z');
 SELECT set_config('app.tenant_id','81000000-0000-4000-8000-000000000001',true),
  set_config('app.actor_id','83000000-0000-4000-8000-000000000001',true),set_config('app.correlation_id','sla-alert-test',true);
-DO $$ DECLARE listed record;first_ack record;replay_ack record;BEGIN
+DO $$ DECLARE listed record;first_ack record;replay_ack record;next_ack record;BEGIN
  SELECT * INTO listed FROM list_inbox_sla_alerts('82000000-0000-4000-8000-000000000001',10,NULL,NULL,
    '2026-01-01 10:00Z',NULL,NULL,NULL,NULL,NULL);
  IF listed.sla_status<>'OVERDUE' OR listed.age_seconds<>7200 THEN RAISE EXCEPTION 'SLA_ALERT_PROJECTION_INVALID';END IF;
@@ -32,5 +32,21 @@ DO $$ DECLARE listed record;first_ack record;replay_ack record;BEGIN
    RAISE EXCEPTION 'SLA_ACK_REPLAY_INVALID';END IF;
  IF (SELECT count(*) FROM audit_events WHERE action='SLA_ALERT_ACKNOWLEDGED')<>1 THEN RAISE EXCEPTION 'SLA_ACK_AUDIT_INVALID';END IF;
  IF EXISTS(SELECT 1 FROM outbox_events WHERE aggregate_id='89000000-0000-4000-8000-000000000001') THEN RAISE EXCEPTION 'SLA_ACK_OUTBOX_FORBIDDEN';END IF;
+ UPDATE human_handoffs SET version=3 WHERE tenant_id='81000000-0000-4000-8000-000000000001'
+   AND id='89000000-0000-4000-8000-000000000001';
+ SELECT * INTO listed FROM list_inbox_sla_alerts('82000000-0000-4000-8000-000000000001',10,NULL,NULL,
+   '2026-01-01 10:00Z',NULL,NULL,NULL,NULL,NULL);
+ IF listed.acknowledged_at IS NOT NULL OR listed.acknowledgement_version<>3 THEN
+   RAISE EXCEPTION 'SLA_ACK_CURRENT_EPISODE_PROJECTION_INVALID';END IF;
+ SELECT * INTO next_ack FROM acknowledge_inbox_sla_alert('89000000-0000-4000-8000-000000000001',3,
+   'sla-ack-key-3','539a8e9a86c0bf1e6b74df2a6626cb7f78b3203d7a5efd36f5cb75c4a5fda1de');
+ SELECT * INTO replay_ack FROM acknowledge_inbox_sla_alert('89000000-0000-4000-8000-000000000001',1,
+   'sla-ack-key-1','48ec574821c1bde61e699d7ba8f3fe5831fa94a07c5650b4f607fd027cf1acd7');
+ IF next_ack.replayed OR NOT replay_ack.replayed OR replay_ack.acknowledged_at<>first_ack.acknowledged_at
+   OR (SELECT count(*) FROM handoff_sla_acknowledgements WHERE handoff_id='89000000-0000-4000-8000-000000000001')<>2 THEN
+   RAISE EXCEPTION 'SLA_ACK_EPISODE_HISTORY_INVALID';END IF;
+ IF (SELECT count(*) FROM audit_events WHERE action='SLA_ALERT_ACKNOWLEDGED')<>2
+   OR EXISTS(SELECT 1 FROM outbox_events WHERE aggregate_id='89000000-0000-4000-8000-000000000001') THEN
+   RAISE EXCEPTION 'SLA_ACK_EPISODE_SIDE_EFFECT_INVALID';END IF;
 END$$;
 ROLLBACK;
