@@ -159,6 +159,7 @@ try {
   assert.match(firstRun, /applied 0049_handoff_reopen\.sql/);
   assert.match(firstRun, /applied 0050_handoff_reopen_latest_episode\.sql/);
   assert.match(firstRun, /applied 0051_attendant_availability\.sql/);
+  assert.match(firstRun, /applied 0052_availability_authorization_hardening\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -194,9 +195,19 @@ try {
       has_function_privilege('zap_pronto_worker','get_actor_unit_availability(uuid)','EXECUTE') read_worker,
       has_function_privilege('zap_pronto_api','set_actor_unit_availability(uuid,text,integer,text,timestamptz,integer,text,text)','EXECUTE') write_api,
       has_function_privilege('zap_pronto_app','set_actor_unit_availability(uuid,text,integer,text,timestamptz,integer,text,text)','EXECUTE') write_app,
+      has_function_privilege('zap_pronto_api','get_actor_unit_availability_v0051(uuid)','EXECUTE') internal_read_api,
+      has_function_privilege('zap_pronto_api','set_actor_unit_availability_v0051(uuid,text,integer,text,timestamptz,integer,text,text)','EXECUTE') internal_write_api,
+      pg_get_functiondef('get_actor_unit_availability(uuid)'::regprocedure) LIKE '%assert_app_context_authorized%' read_asserts_context,
+      pg_get_functiondef('set_actor_unit_availability(uuid,text,integer,text,timestamptz,integer,text,text)'::regprocedure)
+        LIKE '%membership.status=''ACTIVE''%' write_reauthorizes,
+      pg_get_functiondef('list_inbox_handoff_transfer_candidates(uuid)'::regprocedure)
+        LIKE '%membership.role%' AND pg_get_functiondef('list_inbox_handoff_transfer_candidates(uuid)'::regprocedure)
+        LIKE '%TENANT_ADMIN%' AND pg_get_functiondef('list_inbox_handoff_transfer_candidates(uuid)'::regprocedure)
+        LIKE '%ATTENDANT%' transfer_role_filter,
       has_table_privilege('zap_pronto_api','attendant_unit_availability','SELECT') direct_select`);
     assert.deepEqual(availabilityUpgrade.rows[0],{availability_table:true,command_table:true,read_api:true,
-      read_worker:false,write_api:true,write_app:false,direct_select:false});
+      read_worker:false,write_api:true,write_app:false,internal_read_api:false,internal_write_api:false,
+      read_asserts_context:true,write_reauthorizes:true,transfer_role_filter:true,direct_select:false});
     const conversations = await verify.query(`SELECT count(*)::integer AS count,
       count(*) FILTER (WHERE status='OPEN')::integer AS open_count,
       count(*) FILTER (WHERE status='CLOSED')::integer AS closed_count FROM conversations`);

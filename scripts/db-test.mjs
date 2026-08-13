@@ -18,6 +18,7 @@ import { listAdministrativeInvitations, listAdministrativeUsers, unitMembershipF
 import { buildApp } from "../apps/api/dist/app.js";
 import { createOidcIdentityVerifier } from "../apps/api/dist/auth/oidc-verifier.js";
 import { claimInboundMaterializationEvents, processInboundClaim } from "../apps/api/dist/worker/inbound-runner.js";
+import { getActorUnitAvailability, setActorUnitAvailability } from "../dist/domain/availability.js";
 
 const adminConnection = process.env.DATABASE_ADMIN_URL;
 if (!adminConnection) throw new Error("DATABASE_ADMIN_URL_REQUIRED");
@@ -104,6 +105,7 @@ try {
       "0049_handoff_reopen.sql",
       "0050_handoff_reopen_latest_episode.sql",
       "0051_attendant_availability.sql",
+      "0052_availability_authorization_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -1549,6 +1551,38 @@ try {
         expectedVersion: handoffA.rows[0].version,
         idempotencyKey: "claim-concurrent-a",
       };
+      const availabilityUnitId=(await target.query("SELECT unit_id FROM human_handoffs WHERE id=$1",
+        [handoffA.rows[0].id])).rows[0].unit_id;
+      const availabilityCommand={unitId:availabilityUnitId,status:"OFFLINE",maxActive:10,pauseReason:null,
+        pausedUntil:null,expectedVersion:1,idempotencyKey:"availability-auth-replay"};
+      const availabilityChanged=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-create"},
+        client=>setActorUnitAvailability(client,availabilityCommand));
+      assert.equal(availabilityChanged.replayed,false);assert.equal(availabilityChanged.status,"OFFLINE");
+      assert.equal((await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-replay"},
+        client=>setActorUnitAvailability(client,availabilityCommand))).replayed,true);
+      const availabilityEffects=(await target.query(`SELECT
+        (SELECT count(*)::int FROM attendant_availability_commands WHERE tenant_id=$1 AND user_id=$2) commands,
+        (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND actor_id=$2::text
+          AND action='ATTENDANT_AVAILABILITY_CHANGED') audits`,[claimContext.tenantId,claimContext.actorId])).rows[0];
+      await target.query(`UPDATE user_units SET status='REVOKED',revoked_at=now(),revoked_by_user_id=$2,
+        revocation_reason='Availability replay authorization test' WHERE tenant_id=$1 AND user_id=$2`,
+      [claimContext.tenantId,claimContext.actorId]);
+      await assert.rejects(withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-get-revoked"},
+        client=>getActorUnitAvailability(client,availabilityUnitId)),/AVAILABILITY_NOT_FOUND/);
+      await assert.rejects(withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-replay-revoked"},
+        client=>setActorUnitAvailability(client,availabilityCommand)),/AVAILABILITY_NOT_FOUND/);
+      assert.deepEqual((await target.query(`SELECT
+        (SELECT count(*)::int FROM attendant_availability_commands WHERE tenant_id=$1 AND user_id=$2) commands,
+        (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND actor_id=$2::text
+          AND action='ATTENDANT_AVAILABILITY_CHANGED') audits`,[claimContext.tenantId,claimContext.actorId])).rows[0],availabilityEffects);
+      await target.query(`UPDATE user_units SET status='ACTIVE',revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL
+        WHERE tenant_id=$1 AND user_id=$2`,[claimContext.tenantId,claimContext.actorId]);
+      assert.equal((await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-get-restored"},
+        client=>getActorUnitAvailability(client,availabilityUnitId))).status,"OFFLINE");
+      const availabilityRestored=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-available"},
+        client=>setActorUnitAvailability(client,{...availabilityCommand,status:"AVAILABLE",expectedVersion:2,
+          idempotencyKey:"availability-auth-available"}));
+      assert.equal(availabilityRestored.status,"AVAILABLE");
       await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
         pause_reason=NULL,paused_until=NULL WHERE tenant_id=$1 AND user_id=$2`,
         [claimContext.tenantId,claimContext.actorId]);
@@ -1679,11 +1713,11 @@ try {
       await assert.rejects(withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-blocked"},client=>transferHandoff(client,
         {handoffId:handoffA.rows[0].id,expectedVersion:4,targetUserId:transferTargetId,reason:"LOAD_BALANCING",idempotencyKey:"handoff-transfer-blocked"})),/HANDOFF_TRANSFER_NOT_FOUND/);
       await target.query("UPDATE users SET status='ACTIVE',blocked_at=NULL WHERE id=$1",[transferTargetId]);
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
+        pause_reason=NULL,paused_until=NULL WHERE user_id=$1`,[transferTargetId]);
       await target.query("UPDATE user_units SET role='AUDITOR' WHERE user_id=$1",[transferTargetId]);
       assert.deepEqual(await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates-auditor"},client=>listTransferCandidates(client,handoffA.rows[0].id)),{items:[]});
       await target.query("UPDATE user_units SET role='ATTENDANT' WHERE user_id=$1",[transferTargetId]);
-      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
-        pause_reason=NULL,paused_until=NULL WHERE user_id=$1`,[transferTargetId]);
       const legacyTransferKey="handoff-transfer-legacy-key";
       const legacyTransferFingerprint=createHash("sha256").update(`{"expectedVersion":4,"handoffId":"${handoffA.rows[0].id.toLowerCase()}","targetUserId":"${transferTargetId.toLowerCase()}"}`).digest("hex");
       await target.query(`INSERT INTO handoff_transfer_commands(tenant_id,idempotency_key,handoff_id,expected_version,target_user_id,
