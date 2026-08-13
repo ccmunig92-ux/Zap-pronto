@@ -171,6 +171,7 @@ try {
   assert.match(firstRun, /applied 0061_effective_staff_shift\.sql/);
   assert.match(firstRun, /applied 0062_unit_assignment_shift_enforcement\.sql/);
   assert.match(firstRun, /applied 0063_assignment_policy_authorization_hardening\.sql/);
+  assert.match(firstRun, /applied 0064_shift_aware_sla_capacity\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -197,6 +198,19 @@ try {
       unit_count:assignmentPolicyUpgrade.rows[0].unit_count,defaults_observe:true,get_api:true,set_api:true,get_worker:false,
       evaluator_api:false,assignment_internal_api:false,claim_gate_api:true,table_api:false,rls_forced:true,transfer_gated:true,
       replay_actor_bound:true,auth_after_membership_lock:true,takeover_unchanged:true});
+    const shiftAwareSlaUpgrade=await verify.query(`SELECT
+      has_function_privilege('zap_pronto_api','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') legacy_api_execute,
+      pg_get_functiondef('list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%evaluate_unit_staff_shift_internal%' shift_aware,
+      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%active_counts AS MATERIALIZED%' active_counts_once,
+      EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='human_handoffs'
+        AND indexname='human_handoffs_active_assignee_capacity_idx'
+        AND indexdef LIKE '%(tenant_id, unit_id, assigned_user_id)%' AND indexdef LIKE '%status = ''ACTIVE''%') capacity_index`);
+    assert.deepEqual(shiftAwareSlaUpgrade.rows[0],{api_execute:true,worker_execute:false,legacy_api_execute:false,
+      shift_aware:true,active_counts_once:true,capacity_index:true});
     const transferReplayUpgrade=await verify.query(`SELECT
       (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
         AND table_name='handoff_transfer_commands' AND column_name='unit_id') unit_nullable,
@@ -255,8 +269,8 @@ try {
         LIKE '%candidate.version%' projects_handoff_version,
       EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='handoff_sla_acknowledgements'::regclass
         AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (tenant_id, handoff_id, handoff_version)') episode_primary_key,
-      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
-        LIKE '%ack.handoff_version%' AND pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+      pg_get_functiondef('list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%ack.handoff_version%' AND pg_get_functiondef('list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
         LIKE '%candidate.version%' current_episode_join,
       has_table_privilege('zap_pronto_api','handoff_sla_acknowledgements','SELECT') direct_select,
       NOT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='handoff_sla_alerts') no_alert_table`);

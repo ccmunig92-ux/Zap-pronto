@@ -117,6 +117,7 @@ try {
       "0061_effective_staff_shift.sql",
       "0062_unit_assignment_shift_enforcement.sql",
       "0063_assignment_policy_authorization_hardening.sql",
+      "0064_shift_aware_sla_capacity.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);

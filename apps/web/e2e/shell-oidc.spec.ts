@@ -352,6 +352,24 @@ test.describe("shell OIDC real", () => {
     expect(posts).toHaveLength(2);expect(externalHosts).toEqual([]);await expect(page.getByText("Enviado",{exact:true})).toHaveCount(0);
   });
 
+  test("alerta SLA preserva o item e zera a capacidade quando a escala vigente fecha",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar capacidade de alerta consciente do turno.");await login(page,account("MANAGER"));
+    const externalHosts:string[]=[],outboundRequests:string[]=[],schedulePosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);if(request.method()==="POST"&&/\/staff-schedules\//u.test(url.pathname))schedulePosts.push(url.pathname);if(/meta|facebook|whatsapp/iu.test(url.hostname)||url.pathname==="/v1/webhooks/meta")outboundRequests.push(`${request.method()} ${url.href}`)});
+    await expect(page.getByRole("heading",{name:"Alertas de SLA"})).toBeVisible();const alertLabel=page.getByText("Sem prazo de SLA",{exact:true}).last();await expect(alertLabel).toBeVisible();
+    const positiveCapacity=page.getByText(/Capacidade disponível: [1-9]\d*/u);await expect(positiveCapacity).toBeVisible();const initialAlertCount=await page.getByText("Sem prazo de SLA",{exact:true}).count();
+
+    const unitId="90000000-0000-4000-8000-000000000002",managerUserId="90000000-0000-4000-8000-000000000012";await openModule(page,"Escalas");
+    const scheduleRequest=page.waitForRequest(request=>request.method()==="GET"&&new URL(request.url()).pathname===`/v1/units/${unitId}/staff-schedules/${managerUserId}`);
+    await page.getByLabel("Integrante").selectOption(managerUserId);const authorization=(await (await scheduleRequest).allHeaders()).authorization;if(!authorization)throw new Error("SLA_SHIFT_AUTHORIZATION_NOT_CAPTURED");
+    const localDate=new Intl.DateTimeFormat("en-CA",{timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+    const closed=await page.evaluate(async({unitId,managerUserId,authorization,localDate})=>{const weeklySlots=Array.from({length:7},(_,index)=>({weekday:index+1,start:"00:00",end:"23:59"}));const response=await fetch(`/v1/units/${unitId}/staff-schedules/${managerUserId}`,{method:"POST",headers:{authorization,"idempotency-key":crypto.randomUUID(),"content-type":"application/json"},body:JSON.stringify({expectedVersion:1,effectiveFrom:localDate,weeklySlots,exceptions:[{date:localDate,type:"CLOSED"}]})});return{status:response.status,body:await response.text()}},{unitId,managerUserId,authorization,localDate});
+    if(closed.status!==200)throw new Error(`SLA_SHIFT_CLOSE_FAILED:${closed.status}:${closed.body.slice(0,500)}`);
+
+    await openModule(page,"Inbox");await page.getByRole("button",{name:"Atualizar Inbox"}).click();await expect(page.getByText("Sem prazo de SLA",{exact:true}).last()).toBeVisible();
+    await expect(page.getByText("Capacidade disponível: 0")).toBeVisible();expect(await page.getByText("Sem prazo de SLA",{exact:true}).count()).toBe(initialAlertCount);
+    expect(schedulePosts).toHaveLength(1);expect(outboundRequests).toEqual([]);expect(externalHosts).toEqual([]);await expect(page.getByText("Enviado",{exact:true})).toHaveCount(0);
+  });
+
   test("inbound materializado permite claim e devolução segura à fila",async({page})=>{
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");await login(page,account("ATTENDANT"));
     const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
