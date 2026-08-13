@@ -470,6 +470,12 @@ export type SetStaffScheduleResponse=Static<typeof SetStaffScheduleResponseSchem
 export const ShiftMemberSchema=Type.Object({userId:Type.String({format:"uuid"}),displayName:Type.String({minLength:1,maxLength:160}),role:AppRoleSchema},{additionalProperties:false});
 export const ListShiftMembersResponseSchema=Type.Object({items:Type.Array(ShiftMemberSchema)},{additionalProperties:false});
 export type ListShiftMembersResponse=Static<typeof ListShiftMembersResponseSchema>;
+export const EffectiveStaffShiftStateSchema=Type.Union([Type.Literal("IN_SHIFT"),Type.Literal("OUTSIDE_SHIFT"),Type.Literal("CLOSED"),Type.Literal("NOT_EFFECTIVE"),Type.Literal("UNCONFIGURED")]);
+export type EffectiveStaffShiftState=Static<typeof EffectiveStaffShiftStateSchema>;
+export const EffectiveStaffShiftQuerySchema=Type.Object({at:Type.Optional(Type.String({format:"date-time"}))},{additionalProperties:false});
+export type EffectiveStaffShiftQuery=Static<typeof EffectiveStaffShiftQuerySchema>;
+export const EffectiveStaffShiftSchema=Type.Object({unitId:Type.String({format:"uuid"}),userId:Type.String({format:"uuid"}),state:EffectiveStaffShiftStateSchema,scheduleVersion:Type.Union([Type.Integer({minimum:1}),Type.Null()]),effectiveFrom:Type.Union([Type.String({format:"date"}),Type.Null()]),timeZone:Type.Union([OperationalTimezoneNameSchema,Type.Null()]),localDate:Type.Union([Type.String({format:"date"}),Type.Null()]),localTime:Type.Union([Type.String({pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d$"}),Type.Null()])},{additionalProperties:false});
+export type EffectiveStaffShift=Static<typeof EffectiveStaffShiftSchema>;
 export const HandoffResolutionDispositionSchema=Type.Union([
   Type.Literal("RESOLVED"),Type.Literal("DUPLICATE"),Type.Literal("CUSTOMER_WITHDREW"),Type.Literal("EXTERNAL_REFERRAL"),
 ],{$id:"HandoffResolutionDisposition"});

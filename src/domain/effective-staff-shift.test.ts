@@ -1,0 +1,7 @@
+import assert from "node:assert/strict";import test from "node:test";import{evaluateUnitStaffShift}from"./shift-schedule.js";
+const unitId="10000000-0000-4000-8000-000000000001",userId="20000000-0000-4000-8000-000000000001";
+test("consulta estreita e read-only com instante canonico",async()=>{let sql="",values:readonly unknown[]=[];const expected={unitId,userId,state:"IN_SHIFT",scheduleVersion:2,effectiveFrom:"2026-08-13",timeZone:"America/Sao_Paulo",localDate:"2026-08-13",localTime:"09:00:00"};
+  const row=await evaluateUnitStaffShift({query:async(s:string,v?:readonly unknown[])=>{sql=s;values=v??[];return{rows:[expected]}}}as never,{unitId,userId,at:new Date("2026-08-13T12:00:00.000Z")});
+  assert.deepEqual(row,expected);assert.deepEqual(values,[unitId,userId,"2026-08-13T12:00:00.000Z"]);assert.match(sql,/FROM evaluate_unit_staff_shift/);assert.doesNotMatch(sql,/INSERT|UPDATE|DELETE/iu)});
+test("usa relogio do servidor e rejeita entradas invalidas",async()=>{let values:readonly unknown[]=[];await evaluateUnitStaffShift({query:async(_s:string,v?:readonly unknown[])=>{values=v??[];return{rows:[{unitId,userId,state:"UNCONFIGURED",scheduleVersion:null,effectiveFrom:null,timeZone:null,localDate:null,localTime:null}]}}}as never,{unitId,userId});assert.equal(values[2],null);
+  await assert.rejects(()=>evaluateUnitStaffShift({}as never,{unitId:"bad",userId}),/INVALID_SHIFT_EVALUATION_REQUEST/);await assert.rejects(()=>evaluateUnitStaffShift({}as never,{unitId,userId,at:new Date("bad")}),/INVALID_SHIFT_EVALUATION_REQUEST/)});

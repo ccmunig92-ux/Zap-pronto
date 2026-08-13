@@ -560,6 +560,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/units/{unitId}/staff-schedules/{userId}/effective": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getEffectiveStaffShift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/units/{unitId}/staff-schedules/{userId}": {
         parameters: {
             query?: never;
@@ -6186,6 +6202,147 @@ export interface operations {
                             displayName: string;
                             role: "TENANT_ADMIN" | "UNIT_MANAGER" | "SUPERVISOR" | "ATTENDANT" | "AUDITOR";
                         }[];
+                    };
+                };
+            };
+            /** @description Default Response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+        };
+    };
+    getEffectiveStaffShift: {
+        parameters: {
+            query?: {
+                at?: string;
+            };
+            header?: never;
+            path: {
+                unitId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        unitId: string;
+                        /** Format: uuid */
+                        userId: string;
+                        state: "IN_SHIFT" | "OUTSIDE_SHIFT" | "CLOSED" | "NOT_EFFECTIVE" | "UNCONFIGURED";
+                        scheduleVersion: number | null;
+                        effectiveFrom: string | null;
+                        timeZone: string | null;
+                        localDate: string | null;
+                        localTime: string | null;
                     };
                 };
             };

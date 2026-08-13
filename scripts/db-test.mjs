@@ -114,6 +114,7 @@ try {
       "0058_team_availability_projection.sql",
       "0059_unit_operational_timezone.sql",
       "0060_unit_shift_schedule.sql",
+      "0061_effective_staff_shift.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -154,6 +155,9 @@ try {
     const shiftTestClient = new pg.Client({ connectionString: targetUrl.toString() });await shiftTestClient.connect();
     try {await shiftTestClient.query(await readFile(resolve("database/tests", "0007_shift_schedule.sql"), "utf8"));}
     finally {await shiftTestClient.end();}
+    const effectiveShiftTestClient=new pg.Client({connectionString:targetUrl.toString()});await effectiveShiftTestClient.connect();
+    try{await effectiveShiftTestClient.query(await readFile(resolve("database/tests","0008_effective_staff_shift.sql"),"utf8"));}
+    finally{await effectiveShiftTestClient.end();}
 
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";

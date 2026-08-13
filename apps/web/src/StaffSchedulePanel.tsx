@@ -17,12 +17,18 @@ export type StaffSchedule = {
   updatedAt: string;
 };
 export type ShiftMember = { userId: string; displayName: string; role: string };
+export type EffectiveStaffShift = {
+  unitId: string; userId: string; state: "IN_SHIFT" | "OUTSIDE_SHIFT" | "CLOSED" | "NOT_EFFECTIVE" | "UNCONFIGURED";
+  scheduleVersion: number | null; effectiveFrom: string | null; timeZone: string | null;
+  localDate: string | null; localTime: string | null;
+};
 export interface StaffScheduleClient {
   listShiftMembers(unitId: string): Promise<{ items: ShiftMember[] }>;
   getStaffSchedule(
     unitId: string,
     userId: string,
   ): Promise<StaffSchedule | null>;
+  getEffectiveStaffShift(unitId: string, userId: string): Promise<EffectiveStaffShift>;
   setStaffSchedule(
     unitId: string,
     userId: string,
@@ -68,6 +74,7 @@ export function StaffSchedulePanel({
     [members, setMembers] = useState<ShiftMember[]>(),
     [userId, setUserId] = useState(""),
     [schedule, setSchedule] = useState<StaffSchedule | null>(),
+    [effectiveShift, setEffectiveShift] = useState<EffectiveStaffShift>(),
     [effectiveFrom, setEffectiveFrom] = useState(""),
     [weeklySlots, setWeeklySlots] = useState<ShiftSlot[]>([]),
     [exceptions, setExceptions] = useState<ShiftException[]>([]),
@@ -87,6 +94,7 @@ export function StaffSchedulePanel({
     setMembers(undefined);
     setUserId("");
     setSchedule(undefined);
+    setEffectiveShift(undefined);
     setEffectiveFrom("");
     setWeeklySlots([]);
     setExceptions([]);
@@ -160,10 +168,16 @@ export function StaffSchedulePanel({
   ) {
     setLoading(true);
     setError(undefined);
+    setEffectiveShift(undefined);
     try {
-      const value = await client.getStaffSchedule(unit, user);
+      const scheduleRequest=client.getStaffSchedule(unit,user).catch((cause:unknown)=>{
+        if(cause instanceof ApiProblem&&cause.problem.status===404)return null;
+        throw cause;
+      });
+      const [value,effective] = await Promise.all([scheduleRequest,client.getEffectiveStaffShift(unit,user)]);
       if (g !== generation.current || unit !== unitId) return;
       apply(value);
+      setEffectiveShift(effective);
     } catch (c) {
       if (g !== generation.current) return;
       if (c instanceof ApiProblem && c.problem.status === 404) apply(null);
@@ -172,6 +186,11 @@ export function StaffSchedulePanel({
       if (g === generation.current) setLoading(false);
     }
   }
+  const effectiveLabel = effectiveShift?.state === "IN_SHIFT" ? "Em escala"
+    : effectiveShift?.state === "CLOSED" ? "Fora da escala: exceção fechada"
+    : effectiveShift?.state === "NOT_EFFECTIVE" ? "Fora da escala: vigência ainda não iniciada"
+    : effectiveShift?.state === "UNCONFIGURED" ? "Escala não configurada"
+    : effectiveShift ? "Fora da escala: fora dos horários publicados" : undefined;
   useEffect(() => {
     if (unitId) void loadMembers(unitId);
     return () => {
@@ -214,7 +233,28 @@ export function StaffSchedulePanel({
               x.slots.every((s) => s.start < s.end) &&
               !overlaps(x.slots))),
       ),
-    valid = date.test(effectiveFrom) && weeklyValid && exceptionValid;
+    valid = date.test(effectiveFrom) && weeklyValid && exceptionValid,
+    validationMessage = !date.test(effectiveFrom)
+      ? "Informe a data de início da vigência."
+      : weeklySlots.some((slot) => !slot.start || !slot.end || slot.start >= slot.end)
+        ? "Cada período semanal deve ter início e fim, com o fim após o início."
+        : [1, 2, 3, 4, 5, 6, 7].some((day) => {
+              const slots = weeklySlots.filter((slot) => slot.weekday === day);
+              return slots.length > 4 || overlaps(slots);
+            })
+          ? "A grade aceita até quatro períodos por dia e não permite sobreposição."
+          : exceptionDates.size !== exceptions.length
+            ? "Cada exceção deve usar uma data diferente."
+            : exceptions.some((exception) => !date.test(exception.date) || exception.date < effectiveFrom)
+              ? "Cada exceção deve ter uma data igual ou posterior ao início da vigência."
+              : exceptions.some((exception) => exception.kind === "REPLACE" &&
+                  (exception.slots.length < 1 || exception.slots.some((slot) => !slot.start || !slot.end || slot.start >= slot.end) || overlaps(exception.slots)))
+                ? "Horários substitutos exigem de um a quatro períodos válidos e sem sobreposição."
+                : exceptions.length > 90
+                  ? "A escala aceita no máximo 90 exceções."
+                  : weeklySlots.length > 28
+                    ? "A escala aceita no máximo 28 períodos semanais."
+                    : undefined;
   useEffect(
     () =>
       onNavigationStateChange?.({
@@ -240,6 +280,7 @@ export function StaffSchedulePanel({
     if (dirty && !window.confirm("Descartar alterações não salvas da escala?"))
       return;
     apply(null);
+    setEffectiveShift(undefined);
     setUserId(v);
     void loadSchedule(unitId, v);
   }
@@ -325,6 +366,14 @@ export function StaffSchedulePanel({
       )
         return;
       apply(value);
+      try {
+        const refreshedEffective=await client.getEffectiveStaffShift(capturedUnit,capturedUser);
+        if(g!==generation.current||capturedUnit!==unitId||capturedUser!==userId)return;
+        setEffectiveShift(refreshedEffective);
+      } catch (projectionError) {
+        setEffectiveShift(undefined);
+        if (access(projectionError)) return;
+      }
       setKey(undefined);
       setConfirming(false);
       setNotice("Escala semanal atualizada.");
@@ -418,6 +467,8 @@ export function StaffSchedulePanel({
               Esta configuração é observacional: não altera disponibilidade,
               atendimentos, responsáveis ou claims e não executa scheduler.
             </p>
+            {effectiveLabel && <p role="status"><strong>{effectiveLabel}</strong>{effectiveShift?.localDate && effectiveShift.localTime
+              ? ` · ${effectiveShift.localDate} ${effectiveShift.localTime}${effectiveShift.timeZone ? ` · ${effectiveShift.timeZone}` : ""}` : ""}</p>}
             {canManage ? (
               <>
                 <label>
@@ -677,6 +728,7 @@ export function StaffSchedulePanel({
                 >
                   Salvar escala
                 </button>
+                {dirty && validationMessage && <p role="alert">{validationMessage}</p>}
               </>
             ) : (
               <p>

@@ -54,6 +54,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const moduleContentRef = useRef<HTMLDivElement>(null);
   const scheduleClient=useMemo<StaffScheduleClient>(()=>staffScheduleClient??{
     listShiftMembers:unitId=>apiClient.listShiftMembers(unitId),
+    getEffectiveStaffShift:(unitId,userId)=>apiClient.getEffectiveStaffShift(unitId,userId),
     async getStaffSchedule(unitId,userId){const value=await apiClient.getStaffSchedule(unitId,userId);return value?{...value,weeklySlots:[...value.weeklySlots],exceptions:value.exceptions.map(exception=>({date:exception.date,kind:exception.type,slots:exception.type==="REPLACE"?[...exception.slots]:[]}))}:null},
     async setStaffSchedule(unitId,userId,input,key){const value=await apiClient.setStaffSchedule(unitId,userId,{...input,exceptions:input.exceptions.map(exception=>exception.kind==="CLOSED"?{date:exception.date,type:"CLOSED" as const}:{date:exception.date,type:"REPLACE" as const,slots:exception.slots})},key);return{...value,weeklySlots:[...value.weeklySlots],exceptions:value.exceptions.map(exception=>({date:exception.date,kind:exception.type,slots:exception.type==="REPLACE"?[...exception.slots]:[]}))}},
   },[staffScheduleClient]);

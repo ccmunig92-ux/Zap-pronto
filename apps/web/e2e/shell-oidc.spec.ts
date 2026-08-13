@@ -25,7 +25,7 @@ if (enabled) {
     ||!process.env.E2E_LOCAL_INSTANCE_NONCE?.match(/^[A-Za-z0-9_-]{32,128}$/)
     ||process.env.E2E_ADMIN_USERNAME!=="admin.local"||process.env.E2E_ATTENDANT_USERNAME!=="attendant.local"
     ||process.env.E2E_ATTENDANT_TWO_USERNAME!=="attendant.two.local"
-    ||process.env.E2E_MANAGER_USERNAME!=="attendant.two.local")){
+    ||process.env.E2E_MANAGER_USERNAME!=="attendant.two.local"||process.env.E2E_SUPERVISOR_USERNAME!=="supervisor.local")){
     throw new Error("E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED");
   }
   if(externalMode&&(process.env.E2E_LOCAL_DESTRUCTIVE_ALLOWED==="true"
@@ -54,7 +54,7 @@ if (requireBlockRevocation && !enabled) {
 }
 
 interface AccountConfiguration { username: string; password: string; tenant: string }
-function account(prefix: "ADMIN" | "ATTENDANT" | "ATTENDANT_TWO" | "MANAGER"): AccountConfiguration {
+function account(prefix: "ADMIN" | "ATTENDANT" | "ATTENDANT_TWO" | "MANAGER" | "SUPERVISOR"): AccountConfiguration {
   const username = process.env[`E2E_${prefix}_USERNAME`];
   const password = process.env[`E2E_${prefix}_PASSWORD`];
   const tenant = process.env[`E2E_${prefix}_EXPECTED_TENANT`];
@@ -259,6 +259,20 @@ test.describe("shell OIDC real", () => {
     await openModule(page,"Escalas");await expect(page.getByRole("heading",{name:"Grade semanal e exceções"})).toBeVisible();await page.getByLabel("Integrante").selectOption({label:"Atendente Local · ATTENDANT"});await expect(page.getByText("Nenhuma escala configurada. O fuso será definido pelo servidor a partir da unidade.")).toBeVisible();
     await page.getByLabel("Vigência a partir de").fill(effectiveFrom);await page.getByRole("button",{name:"Adicionar período"}).click();await page.getByLabel("Início").fill("08:00");await page.getByLabel("Fim").fill("12:00");await page.getByRole("button",{name:"Adicionar exceção"}).click();await page.getByLabel("Data").fill(exceptionDate);await page.getByRole("button",{name:"Salvar escala"}).click();const saved=page.waitForResponse(response=>response.request().method()==="POST"&&/^\/v1\/units\/[^/]+\/staff-schedules\/[^/]+$/u.test(new URL(response.url()).pathname));await page.getByRole("button",{name:"Confirmar alteração"}).evaluate((element:HTMLButtonElement)=>{element.click();element.click()});expect((await saved).status()).toBe(200);await expect(page.getByText("Escala semanal atualizada.")).toBeVisible();await expect(page.getByText(/Fuso da versão:/)).toBeVisible();await expect(page.getByText("America/Sao_Paulo",{exact:true})).toBeVisible();
     await page.reload();await openModule(page,"Escalas");await page.getByLabel("Integrante").selectOption({label:"Atendente Local · ATTENDANT"});await expect(page.getByText(/Versão 1/)).toBeVisible();await expect(page.getByLabel("Vigência a partir de")).toHaveValue(effectiveFrom);expect(posts).toHaveLength(1);expect(externalHosts).toEqual([]);
+  });
+  test("supervisor consulta escala efetiva sem controles nem mutações",async({page})=>{
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a leitura de supervisor local.");
+    const posts:string[]=[],externalHosts:string[]=[];
+    await login(page,account("SUPERVISOR"));page.on("request",request=>{const url=new URL(request.url());
+      if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+      if(request.method()==="POST"&&url.pathname.startsWith("/v1/"))posts.push(url.pathname)});
+    await openModule(page,"Escalas");
+    await page.getByLabel("Integrante").selectOption("90000000-0000-4000-8000-000000000011");
+    await expect(page.getByRole("status")).toContainText(/Em escala|Fora da escala|Escala não configurada/);
+    await expect(page.getByText(/Fuso da versão:|Nenhuma escala configurada/)).toBeVisible();
+    await expect(page.getByLabel("Vigência a partir de")).toHaveCount(0);
+    await expect(page.getByRole("button",{name:"Salvar escala"})).toHaveCount(0);
+    expect(posts).toEqual([]);expect(externalHosts).toEqual([]);
   });
 
   test("gestor consulta disponibilidade da equipe sob demanda sem mutações",async({page})=>{

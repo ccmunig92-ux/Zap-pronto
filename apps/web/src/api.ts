@@ -69,6 +69,7 @@ export const apiClient = {
   },
   listShiftMembers(...parameters:Parameters<typeof transportClient.listShiftMembers>){return transportClient.listShiftMembers(...parameters)},
   getStaffSchedule(...parameters:Parameters<typeof transportClient.getStaffSchedule>){return transportClient.getStaffSchedule(...parameters)},
+  getEffectiveStaffShift(...parameters:Parameters<typeof transportClient.getEffectiveStaffShift>){return transportClient.getEffectiveStaffShift(...parameters)},
   setStaffSchedule(...parameters:Parameters<typeof transportClient.setStaffSchedule>){return transportClient.setStaffSchedule(...parameters)},
   revokeUserInvitation(...parameters: Parameters<typeof transportClient.revokeUserInvitation>) {
     return transportClient.revokeUserInvitation(...parameters);
