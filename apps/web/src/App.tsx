@@ -10,6 +10,7 @@ import { RoutingRequiredPanel,type RoutingRequiredClient } from "./RoutingRequir
 import { InboxPanel,type InboxClient } from "./InboxPanel.js";
 import { UnitMembershipPanel,type UnitMembershipClient } from "./UnitMembershipPanel.js";
 import { UnitSlaPolicyPanel,type UnitSlaPolicyClient } from "./UnitSlaPolicyPanel.js";
+import{TeamAvailabilityPanel,type TeamAvailabilityClient}from"./TeamAvailabilityPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -18,18 +19,19 @@ type SessionState =
   | { status: "error"; message: string; correlationId?: string };
 
 export type NavigationState = { readonly blocked: boolean; readonly dirty: boolean };
-type ModuleId = "INBOX" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "OVERVIEW";
+type ModuleId = "INBOX" | "TEAM_AVAILABILITY" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "OVERVIEW";
 type PanelId = "inbox" | "routing" | "invitation" | "administration" | "unit-memberships" | "unit-sla-policy";
 const emptyNavigationState: NavigationState = { blocked: false, dirty: false };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  unitMembershipClient=apiClient,slaPolicyClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
+  unitMembershipClient=apiClient,slaPolicyClient=apiClient,teamAvailabilityClient=apiClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
   retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
   readonly unitMembershipClient?:UnitMembershipClient;
   readonly slaPolicyClient?:UnitSlaPolicyClient;
+  readonly teamAvailabilityClient?:TeamAvailabilityClient;
   readonly acceptanceClient?: AcceptanceClient;
   readonly routingClient?:RoutingRequiredClient;
   readonly inboxClient?:InboxClient;
@@ -113,9 +115,11 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const manageableSlaPolicyUnitIds=currentUser.memberships.filter(membership=>canManageTenantSlaPolicy||currentUser.grants.some(grant=>
     grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId)).map(membership=>membership.unitId);
   const inboxUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="conversation.read"&&g.scope==="UNIT"&&g.unitId===m.unitId)).map(m=>({id:m.unitId,name:m.unitName}));
+  const teamAvailabilityUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="availability.supervise"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
   const canReadRouting=currentUser.grants.some(grant=>grant.permission==="inbound.routing.read"&&grant.scope==="TENANT");
   const modules:readonly {id:ModuleId;label:string}[]=[
     ...(inboxUnits.length>0?[{id:"INBOX" as const,label:"Inbox"}]:[]),
+    ...(teamAvailabilityUnits.length>0?[{id:"TEAM_AVAILABILITY" as const,label:"Equipe"}]:[]),
     ...(canReadRouting?[{id:"ROUTING" as const,label:"Roteamento"}]:[]),
     ...(canManageTenantUsers?[{id:"TENANT_ACCESS" as const,label:"Acessos"}]:[]),
     ...(!canManageTenantUsers&&managedUnits.length>0?[{id:"UNIT_MEMBERSHIPS" as const,label:"Vínculos"}]:[]),
@@ -147,6 +151,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     <div className="module-content" ref={moduleContentRef}>
     {activeModule==="OVERVIEW"&&<section><h2 tabIndex={-1}>Unidades vinculadas</h2><ul>{currentUser.memberships.map((membership) =>
       <li key={membership.unitId}><strong>{membership.unitName}</strong> <span>{membership.role}</span></li>)}</ul></section>}
+    {activeModule==="TEAM_AVAILABILITY"&&teamAvailabilityUnits.length>0&&<TeamAvailabilityPanel client={teamAvailabilityClient} authorizedUnits={teamAvailabilityUnits} onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}/>}
     {activeModule==="TENANT_ACCESS"&&canManageTenantUsers
       && <><InvitationPanel client={invitationClient} onAuthenticationRequired={invalidateAuthentication}
         onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters.invitation}/>

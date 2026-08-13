@@ -102,6 +102,7 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/Read-InboxImmutableSnapshot[\s\S]*LOCAL_OIDC_CLAIM_REQUEUE_STATE_INVALID/);
   assert.match(controller,/event_type='handoff\.claimed'/);
   assert.match(controller,/--grep','atendente altera a própria disponibilidade'[\s\S]*attendant_unit_availability[\s\S]*attendant_availability_commands[\s\S]*LOCAL_OIDC_ATTENDANT_AVAILABILITY_STATE_INVALID/);
+  assert.match(controller,/--grep','gestor consulta disponibilidade da equipe sob demanda'[\s\S]*Compose @\('run','--rm','local-seed'\)/);
   assert.match(controller,/resposta humana TEXT/);
   assert.match(controller,/LOCAL_OIDC_HUMAN_TEXT_STATE_INVALID/);
   assert.match(controller,/cancelamento local mantém TEXT/);
@@ -139,4 +140,5 @@ test("controlador isola volumes pelo project name local fixo", async () => {
 
 test("Playwright recusa origem externa ou nonce ausente antes do browser",async()=>{const spec=await readFile(new URL("../../apps/web/e2e/shell-oidc.spec.ts",directory),"utf8");
   assert.match(spec,/E2E_LOCAL_DESTRUCTIVE_ALLOWED/);assert.match(spec,/https:\/\/zap-pronto\.127\.0\.0\.1\.nip\.io:18443/);
-  assert.match(spec,/E2E_LOCAL_INSTANCE_NONCE/);assert.match(spec,/E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED/);});
+  assert.match(spec,/E2E_LOCAL_INSTANCE_NONCE/);assert.match(spec,/E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED/);
+  assert.match(spec,/gestor consulta disponibilidade da equipe sob demanda[\s\S]*gets[\s\S]*Atendente Local[\s\S]*Capacidade: 0\/100 · Restante: 100[\s\S]*selectOption\("PAUSED"\)[\s\S]*mutations\)\.toEqual\(\[\]\)[\s\S]*externalHosts\)\.toEqual\(\[\]\)/);});

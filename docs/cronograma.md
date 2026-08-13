@@ -657,6 +657,16 @@ recebem controles de publicação. A validação local inclui 151 testes do fron
 overlay Verify e diff-check; banco limpo e upgrade serão exigidos no CI antes da integração. O corte não cria
 serviço, scheduler, Hermes, Meta ou deploy.
 
+Checkpoint local incremental em 2026-08-13, migration `0058`: supervisores, gestores e
+administradores autorizados receberam uma visão somente leitura da disponibilidade operacional da
+equipe por unidade. A projeção estreita deriva status, capacidade máxima, atendimentos ativos e
+capacidade restante diretamente de memberships, disponibilidade e handoffs canônicos; não expõe
+e-mail, identidade OIDC, grant ou conteúdo clínico. A consulta usa permissão `availability.supervise`,
+função `SECURITY DEFINER` API-only, filtro fechado de status e cursor keyset vinculado à unidade e ao
+filtro. O módulo Equipe é lazy e desmontável, sem polling ou mutation. Prova local verde: 98 testes
+core, 79 da API, 29 do cliente, 158 do frontend, 5 do overlay e 21/21 jornadas E2E OIDC em runtime;
+banco limpo, upgrade e checks remotos deste novo corte permanecem obrigatórios antes do verde final.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -669,7 +679,7 @@ serviço, scheduler, Hermes, Meta ou deploy.
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0057`; staging deve
+   execução como evidência. A Inbox canônica já está implementada até a migration `0058`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

@@ -111,6 +111,7 @@ try {
       "0055_sla_acknowledgement_episodes.sql",
       "0056_unit_sla_policy.sql",
       "0057_sla_policy_idempotency_serialization.sql",
+      "0058_team_availability_projection.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -145,6 +146,8 @@ try {
     const policyRaceTenant="94000000-0000-4000-8000-000000000001";
     const policyRaceActor="94000000-0000-4000-8000-000000000002";
     const policyRaceUnits=["94000000-0000-4000-8000-000000000003","94000000-0000-4000-8000-000000000004"];
+    const teamSupervisor="94000000-0000-4000-8000-000000000005",teamAttendant="94000000-0000-4000-8000-000000000006",
+      teamRevoked="94000000-0000-4000-8000-000000000007";
     await target.query("INSERT INTO tenants(id,name) VALUES($1,'SLA policy race')",[policyRaceTenant]);
     await target.query("INSERT INTO units(id,tenant_id,code,name) VALUES($2,$1,'RACE-A','Race A'),($3,$1,'RACE-B','Race B')",
       [policyRaceTenant,...policyRaceUnits]);
@@ -152,6 +155,16 @@ try {
       [policyRaceTenant,policyRaceActor]);
     await target.query("INSERT INTO user_units(tenant_id,user_id,unit_id,role) VALUES($1,$4,$2,'UNIT_MANAGER'),($1,$4,$3,'UNIT_MANAGER')",
       [policyRaceTenant,...policyRaceUnits,policyRaceActor]);
+    await target.query(`INSERT INTO users(id,tenant_id,email,display_name) VALUES
+      ($2,$1,'team-supervisor@test.local','ana'),($3,$1,'team-attendant@test.local','Ana'),($4,$1,'team-revoked@test.local','Zed')`,
+      [policyRaceTenant,teamSupervisor,teamAttendant,teamRevoked]);
+    await target.query(`INSERT INTO user_units(tenant_id,user_id,unit_id,role,status) VALUES
+      ($1,$2,$5,'SUPERVISOR','ACTIVE'),($1,$3,$5,'ATTENDANT','ACTIVE'),($1,$4,$5,'SUPERVISOR','REVOKED')`,
+      [policyRaceTenant,teamSupervisor,teamAttendant,teamRevoked,policyRaceUnits[0]]);
+    await target.query("UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=2 WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
+      [policyRaceTenant,teamSupervisor,policyRaceUnits[0]]);
+    await target.query("UPDATE attendant_unit_availability SET status='PAUSED',max_active=1,pause_reason='BREAK' WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3",
+      [policyRaceTenant,teamAttendant,policyRaceUnits[0]]);
     const policyRaceClients=await Promise.all([0,1].map(async()=>{const client=new pg.Client({connectionString:targetUrl.toString()});
       await client.connect();await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
       await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id',$3,true)",
@@ -174,6 +187,24 @@ try {
       (SELECT count(*)::int FROM unit_sla_policy_targets WHERE tenant_id=$1) targets,
       (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='SLA_POLICY_PUBLISHED') audits`,[policyRaceTenant])).rows[0];
     assert.deepEqual(policyRaceEvidence,{commands:1,versions:1,targets:4,audits:1});
+    const teamQuery=async(actorId,unitId,limit=101,status=null,anchorName=null,anchorId=null)=>{const client=new pg.Client({connectionString:targetUrl.toString()});
+      await client.connect();try{await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
+        await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','team-test',true)",[policyRaceTenant,actorId]);
+        const result=await client.query("SELECT * FROM list_unit_team_availability($1,$2,$3,$4,$5)",[unitId,limit,status,anchorName,anchorId]);
+        await client.query("ROLLBACK");return result.rows}finally{await client.end()}};
+    const teamBefore=(await target.query("SELECT count(*)::int count FROM attendant_unit_availability WHERE tenant_id=$1",[policyRaceTenant])).rows[0].count;
+    const managerTeam=await teamQuery(policyRaceActor,policyRaceUnits[0]);
+    assert.deepEqual(managerTeam.map(row=>row.display_name),["Ana","ana","SLA Race Manager"]);
+    assert.deepEqual(managerTeam.slice(0,2).map(row=>({status:row.status,active:row.active_count,remaining:row.remaining_capacity})),
+      [{status:"PAUSED",active:0,remaining:1},{status:"AVAILABLE",active:0,remaining:2}]);
+    assert.deepEqual((await teamQuery(teamSupervisor,policyRaceUnits[0],101,"PAUSED")).map(row=>row.user_id),[teamAttendant]);
+    const firstTeamPage=await teamQuery(teamSupervisor,policyRaceUnits[0],1);assert.equal(firstTeamPage.length,1);
+    assert.deepEqual((await teamQuery(teamSupervisor,policyRaceUnits[0],2,null,firstTeamPage[0].display_name,firstTeamPage[0].user_id)).map(row=>row.display_name),["ana","SLA Race Manager"]);
+    await assert.rejects(teamQuery(teamSupervisor,policyRaceUnits[1]),/TEAM_AVAILABILITY_NOT_FOUND/);
+    await assert.rejects(teamQuery(teamAttendant,policyRaceUnits[0]),/TEAM_AVAILABILITY_NOT_FOUND/);
+    await assert.rejects(teamQuery(teamRevoked,policyRaceUnits[0]),/TEAM_AVAILABILITY_NOT_FOUND/);
+    await assert.rejects(teamQuery(teamSupervisor,policyRaceUnits[0],2,null,"missing",teamAttendant),/TEAM_AVAILABILITY_CURSOR_INVALID/);
+    assert.equal((await target.query("SELECT count(*)::int count FROM attendant_unit_availability WHERE tenant_id=$1",[policyRaceTenant])).rows[0].count,teamBefore);
 
     const role = await target.query(
       "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'zap_pronto_app'",
@@ -443,6 +474,15 @@ try {
         AND role_code<>'TENANT_ADMIN') AS non_admin_grants`);
     assert.deepEqual(routingSecurity.rows[0],{api_list:true,api_resolve:true,worker_list:false,worker_resolve:false,
       api_command_select:false,api_receipt_update:false,non_admin_grants:0});
+    const teamAvailabilitySecurity=await target.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='availability.supervise' ORDER BY role_code) roles,
+      has_function_privilege('zap_pronto_api','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') app_execute,
+      (SELECT provolatile='s' AND prosecdef AND proconfig @> ARRAY['search_path=pg_catalog, public','row_security=off']
+        FROM pg_proc WHERE oid='list_unit_team_availability(uuid,integer,text,text,uuid)'::regprocedure) pure_hardened`);
+    assert.deepEqual(teamAvailabilitySecurity.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
+      api_execute:true,worker_execute:false,app_execute:false,pure_hardened:true});
     const historySecurity=await target.query(`SELECT
       ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='handoff.history.read' ORDER BY role_code) roles,
       has_function_privilege('zap_pronto_api','list_inbox_resolved_handoffs(uuid,integer,timestamptz,uuid)','EXECUTE') api_execute,

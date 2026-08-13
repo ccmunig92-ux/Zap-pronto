@@ -86,6 +86,17 @@ restrita a gerente e administrador autorizados. O frontend integrado passou 151/
 `typecheck:all`, `api:check`, overlay Verify e `git diff --check`. Banco limpo e upgrade permanecem gates
 obrigatórios do CI para este novo HEAD antes de declarar o corte remoto verde.
 
+## Evidência incremental 0058
+
+A migration `0058_team_availability_projection.sql` adiciona a leitura unitária e paginada da
+disponibilidade da equipe, autorizada pela capacidade explícita `availability.supervise`. A projeção
+calcula atendimentos ativos e capacidade restante no banco, exige tenant, unidade, conta e membership
+ativos e não concede leitura direta das tabelas à API. A UI monta o módulo Equipe somente sob demanda,
+com filtro de status, deduplicação, descarte de respostas tardias e purge em `401/403`, sem polling ou
+mutation. Evidência local até aqui: 98 testes core, 79 da API, 29 do cliente, 158 do frontend, 5 do
+overlay, `typecheck:all`, `test:all`, `api:check`, build, diff-check e 21/21 jornadas E2E OIDC em
+runtime verdes. Banco limpo/upgrade e CI remoto do 0058 ainda precisam passar.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:

@@ -165,6 +165,7 @@ try {
   assert.match(firstRun, /applied 0055_sla_acknowledgement_episodes\.sql/);
   assert.match(firstRun, /applied 0056_unit_sla_policy\.sql/);
   assert.match(firstRun, /applied 0057_sla_policy_idempotency_serialization\.sql/);
+  assert.match(firstRun, /applied 0058_team_availability_projection\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -324,6 +325,7 @@ try {
       (SELECT count(*)::integer FROM app_permissions) AS permission_count,
       EXISTS(SELECT 1 FROM app_permissions WHERE code = 'sla_policy.read') AS sla_policy_read_exists,
       EXISTS(SELECT 1 FROM app_permissions WHERE code = 'sla_policy.manage') AS sla_policy_manage_exists,
+      EXISTS(SELECT 1 FROM app_permissions WHERE code = 'availability.supervise') AS availability_supervise_exists,
       (SELECT count(*)::integer FROM oidc_providers) AS provider_count,
       (SELECT count(*)::integer FROM user_oidc_identities) AS identity_count,
       (SELECT count(*)::integer FROM user_units WHERE user_id='12000000-0000-4000-8000-000000000001') AS membership_count,
@@ -332,11 +334,19 @@ try {
       (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
       to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
-      role_count: 5, permission_count: 25, sla_policy_read_exists: true, sla_policy_manage_exists: true,
+      role_count: 5, permission_count: 26, sla_policy_read_exists: true, sla_policy_manage_exists: true,
+      availability_supervise_exists:true,
       provider_count: 0, identity_count: 0, membership_count: 1,
       normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,
       permission_policy_exists: true,
     });
+    const teamAvailabilityUpgrade=await verify.query(`SELECT
+      ARRAY(SELECT role_code FROM app_role_permissions WHERE permission_code='availability.supervise' ORDER BY role_code) roles,
+      has_function_privilege('zap_pronto_api','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') api_execute,
+      has_function_privilege('zap_pronto_worker','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') worker_execute,
+      has_function_privilege('zap_pronto_app','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') app_execute`);
+    assert.deepEqual(teamAvailabilityUpgrade.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
+      api_execute:true,worker_execute:false,app_execute:false});
     const unitMembershipCatalogUpgrade=await verify.query(`SELECT
       to_regprocedure('admin_list_unit_memberships(uuid,text,uuid,integer)') IS NOT NULL function_exists,
       has_function_privilege('zap_pronto_api','admin_list_unit_memberships(uuid,text,uuid,integer)','EXECUTE') api_execute,

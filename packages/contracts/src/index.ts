@@ -29,7 +29,7 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -417,6 +417,18 @@ export const SetInboxAvailabilityResponseSchema=Type.Object({unitId:Type.String(
   maxActive:Type.Integer({minimum:1,maximum:100}),pauseReason:Type.Union([InboxAvailabilityPauseReasonSchema,Type.Null()]),pausedUntil:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
   activeCount:Type.Integer({minimum:0}),version:Type.Integer({minimum:1}),updatedAt:Type.String({format:"date-time"}),replayed:Type.Boolean()},{$id:"SetInboxAvailabilityResponse",additionalProperties:false});
 export type SetInboxAvailabilityResponse=Static<typeof SetInboxAvailabilityResponseSchema>;
+export const ListInboxTeamAvailabilityQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),
+  status:Type.Optional(InboxAvailabilityStatusSchema),cursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListInboxTeamAvailabilityQuery",additionalProperties:false});
+export type ListInboxTeamAvailabilityQuery=Static<typeof ListInboxTeamAvailabilityQuerySchema>;
+export const InboxTeamAvailabilityItemSchema=Type.Object({userId:Type.String({format:"uuid"}),displayName:Type.String({minLength:1,maxLength:160}),
+  role:Type.Union([Type.Literal("TENANT_ADMIN"),Type.Literal("UNIT_MANAGER"),Type.Literal("SUPERVISOR"),Type.Literal("ATTENDANT")]),status:InboxAvailabilityStatusSchema,
+  maxActive:Type.Integer({minimum:1,maximum:100}),activeCount:Type.Integer({minimum:0}),remainingCapacity:Type.Integer({minimum:0}),
+  pauseReason:Type.Union([InboxAvailabilityPauseReasonSchema,Type.Null()]),pausedUntil:Type.Union([Type.String({format:"date-time"}),Type.Null()]),updatedAt:Type.String({format:"date-time"})},
+{$id:"InboxTeamAvailabilityItem",additionalProperties:false});
+export type InboxTeamAvailabilityItem=Static<typeof InboxTeamAvailabilityItemSchema>;
+export const ListInboxTeamAvailabilityResponseSchema=Type.Object({items:Type.Array(InboxTeamAvailabilityItemSchema),
+  nextCursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{$id:"ListInboxTeamAvailabilityResponse",additionalProperties:false});
+export type ListInboxTeamAvailabilityResponse=Static<typeof ListInboxTeamAvailabilityResponseSchema>;
 export const SlaAlertSeveritySchema=Type.Union([Type.Literal("MISSING_SLA"),Type.Literal("DUE_SOON"),Type.Literal("OVERDUE")],{$id:"SlaAlertSeverity"});
 export const ListInboxSlaAlertsQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25})),severity:Type.Optional(SlaAlertSeveritySchema),priority:Type.Optional(HandoffPrioritySchema),cursor:Type.Optional(Type.String({minLength:1,maxLength:1024}))},{additionalProperties:false});
 export type ListInboxSlaAlertsQuery=Static<typeof ListInboxSlaAlertsQuerySchema>;

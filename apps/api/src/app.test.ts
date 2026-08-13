@@ -133,6 +133,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
     ["GET", "/v1/inbox/resolved", "permission", "handoff.history.read", "unit"],
     ["GET", "/v1/inbox/handoffs/:handoffId/transfer-candidates", "permission", "handoff.transfer", "unit"],
     ["GET", "/v1/inbox/supervised", "permission", "handoff.takeover", "unit"],
+    ["GET", "/v1/inbox/team-availability", "permission", "availability.supervise", "unit"],
     ["GET", "/v1/inbox/routing-required", "permission", "inbound.routing.read", "tenant"],
       ["GET", "/v1/me", "bootstrap", null, null],
       ["GET", "/v1/units/:unitId/sla-policy", "permission", "sla_policy.read", "unit"],

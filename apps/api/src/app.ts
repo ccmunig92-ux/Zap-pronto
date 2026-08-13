@@ -14,6 +14,7 @@ import { registerInboxHandoffRoutes } from "./routes/inbox-handoffs.js";
 import { registerInboxRoutingRequiredRoutes } from "./routes/inbox-routing-required.js";
 import { registerInboxConversationRoutes } from "./routes/inbox-conversations.js";
 import { registerInboxAvailabilityRoutes } from "./routes/inbox-availability.js";
+import { registerInboxTeamAvailabilityRoute } from "./routes/inbox-team-availability.js";
 import { registerInboxSlaAlertRoutes } from "./routes/inbox-sla-alerts.js";
 import { registerUnitSlaPolicyRoutes } from "./routes/unit-sla-policy.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
@@ -91,6 +92,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerInboxRoutingRequiredRoutes(app, options.pool ?? unavailablePool);
   registerInboxConversationRoutes(app, options.pool ?? unavailablePool);
   registerInboxAvailabilityRoutes(app, options.pool ?? unavailablePool);
+  registerInboxTeamAvailabilityRoute(app, options.pool ?? unavailablePool);
   registerInboxSlaAlertRoutes(app, options.pool ?? unavailablePool);
   registerUnitSlaPolicyRoutes(app, options.pool ?? unavailablePool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
