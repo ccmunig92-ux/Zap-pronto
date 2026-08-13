@@ -104,10 +104,14 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const managedUnits=currentUser.memberships.filter(membership=>currentUser.grants.some(grant=>
     grant.permission==="unit.members.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
     .map(membership=>({id:membership.unitId,name:membership.unitName}));
+  const canReadTenantSlaPolicy=currentUser.grants.some(grant=>grant.permission==="sla_policy.read"&&grant.scope==="TENANT");
   const canManageTenantSlaPolicy=currentUser.grants.some(grant=>grant.permission==="sla_policy.manage"&&grant.scope==="TENANT");
-  const slaPolicyUnits=currentUser.memberships.filter(membership=>canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+  const slaPolicyUnits=currentUser.memberships.filter(membership=>canReadTenantSlaPolicy||canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+    grant.permission==="sla_policy.read"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId||
     grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
     .map(membership=>({id:membership.unitId,name:membership.unitName}));
+  const manageableSlaPolicyUnitIds=currentUser.memberships.filter(membership=>canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+    grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId)).map(membership=>membership.unitId);
   const inboxUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="conversation.read"&&g.scope==="UNIT"&&g.unitId===m.unitId)).map(m=>({id:m.unitId,name:m.unitName}));
   const canReadRouting=currentUser.grants.some(grant=>grant.permission==="inbound.routing.read"&&grant.scope==="TENANT");
   const modules:readonly {id:ModuleId;label:string}[]=[
@@ -152,7 +156,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       authorizedUnits={managedUnits} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-memberships"]}/>}
     {activeModule==="UNIT_SLA_POLICY"&&slaPolicyUnits.length>0&&<UnitSlaPolicyPanel client={slaPolicyClient}
-      authorizedUnits={slaPolicyUnits} onAuthenticationRequired={invalidateAuthentication}
+      readableUnits={slaPolicyUnits} manageableUnitIds={manageableSlaPolicyUnitIds} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-sla-policy"]}/>}
     {activeModule==="ROUTING"&&canReadRouting&&
       <RoutingRequiredPanel client={routingClient}

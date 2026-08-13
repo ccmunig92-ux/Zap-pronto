@@ -73,8 +73,18 @@ o SLA permanece nulo e o alerta `MISSING_SLA` continua explícito.
 Evidência executada no checkout local: 95 testes core, 79 da API, 28 do cliente, 149 do frontend, 5
 do overlay e 20/20 jornadas E2E OIDC em runtime. Também passaram banco vazio com migrations
 `0001`-`0056`, upgrade legado, `typecheck:all`, `test:all`, `api:check`, `build:all`, overlay Verify e
-`git diff --check`. Essas contagens não comprovam CI remoto da 0056, staging, deploy, produção,
-Hermes ou Meta real.
+`git diff --check`. O HEAD `0e61817` passou os dois checks remotos `validate`. Essas contagens não
+comprovam staging, deploy, produção, Hermes ou Meta real.
+
+## Evidência incremental 0057
+
+A migration `0057_sla_policy_idempotency_serialization.sql` fecha a corrida da chave idempotente entre
+unidades, adquirindo o lock do tenant e da chave antes do lock da unidade. O teste concorrente exige um
+sucesso, um conflito semântico, um comando, uma versão, quatro targets e uma auditoria. A UI agora
+permite a leitura da política pelo supervisor sem renderizar inputs, confirmação ou POST; gestão continua
+restrita a gerente e administrador autorizados. O frontend integrado passou 151/151 testes, além de
+`typecheck:all`, `api:check`, overlay Verify e `git diff --check`. Banco limpo e upgrade permanecem gates
+obrigatórios do CI para este novo HEAD antes de declarar o corte remoto verde.
 
 ## Gates obrigatórios
 

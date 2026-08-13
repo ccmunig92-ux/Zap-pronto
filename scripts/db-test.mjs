@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -110,6 +110,7 @@ try {
       "0054_sla_alert_projection_hardening.sql",
       "0055_sla_acknowledgement_episodes.sql",
       "0056_unit_sla_policy.sql",
+      "0057_sla_policy_idempotency_serialization.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -140,6 +141,37 @@ try {
     } finally {
       await slaPolicyTestClient.end();
     }
+
+    const policyRaceTenant="94000000-0000-4000-8000-000000000001";
+    const policyRaceActor="94000000-0000-4000-8000-000000000002";
+    const policyRaceUnits=["94000000-0000-4000-8000-000000000003","94000000-0000-4000-8000-000000000004"];
+    await target.query(`INSERT INTO tenants(id,name) VALUES($1,'SLA policy race');
+      INSERT INTO units(id,tenant_id,code,name) VALUES($2,$1,'RACE-A','Race A'),($3,$1,'RACE-B','Race B');
+      INSERT INTO users(id,tenant_id,email,display_name) VALUES($4,$1,'sla-race@test.local','SLA Race Manager');
+      INSERT INTO user_units(tenant_id,user_id,unit_id,role) VALUES($1,$4,$2,'UNIT_MANAGER'),($1,$4,$3,'UNIT_MANAGER')`,
+      [policyRaceTenant,...policyRaceUnits,policyRaceActor]);
+    const policyRaceClients=await Promise.all([0,1].map(async()=>{const client=new pg.Client({connectionString:targetUrl.toString()});
+      await client.connect();await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
+      await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id',$3,true)",
+        [policyRaceTenant,policyRaceActor,`sla-policy-race-${randomUUID()}`]);return client}));
+    const policyRaceTargets=JSON.stringify([{priority:"LOW",targetMinutes:120},{priority:"NORMAL",targetMinutes:60},
+      {priority:"HIGH",targetMinutes:30},{priority:"URGENT",targetMinutes:15}]);
+    const policyRaceCalls=policyRaceClients.map((client,index)=>client.query(
+      "SELECT * FROM set_unit_sla_policy($1,0,$2::jsonb,'sla-policy-shared-race-key',$3)",
+      [policyRaceUnits[index],policyRaceTargets,index===0?"a".repeat(64):"b".repeat(64)]));
+    const firstPolicyRace=await Promise.race(policyRaceCalls.map((call,index)=>call.then(result=>({index,result}))));
+    assert.equal(firstPolicyRace.result.rows.length,1);assert.equal(firstPolicyRace.result.rows[0].replayed,false);
+    await policyRaceClients[firstPolicyRace.index].query("COMMIT");
+    const losingPolicyRaceIndex=firstPolicyRace.index===0?1:0;
+    await assert.rejects(policyRaceCalls[losingPolicyRaceIndex],/SLA_POLICY_IDEMPOTENCY_CONFLICT/);
+    await policyRaceClients[losingPolicyRaceIndex].query("ROLLBACK");
+    await Promise.all(policyRaceClients.map(client=>client.end()));
+    const policyRaceEvidence=(await target.query(`SELECT
+      (SELECT count(*)::int FROM unit_sla_policy_publish_commands WHERE tenant_id=$1) commands,
+      (SELECT count(*)::int FROM unit_sla_policy_versions WHERE tenant_id=$1) versions,
+      (SELECT count(*)::int FROM unit_sla_policy_targets WHERE tenant_id=$1) targets,
+      (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='SLA_POLICY_PUBLISHED') audits`,[policyRaceTenant])).rows[0];
+    assert.deepEqual(policyRaceEvidence,{commands:1,versions:1,targets:4,audits:1});
 
     const role = await target.query(
       "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'zap_pronto_app'",
