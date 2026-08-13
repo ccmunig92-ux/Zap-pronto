@@ -1,8 +1,9 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma, não autoriza commit, push ou deploy e não homologa Meta, Hermes, IdP
-externo ou produção.
+Ele não substitui o cronograma e não autoriza merge ou deploy. O candidato está versionado no branch
+`codex/release-local-0050` e permanece em PR draft; isso não homologa Meta, Hermes, IdP externo ou
+produção.
 
 ## Escopo
 
@@ -80,7 +81,8 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com todos os gates verdes, a declaração permitida é **candidato local validado**. Publicação exige um
-snapshot deliberado e autorizado em branch/commit. Staging exige artefato imutável, IdP externo, HTTPS,
-segredos escopados e homologação própria. Meta real, push e deploy permanecem proibidos sem autorização
-explícita.
+Com todos os gates verdes, a declaração permitida é **candidato local validado**. O snapshot deliberado
+já existe no branch `codex/release-local-0050`, com PR draft e CI verde. Staging continua bloqueado até
+existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
+homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
+gates externos correspondentes.
