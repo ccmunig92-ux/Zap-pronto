@@ -603,7 +603,10 @@ automatizados, 17/17 jornadas E2E OIDC, banco limpo, upgrade legado, `typecheck:
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
 2. O environment `oidc-homologation` está protegido no GitHub com reviewer obrigatório distinto,
    prevenção de autoaprovação, bypass administrativo desabilitado e deployments restritos à branch
-   `main`. Preservar essas regras e não cadastrar valores sintéticos como configuração externa.
+   `main`. A própria branch `main` exige PR, o check `validate` atualizado, um approval, conversas
+   resolvidas e histórico linear; administradores também estão sujeitos às regras, e force-push e
+   deleção permanecem bloqueados. Preservar essas regras e não cadastrar valores sintéticos como
+   configuração externa.
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
