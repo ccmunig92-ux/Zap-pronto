@@ -27,6 +27,8 @@ validado até a migration `0066`, com:
 - webhook Meta assinado e reconciliação sintética local, sem transporte outbound real.
 - escalas vinculadas causalmente à versão exata do fuso e invalidadas de forma fail-closed quando ele muda;
 - disponibilidade restaurada como `OFFLINE` após reativação de vínculo.
+- convergência automática near-real-time da Inbox por leituras periódicas dos contratos existentes,
+  sem push, WebSocket, endpoint ou persistência paralelos.
 
 Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta
 contas Meta reais e mantém o transporte externo e Hermes desativados. O histórico de cortes e evidências

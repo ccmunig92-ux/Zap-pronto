@@ -70,6 +70,9 @@ type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
 const maximumHistorySpanMs=366*24*60*60*1000;
+const automaticRefreshBaseMs=30_000,automaticRefreshMaximumMs=300_000,automaticRefreshRecoveryMs=1_000;
+const refreshWindowMaximumItems=400,refreshWindowMaximumRequests=4;
+type RefreshResult="success"|"skipped"|"retryable-failure"|"terminal-auth";
 function instantToLocalDateTime(value:string):string{const date=new Date(value),pad=(part:number)=>String(part).padStart(2,"0");return`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`}
 function historicalMessages(page:ListInboxMessagesResponse,resolvedAt:string):ListInboxMessagesResponse{
   return {...page,items:page.items.filter(message=>message.createdAt<=resolvedAt).map(message=>({...message,allowedActions:[]}))};
@@ -143,6 +146,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const takeoverIntent=useRef<{id:string;version:number;key:string}|undefined>(undefined);
   const cancelIntent = useRef<{ conversationId: string; messageId: string; version: number; key: string } | undefined>(undefined);
   const refreshFlight = useRef(false);
+  const initialLoadFlight=useRef(false);
   const operationLock = useRef<symbol | undefined>(undefined);
   const mutationLock = useRef<symbol | undefined>(undefined);
   const queuePageFlight = useRef(false);
@@ -151,6 +155,11 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const resolvedPageFlight=useRef(false);
   const slaAlertPageFlight=useRef(false);
   const slaAlertIntent=useRef<{id:string;version:number;key:string}|undefined>(undefined);
+  const automaticRefreshTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const automaticRefreshFailures=useRef(0);
+  const automaticRefreshRunner=useRef<()=>Promise<RefreshResult>>(async()=>"skipped");
+  const mounted=useRef(true);
+  const authorizationFailed=useRef(false);
   const navigationCallback=useRef(onNavigationStateChange);
   const [loadingQueuePage, setLoadingQueuePage] = useState(false);
   const [loadingActivePage, setLoadingActivePage] = useState(false);
@@ -260,10 +269,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     if (g !== generation.current) return;
     const actual = (errorValue as Partial<ScopedReadError>).cause ?? errorValue;
     if (actual instanceof AuthenticationRequired || actual instanceof ApiProblem && actual.problem.status === 401) {
-      generation.current += 1; purgeSensitive(); onAuthenticationRequired(); return;
+      generation.current += 1; purgeSensitive(); if(!authorizationFailed.current){authorizationFailed.current=true;onAuthenticationRequired()} return;
     }
     if (actual instanceof ApiProblem && actual.problem.status === 403) {
-      generation.current += 1; purgeSensitive(); onAuthorizationChanged(); return;
+      generation.current += 1; purgeSensitive(); if(!authorizationFailed.current){authorizationFailed.current=true;onAuthorizationChanged()} return;
     }
     setError(actual instanceof ApiProblem
       ? `Não foi possível carregar a Inbox. Correlação: ${actual.problem.correlationId}`
@@ -274,10 +283,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     if (g !== generation.current) return;
     const actual = (errorValue as Partial<ScopedReadError>).cause ?? errorValue;
     if (actual instanceof AuthenticationRequired || actual instanceof ApiProblem && actual.problem.status === 401) {
-      generation.current += 1; purgeSensitive(); onAuthenticationRequired(); return;
+      generation.current += 1; purgeSensitive(); if(!authorizationFailed.current){authorizationFailed.current=true;onAuthenticationRequired()} return;
     }
     if (actual instanceof ApiProblem && actual.problem.status === 403) {
-      generation.current += 1; purgeSensitive(); onAuthorizationChanged(); return;
+      generation.current += 1; purgeSensitive(); if(!authorizationFailed.current){authorizationFailed.current=true;onAuthorizationChanged()} return;
     }
     setError("A ação foi concluída, mas não foi possível atualizar a Inbox. Use Atualizar Inbox.");
   }
@@ -290,6 +299,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     const g = ++generation.current;
     purgeSensitive();
     if (!unitId) return () => { generation.current += 1; };
+    initialLoadFlight.current=true;
     Promise.all([
       scoped("queue", client.listHandoffs(queueInput(unitId))),
       scoped("active", client.listActiveInboxHandoffs({ unitId, limit: 25 })),
@@ -299,8 +309,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("availability",client.getInboxAvailability(unitId)),
     ]).then(([queued, mine,others,closed,alerts,nextAvailability]) => {
       if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability); }
-    }).catch((caught: unknown) => fail(caught, g));
-    return () => { generation.current += 1; };
+    }).catch((caught: unknown) => fail(caught, g)).finally(()=>{if(g===generation.current)initialLoadFlight.current=false});
+    return () => { generation.current += 1;initialLoadFlight.current=false };
   }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
 
   function openAvailability(){
@@ -437,32 +447,63 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     if (!cancellable) cancelIntent.current = undefined;
   }
 
-  async function refresh() {
-    if (!unitId || refreshing || mutationBusy) return;
+  async function collectWindow<T extends object,R extends {readonly items:readonly T[];readonly nextCursor?:string}>(
+    target:number,first:(limit:number)=>Promise<R>,next:(cursor:string,limit:number)=>Promise<R>):Promise<R>{
+    if(target>refreshWindowMaximumItems)throw new Error("INBOX_REFRESH_WINDOW_BUDGET_EXCEEDED");
+    const limit=Math.min(100,Math.max(25,target)),initial=await first(limit);let result=initial;
+    const cursors=new Set<string>();let requests=1;
+    while(result.items.length<target&&result.nextCursor){
+      if(cursors.has(result.nextCursor))throw new Error("INBOX_REFRESH_CURSOR_CYCLE");
+      if(requests>=refreshWindowMaximumRequests)throw new Error("INBOX_REFRESH_WINDOW_BUDGET_EXCEEDED");
+      cursors.add(result.nextCursor);const previousSize=result.items.length;
+      const page=await next(result.nextCursor,Math.min(100,target-result.items.length));
+      requests+=1;
+      const key=(item:T)=>"id" in item?String(item.id):"handoffId" in item?String(item.handoffId):JSON.stringify(item);
+      const ids=new Set(result.items.map(key));
+      result={...page,items:[...result.items,...page.items.filter(item=>!ids.has(key(item)))]} as R;
+      if(result.items.length===previousSize&&result.nextCursor)throw new Error("INBOX_REFRESH_WINDOW_NO_PROGRESS");
+    }
+    return result;
+  }
+
+  async function refresh(origin:"manual"|"automatic"="manual"):Promise<RefreshResult> {
+    const windowBudgetExceeded=[queue,active,supervised,resolved,slaAlerts,messages]
+      .some(page=>(page?.items.length??0)>refreshWindowMaximumItems);
+    const automaticBlocked=origin==="automatic"&&(initialLoadFlight.current||navigationDirty||navigationBlocked
+      ||windowBudgetExceeded||queuePageFlight.current||activePageFlight.current||supervisedPageFlight.current||resolvedPageFlight.current||slaAlertPageFlight.current);
+    if (!unitId || refreshing || mutationBusy || authorizationFailed.current || automaticBlocked) return "skipped";
     const operationToken = acquireOperation();
-    if (!operationToken) return;
+    if (!operationToken) return "skipped";
     refreshFlight.current = true;
     const capturedUnit = unitId;
     const capturedSelected = selected;
+    const automatic=origin==="automatic";
     const g = ++generation.current;
-    setRefreshing(true); setError(undefined); setClosedNotice(undefined);
+    if(!automatic){setRefreshing(true);setError(undefined);setClosedNotice(undefined)}
+    const queueTarget=automatic?Math.max(25,queue?.items.length??0):25;
+    const activeTarget=automatic?Math.max(25,active?.items.length??0):25;
+    const supervisedTarget=automatic?Math.max(25,supervised?.items.length??0):25;
+    const resolvedTarget=automatic?Math.max(25,resolved?.items.length??0):25;
+    const alertsTarget=automatic?Math.max(25,slaAlerts?.items.length??0):25;
+    const messagesTarget=automatic?Math.max(25,messages?.items.length??0):25;
     const listsPromise = Promise.all([
-      scoped("queue", client.listHandoffs(queueInput(capturedUnit))),
-      scoped("active", client.listActiveInboxHandoffs({ unitId: capturedUnit, limit: 25 })),
-      scoped("supervised",supervisedFirst(capturedUnit)),
-      scoped("resolved",resolvedFirst(capturedUnit)),
-      scoped("slaAlerts",slaAlertsFirst(capturedUnit)),
+      scoped("queue",collectWindow(queueTarget,limit=>client.listHandoffs({...queueInput(capturedUnit),limit}),(cursor,limit)=>client.listHandoffs({...queueInput(capturedUnit,cursor),limit}))),
+      scoped("active",collectWindow(activeTarget,limit=>client.listActiveInboxHandoffs({unitId:capturedUnit,limit}),(cursor,limit)=>client.listActiveInboxHandoffs({unitId:capturedUnit,limit,cursor}))),
+      scoped("supervised",supervisedUnitIds.includes(capturedUnit)?collectWindow(supervisedTarget,limit=>client.listSupervisedInboxHandoffs({unitId:capturedUnit,limit}),(cursor,limit)=>client.listSupervisedInboxHandoffs({unitId:capturedUnit,limit,cursor})):Promise.resolve({items:[]} satisfies ListHandoffsResponse)),
+      scoped("resolved",historyUnitIds.includes(capturedUnit)?collectWindow(resolvedTarget,limit=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit),limit}),(cursor,limit)=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListResolvedHandoffsResponse)),
+      scoped("slaAlerts",slaAlertReadUnitIds.includes(capturedUnit)?collectWindow(alertsTarget,limit=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit),limit}),(cursor,limit)=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListInboxSlaAlertsResponse)),
       scoped("availability",client.getInboxAvailability(capturedUnit)),
     ]);
     const selectionPromise: Promise<readonly [InboxConversation | undefined, ListInboxMessagesResponse | undefined]> = capturedSelected
       ? Promise.all([
         scoped("detail", client.getInboxConversation(capturedSelected.conversationId)),
-        scoped("messages", client.listInboxConversationMessages(capturedSelected.conversationId, { limit: 25,...("resolvedAt" in capturedSelected?{before:capturedSelected.resolvedAt}:{}) })),
+        scoped("messages",collectWindow(messagesTarget,limit=>client.listInboxConversationMessages(capturedSelected.conversationId,{limit,...("resolvedAt" in capturedSelected?{before:capturedSelected.resolvedAt}:{})}),
+          (cursor,limit)=>client.listInboxConversationMessages(capturedSelected.conversationId,{limit,cursor,...("resolvedAt" in capturedSelected?{before:capturedSelected.resolvedAt}:{})}))),
       ])
       : Promise.resolve([undefined, undefined] as const);
     try {
       const [[queued, mine,others,closed,alerts,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
-      if (g !== generation.current || capturedUnit !== unitId) return;
+      if (g !== generation.current || capturedUnit !== unitId) return "skipped";
       let nextSelected: InboxSelection | undefined;
       if (capturedSelected) nextSelected = queued.items.find(item => item.id === capturedSelected.id)
         ?? mine.items.find(item => item.id === capturedSelected.id)
@@ -478,29 +519,54 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         if("resolvedAt" in nextSelected){setDetail({...nextDetail,allowedActions:[],claimTarget:null,sendTextTarget:null,resolveTarget:null,requeueTarget:null,transferTarget:null,takeoverTarget:null});setMessages(historicalMessages(nextMessages,nextSelected.resolvedAt));setDraft("");clearIntents()}
         else{setDetail(nextDetail);setMessages(nextMessages);retainCoherentIntents(nextDetail,nextMessages,nextSelected)}
       }
+      if(!automatic)setError(undefined);
+      return "success";
     } catch (caught) {
-      if (g !== generation.current || capturedUnit !== unitId) return;
+      if (g !== generation.current || capturedUnit !== unitId) return "skipped";
       const scopedError = caught as Partial<ScopedReadError>;
       const actual = scopedError.cause ?? caught;
       if (actual instanceof ApiProblem && actual.problem.status === 404) {
         if (scopedError.scope === "detail" || scopedError.scope === "messages") {
           try {
             const [queued, mine,others,closed] = await listsPromise;
-            if (g !== generation.current || capturedUnit !== unitId) return;
+            if (g !== generation.current || capturedUnit !== unitId) return "skipped";
             setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed); purgeSelection("Atendimento não está mais disponível.");
+            return "success";
           } catch (listFailure) {
-            if (g === generation.current && capturedUnit === unitId) fail(listFailure, g);
+            if(g!==generation.current||capturedUnit!==unitId)return"skipped";
+            const listActual=(listFailure as Partial<ScopedReadError>).cause??listFailure;
+            const terminal=listActual instanceof AuthenticationRequired||listActual instanceof ApiProblem&&[401,403].includes(listActual.problem.status);
+            if(terminal||!automatic)fail(listFailure,g);
+            return terminal?"terminal-auth":"retryable-failure";
           }
         } else {
           purgeSensitive();
           setClosedNotice("Atendimento não está mais disponível.");
+          return "success";
         }
-      } else fail(caught, g);
+      } else {const terminal=actual instanceof AuthenticationRequired||actual instanceof ApiProblem&&[401,403].includes(actual.problem.status);
+        if(terminal||!automatic)fail(caught,g);return terminal?"terminal-auth":"retryable-failure"}
     } finally {
       releaseOperation(operationToken);
-      if (g === generation.current) { refreshFlight.current = false; setRefreshing(false); }
+      if (g === generation.current) { refreshFlight.current = false; if(!automatic)setRefreshing(false); }
     }
   }
+
+  automaticRefreshRunner.current=()=>refresh("automatic");
+  useEffect(()=>{
+    mounted.current=true;
+    const cancel=()=>{if(automaticRefreshTimer.current!==undefined){clearTimeout(automaticRefreshTimer.current);automaticRefreshTimer.current=undefined}};
+    const eligible=()=>mounted.current&&!authorizationFailed.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
+    const jitter=(delay:number)=>Math.max(1,Math.round(delay*(.8+Math.random()*.4)));
+    const schedule=(delay:number)=>{cancel();if(eligible())automaticRefreshTimer.current=setTimeout(run,jitter(delay))};
+    const run=async()=>{cancel();if(!eligible())return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
+      if(result==="retryable-failure")automaticRefreshFailures.current+=1;else if(result==="success")automaticRefreshFailures.current=0;
+      const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;schedule(delay)};
+    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else cancel()};
+    const online=()=>schedule(automaticRefreshRecoveryMs),offline=()=>cancel();
+    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
+    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("offline",offline)};
+  },[]);
 
   async function older() {
     if (!selected || !messages?.nextCursor || refreshing || mutationBusy) return;
@@ -821,7 +887,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const actionsDisabled = refreshing;
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
-      <button className="inbox-refresh" type="button" onClick={refresh} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div>
+      <button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div>
     <section aria-labelledby="availability-title"><h3 id="availability-title">Minha disponibilidade</h3>
       {!availability?<p>Carregando disponibilidade…</p>:<><p>Status: <strong>{availability.status==="AVAILABLE"?"Disponível":availability.status==="PAUSED"?"Pausado":"Offline"}</strong> · {availability.activeCount} de {availability.maxActive} ativos</p>
       {!availabilityOpen&&<button type="button" disabled={mutationBusy||refreshing} onClick={openAvailability}>Alterar disponibilidade</button>}</>}

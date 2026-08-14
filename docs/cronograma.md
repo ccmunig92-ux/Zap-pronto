@@ -776,6 +776,18 @@ sob o lock canônico da unidade. Escalas legadas ficam sem esse vínculo e falha
 não há backfill inferido por relógio. O teste PostgreSQL segura o lock de timezone, comprova a espera
 advisory da publicação concorrente e verifica que a escala resultante referencia exatamente a versão nova.
 
+Checkpoint frontend sobre a baseline `0066`: a Inbox passou a convergir automaticamente por polling near-real-time
+dos mesmos endpoints `GET` canônicos. O ciclo usa single-flight, backoff limitado, pausa quando a aba
+está oculta ou offline e recuperação atrasada ao voltar. `401/403` encerram o ciclo e purgam o estado;
+respostas tardias e paginação sem progresso não são publicadas. Draft, modal ou outra navegação dirty
+pausam a convergência até o operador limpar o estado.
+
+A prova focal passou com 77/77 testes da Inbox, typecheck web, overlay 5/5 e uma jornada Playwright
+multi-sessão: a sessão observadora ficou hidden e offline enquanto outra sessão enviou uma mensagem;
+ao voltar, convergiu sem clique, sem mutação `/v1` própria e sem duplicar a mensagem. Este corte não é
+push nem realtime estrito, não adiciona API, tabela, migration ou worker e não executa Meta, Hermes,
+staging externo ou deploy.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.

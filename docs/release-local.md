@@ -222,6 +222,19 @@ PostgreSQL 18 limpo e upgrade passaram. A prova concorrente confirma que a publi
 o advisory lock mantido pela alteração de fuso e, após a liberação, persiste exatamente o ID da nova
 versão. A suíte completa, overlay e E2E OIDC permaneceram verdes, sem outbound, Hermes ou Meta.
 
+## Evidência frontend de convergência sobre a baseline 0066
+
+A Inbox usa polling near-real-time sobre os mesmos `GET` existentes, com uma única execução em voo,
+backoff `30/60/120/240/300` segundos, jitter limitado e recuperação de aba/rede após atraso curto. Não
+há push, WebSocket, SSE, endpoint, migration, tabela ou serviço paralelo. Aba oculta, rede offline,
+mutação, paginação em voo, draft ou modal dirty suspendem o refresh automático; `401/403` encerram o
+ciclo até remontagem.
+
+Passaram 77/77 testes focais da Inbox, typecheck web e overlay 5/5. A jornada Playwright isolada com
+duas sessões confirmou que a observadora não fez mutação `/v1`, não atualizou enquanto hidden/offline e,
+após recovery, executou somente leituras e exibiu uma única cópia da mensagem criada pela outra sessão.
+Nenhuma API, banco, Meta, Hermes, staging externo ou deploy foi alterado.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
