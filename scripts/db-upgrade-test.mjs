@@ -172,6 +172,7 @@ try {
   assert.match(firstRun, /applied 0062_unit_assignment_shift_enforcement\.sql/);
   assert.match(firstRun, /applied 0063_assignment_policy_authorization_hardening\.sql/);
   assert.match(firstRun, /applied 0064_shift_aware_sla_capacity\.sql/);
+  assert.match(firstRun, /applied 0065_timezone_and_membership_state_hardening\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();

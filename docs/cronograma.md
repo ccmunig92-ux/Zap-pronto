@@ -7,7 +7,9 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
 - Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
-- Fase atual: **Fase 4 — inbox multiusuário e produtividade**, validada localmente até a migration `0064` no branch `codex/phase-4-attendant-availability`.
+- Fase atual: **Fase 4 — inbox multiusuário e produtividade**. O checkpoint `0064` foi integrado à
+  `main` pela PR #10; o incremento `0065` está validado localmente no branch
+  `codex/phase-4-post-0064-hardening`.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -731,7 +733,8 @@ nega a transferência e preserva owner, conversa e caso. O takeover permanece in
 Os gates locais da cadeia `0001`–`0063` passaram: 112 testes core, 91 da API, 32 do cliente, 185 do
 frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a nova jornada isolada
 1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging ou deploy. Os runs remotos de
-push `31682880249` e pull request `31682884013` passaram integralmente; este checkpoint ainda não está integrado à `main`.
+push `31682880249` e pull request `31682884013` passaram integralmente. O checkpoint foi posteriormente
+integrado à `main` como parte da PR #10.
 
 Checkpoint local incremental em 2026-08-13, migration `0064`: os alertas de SLA continuam derivados
 exclusivamente da fila, prioridade e prazo e permanecem visíveis mesmo quando não há capacidade elegível.
@@ -743,8 +746,28 @@ transferência ou takeover.
 
 Os gates locais da cadeia limpa `0001`–`0064` passaram: 112 testes core, 91 da API, 32 do cliente,
 185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
-1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging, merge ou deploy. Os runs remotos
+1/1. Não houve outbound externo, resposta Hermes, conexão Meta, staging ou deploy. Os runs remotos
 de push `31685855991` e pull request `31685860112` passaram integralmente, incluindo banco limpo e upgrade.
+O checkpoint `0064` foi integrado à `main` pela PR #10; o CI pós-merge `31828027910` passou integralmente.
+
+Checkpoint local incremental em 2026-08-14, migration `0065`: uma escala só é efetiva enquanto seu
+snapshot de timezone coincide com o fuso operacional vigente da unidade e foi publicado depois dessa
+configuração. Após a mudança de fuso, inclusive no ciclo `UTC`→outro fuso→`UTC`, o
+avaliador retorna `UNCONFIGURED`, sem reutilizar campos da escala antiga; readiness mantém
+`timezoneConfigured=true`, contabiliza as escalas incompatíveis em `missingSchedules` e permanece
+`ready=false`. Com `ENFORCE_NEW_ASSIGNMENTS`, claims e novos destinos continuam bloqueados até a
+republicação das escalas no fuso vigente.
+
+O mesmo incremento serializa o lifecycle do vínculo com a disponibilidade. A transição
+`REVOKED`→`ACTIVE` restaura a disponibilidade na unidade como `OFFLINE`, capacidade máxima 100 e sem
+motivo ou prazo de pausa. O usuário reativado não pode assumir novo atendimento antes de declarar-se
+disponível novamente.
+
+Os gates locais da cadeia limpa `0001`–`0065` passaram em PostgreSQL 18: 112 testes core, 91 da API,
+32 do cliente, 186 do frontend, 7/7 do release-check, overlay 5/5, migrations do zero, upgrade e E2E
+OIDC completo após rebuild limpo. As jornadas provaram invalidação por timezone e
+revogação/reativação com retorno a `OFFLINE`, sem claim persistido na recusa e sem outbound, Hermes ou
+Meta. Este incremento não foi promovido a staging, não executou deploy e não usou IdP ou contas externas.
 
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
@@ -758,7 +781,8 @@ de push `31685855991` e pull request `31685860112` passaram integralmente, inclu
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica já está implementada até a migration `0064`; staging deve
+   execução como evidência. A Inbox canônica está integrada à `main` até `0064`, e o incremento `0065`
+   permanece local; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

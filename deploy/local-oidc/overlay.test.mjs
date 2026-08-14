@@ -124,6 +124,8 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/scheduleOperationalBefore[\s\S]*gestor publica uma escala semanal observacional uma única vez[\s\S]*scheduleOperationalAfter[\s\S]*LOCAL_OIDC_SHIFT_SCHEDULE_MUTATED_OPERATIONAL_STATE/);
   assert.match(controller,/gestor exige turno, atendente fora do turno é negado[\s\S]*unit_assignment_policy_commands[\s\S]*UNIT_ASSIGNMENT_POLICY_CHANGED[\s\S]*LOCAL_OIDC_ASSIGNMENT_POLICY_STATE_INVALID/);
   assert.match(controller,/assignmentBefore[\s\S]*assignmentAfter[\s\S]*LOCAL_OIDC_ASSIGNMENT_POLICY_MUTATED_INBOX/);
+  assert.match(controller,/LOCAL_OIDC_TIMEZONE_MISMATCH_FIXTURE_FAILED[\s\S]*mudança de fuso invalida escalas antigas[\s\S]*time_zone='America\/Sao_Paulo'[\s\S]*LOCAL_OIDC_TIMEZONE_MISMATCH_STATE_INVALID/);
+  assert.match(controller,/administrador revoga e reativa vínculo, força OFFLINE[\s\S]*status='OFFLINE'[\s\S]*LOCAL_OIDC_MEMBERSHIP_AVAILABILITY_STATE_INVALID/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor configura a primeira política de SLA uma única vez/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor configura o fuso operacional uma única vez sem efeitos externos/);
   assert.match(controller,/--grep-invert'[\s\S]*gestor publica uma escala semanal observacional uma única vez/);

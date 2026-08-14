@@ -1,14 +1,15 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma e não autoriza merge ou deploy. O incremento atual está no branch
-`codex/phase-4-attendant-availability` e permanece em PR draft; isso não homologa Meta, Hermes, IdP externo ou
-produção.
+Ele não substitui o cronograma e não autoriza merge ou deploy. O checkpoint `0064` já foi integrado à
+`main`; o incremento local `0065` está no branch `codex/phase-4-post-0064-hardening`. Isso não homologa
+Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
-- Cadeia append-only local validada de `0001_core.sql` até `0064_shift_aware_sla_capacity.sql`.
+- Cadeia append-only local validada de `0001_core.sql` até
+  `0065_timezone_and_membership_state_hardening.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -184,8 +185,30 @@ paginação, severidade, reconhecimento, política SLA, claim, transferência e 
 
 Os gates locais passaram com a cadeia limpa `0001`–`0064`, 112 testes core, 91 da API, 32 do cliente,
 185 do frontend, 7/7 do release-check, overlay 5/5 e E2E OIDC completo verde, incluindo a jornada nova
-1/1. Nenhum transporte outbound, Hermes, Meta, staging, merge ou deploy foi executado. Os runs remotos
+1/1. Na validação daquele SHA, nenhum transporte outbound, Hermes, Meta, staging, merge ou deploy foi
+executado. Os runs remotos
 de push `31685855991` e pull request `31685860112` passaram integralmente, incluindo banco limpo e upgrade.
+O checkpoint foi posteriormente integrado à `main` pela PR #10; o CI pós-merge `31828027910` passou
+integralmente.
+
+## Evidência incremental 0065
+
+A migration `0065_timezone_and_membership_state_hardening.sql` torna incompatível qualquer escala cujo
+snapshot de timezone não corresponda ao fuso operacional vigente ou seja anterior à configuração atual.
+Assim, retornar posteriormente ao mesmo nome de fuso não ressuscita escalas antigas. O avaliador retorna `UNCONFIGURED`
+com os campos da escala nulos; readiness mantém o fuso como configurado, informa todas as escalas
+incompatíveis como pendentes e não declara a unidade pronta. O modo `ENFORCE_NEW_ASSIGNMENTS` continua
+fail-closed até que as escalas sejam republicadas no novo fuso.
+
+A mesma migration serializa mudanças de status do vínculo antes da transição e, em uma reativação,
+restaura a disponibilidade para `OFFLINE`, `maxActive=100`, sem motivo ou prazo de pausa e com nova
+versão. Isso impede que disponibilidade anterior à revogação seja reutilizada para um novo claim.
+
+Os gates locais passaram com a cadeia limpa `0001`–`0065` em PostgreSQL 18: 112 testes core, 91 da API,
+32 do cliente, 186 do frontend, 7/7 do release-check, overlay 5/5, banco limpo, upgrade e E2E OIDC
+completo após rebuild limpo. As jornadas isoladas confirmaram a recusa do claim após mudança de fuso e
+após reativação ainda `OFFLINE`, sem persistir comando de claim e sem outbound, Hermes ou Meta.
+Nenhum staging externo, IdP real, deploy ou conta externa foi usado.
 
 ## Gates obrigatórios
 
@@ -221,8 +244,9 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais e remotos verdes, a declaração permitida é **candidato 0064 validado**. O candidato atual
-está no branch `codex/phase-4-attendant-availability`, com PR draft. A promoção à `main` exige PR,
+Com os gates locais verdes, a declaração permitida é **candidato local 0065 validado**. O checkpoint
+`0064` já está integrado à `main`; o candidato atual está no branch
+`codex/phase-4-post-0064-hardening`. A promoção do `0065` à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
 force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e

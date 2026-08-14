@@ -26,6 +26,9 @@ DO $$ DECLARE listed record;first_ack record;replay_ack record;next_ack record;B
  IF listed.sla_status<>'OVERDUE' OR listed.age_seconds<>7200 OR listed.available_capacity<>0
    THEN RAISE EXCEPTION 'SLA_ALERT_PROJECTION_INVALID';END IF;
 
+ INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,version,created_by_user_id)
+ VALUES('81000000-0000-4000-8000-000000000001','82000000-0000-4000-8000-000000000001','UTC',1,
+   '83000000-0000-4000-8000-000000000001');
  INSERT INTO unit_shift_schedule_versions(tenant_id,unit_id,user_id,version,effective_from,time_zone,weekly_slots,exceptions,created_by_user_id)
  VALUES('81000000-0000-4000-8000-000000000001','82000000-0000-4000-8000-000000000001',
    '83000000-0000-4000-8000-000000000001',1,'2026-01-01','UTC','[{"weekday":4,"start":"09:00","end":"11:00"}]','[]',

@@ -118,6 +118,7 @@ try {
       "0062_unit_assignment_shift_enforcement.sql",
       "0063_assignment_policy_authorization_hardening.sql",
       "0064_shift_aware_sla_capacity.sql",
+      "0065_timezone_and_membership_state_hardening.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -164,6 +165,9 @@ try {
     const assignmentPolicyTestClient=new pg.Client({connectionString:targetUrl.toString()});await assignmentPolicyTestClient.connect();
     try{await assignmentPolicyTestClient.query(await readFile(resolve("database/tests","0009_assignment_shift_enforcement.sql"),"utf8"));}
     finally{await assignmentPolicyTestClient.end();}
+    const timezoneMembershipHardeningTestClient=new pg.Client({connectionString:targetUrl.toString()});await timezoneMembershipHardeningTestClient.connect();
+    try{await timezoneMembershipHardeningTestClient.query(await readFile(resolve("database/tests","0010_timezone_membership_state_hardening.sql"),"utf8"));}
+    finally{await timezoneMembershipHardeningTestClient.end();}
 
     const assignmentRaceTenant="99100000-0000-4000-8000-000000000001",assignmentRaceUnit="99100000-0000-4000-8000-000000000002",
       assignmentRaceManager="99100000-0000-4000-8000-000000000003";
@@ -1821,10 +1825,11 @@ try {
           AND action='ATTENDANT_AVAILABILITY_CHANGED') audits`,[claimContext.tenantId,claimContext.actorId])).rows[0],availabilityEffects);
       await target.query(`UPDATE user_units SET status='ACTIVE',revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL
         WHERE tenant_id=$1 AND user_id=$2`,[claimContext.tenantId,claimContext.actorId]);
-      assert.equal((await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-get-restored"},
-        client=>getActorUnitAvailability(client,availabilityUnitId))).status,"OFFLINE");
+      const restoredAvailability=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-get-restored"},
+        client=>getActorUnitAvailability(client,availabilityUnitId));
+      assert.equal(restoredAvailability.status,"OFFLINE");
       const availabilityRestored=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"availability-auth-available"},
-        client=>setActorUnitAvailability(client,{...availabilityCommand,status:"AVAILABLE",expectedVersion:2,
+        client=>setActorUnitAvailability(client,{...availabilityCommand,status:"AVAILABLE",expectedVersion:restoredAvailability.version,
           idempotencyKey:"availability-auth-available"}));
       assert.equal(availabilityRestored.status,"AVAILABLE");
       await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',max_active=100,
@@ -1975,6 +1980,8 @@ try {
       assert.deepEqual({status:oldClaimReplay.status,version:oldClaimReplay.version,assignedUserId:oldClaimReplay.assignedUserId,
         automationStatus:oldClaimReplay.automationStatus,replayed:oldClaimReplay.replayed},
       {status:"ACTIVE",version:2,assignedUserId:actorAId,automationStatus:"HUMAN_ACTIVE",replayed:true});
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',version=version+1,updated_at=clock_timestamp()
+        WHERE tenant_id=$1 AND user_id=$2`,[claimContext.tenantId,claimContext.actorId]);
       const claimedAgain=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"claim-after-requeue"},client=>claimHandoff(client,
         {handoffId:handoffA.rows[0].id,expectedVersion:3,idempotencyKey:"claim-after-requeue"}));
       assert.equal(claimedAgain.version,4);assert.equal(claimedAgain.replayed,false);
@@ -2095,10 +2102,15 @@ try {
       await assert.rejects(withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-outside-shift"},client=>transferHandoff(client,
         {handoffId:handoffA.rows[0].id,expectedVersion:4,targetUserId:transferTargetId,reason:"LOAD_BALANCING",idempotencyKey:"handoff-transfer-outside-shift"})),
       /ASSIGNEE_OUTSIDE_SHIFT/);
+      await target.query(`INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,version,created_by_user_id)
+        SELECT $1,$2,'UTC',1,$3 WHERE NOT EXISTS(SELECT 1 FROM unit_operational_timezone_versions
+          WHERE tenant_id=$1 AND unit_id=$2)`,[claimContext.tenantId,enforcedTransferUnit,actorAId]);
       await target.query(`INSERT INTO unit_shift_schedule_versions(tenant_id,unit_id,user_id,version,effective_from,time_zone,weekly_slots,exceptions,created_by_user_id)
-        VALUES($1,$2,$3,1,(transaction_timestamp() AT TIME ZONE 'UTC')::date,'UTC',
-          jsonb_build_array(jsonb_build_object('weekday',extract(isodow FROM transaction_timestamp() AT TIME ZONE 'UTC')::integer,'start','00:00','end','23:59')),
-          '[]'::jsonb,$4)`,[claimContext.tenantId,enforcedTransferUnit,transferTargetId,actorAId]);
+        SELECT $1,$2,$3,1,(transaction_timestamp() AT TIME ZONE configured.time_zone)::date,configured.time_zone,
+          jsonb_build_array(jsonb_build_object('weekday',extract(isodow FROM transaction_timestamp() AT TIME ZONE configured.time_zone)::integer,'start','00:00','end','23:59')),
+          '[]'::jsonb,$4 FROM LATERAL(SELECT time_zone FROM unit_operational_timezone_versions
+            WHERE tenant_id=$1 AND unit_id=$2 ORDER BY version DESC LIMIT 1) configured`,
+        [claimContext.tenantId,enforcedTransferUnit,transferTargetId,actorAId]);
       const candidates=await withTenantTransaction(runtimePool,{...claimContext,correlationId:"transfer-candidates"},client=>listTransferCandidates(client,handoffA.rows[0].id));
       assert.deepEqual(candidates,{items:[{id:transferTargetId,displayName:"Transfer Target"}]});
       const transferInput={handoffId:handoffA.rows[0].id,expectedVersion:4,targetUserId:transferTargetId,reason:"LOAD_BALANCING",idempotencyKey:"handoff-transfer-key"};
@@ -2284,6 +2296,8 @@ try {
         NOT EXISTS(SELECT 1 FROM information_schema.routine_privileges
           WHERE routine_name='admin_list_unit_memberships' AND grantee='PUBLIC') public_revoked`)).rows[0],
       {api:true,worker:false,app:false,public_revoked:true});
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',version=version+1,updated_at=clock_timestamp()
+        WHERE tenant_id=$1 AND unit_id=$2 AND user_id=$3`,[claimContext.tenantId,handoffUnitId,transferTargetId]);
       await target.query("UPDATE human_handoffs SET assigned_user_id=$1 WHERE id=$2",
         [transferTargetId,handoffA.rows[0].id]);
       await target.query(`UPDATE conversations SET assigned_user_id=$1
@@ -2323,6 +2337,8 @@ try {
       await target.query(`UPDATE user_units SET status='ACTIVE',version=version+1,state_changed_at=now(),
         revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3`,
       [claimContext.tenantId,transferTargetId,handoffUnitId]);
+      await target.query(`UPDATE attendant_unit_availability SET status='AVAILABLE',version=version+1,updated_at=clock_timestamp()
+        WHERE tenant_id=$1 AND user_id=$2 AND unit_id=$3`,[claimContext.tenantId,transferTargetId,handoffUnitId]);
       const assignFirst=new pg.Client({connectionString:targetUrl.toString()});await assignFirst.connect();
       const lifecycleSecond=await competingRuntimePool.connect();
       try {
