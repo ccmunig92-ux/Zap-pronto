@@ -109,6 +109,7 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.match(controller,/--grep','atendente altera a própria disponibilidade'[\s\S]*attendant_unit_availability[\s\S]*attendant_availability_commands[\s\S]*LOCAL_OIDC_ATTENDANT_AVAILABILITY_STATE_INVALID/);
   assert.match(controller,/--grep','gestor consulta disponibilidade da equipe sob demanda'[\s\S]*Compose @\('run','--rm','local-seed'\)/);
   assert.match(controller,/resposta humana TEXT/);
+  assert.match(controller,/duas sessões convergem após hidden e offline[\s\S]*Convergência externa sintética[\s\S]*LOCAL_OIDC_AUTOMATIC_CONVERGENCE_STATE_INVALID/);
   assert.match(controller,/LOCAL_OIDC_HUMAN_TEXT_STATE_INVALID/);
   assert.match(controller,/cancelamento local mantém TEXT/);
   assert.match(controller,/LOCAL_OIDC_HUMAN_TEXT_CANCEL_STATE_INVALID/);
