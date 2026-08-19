@@ -77,6 +77,7 @@ test("seed local restaura contas sinteticas para ACTIVE de forma idempotente", a
   assert.match(seed,/DELETE FROM attendant_availability_commands[\s\S]*INSERT INTO attendant_unit_availability[\s\S]*'AVAILABLE',100,NULL,NULL,1/);
   assert.match(seed,/DELETE FROM unit_operational_timezone_commands[\s\S]*DELETE FROM unit_operational_timezone_versions/);
   assert.match(seed,/DELETE FROM unit_shift_schedule_commands[\s\S]*DELETE FROM unit_shift_schedule_versions/);
+  assert.match(seed,/DELETE FROM unit_shift_schedule_versions[\s\S]*DELETE FROM unit_operational_timezone_versions/);
   assert.match(seed,/DELETE FROM handoff_sla_acknowledge_commands[\s\S]*SLA_ALERT_ACKNOWLEDGED[\s\S]*DELETE FROM handoff_sla_acknowledgements/);
   assert.match(seed,/sla_due_at=NULL[\s\S]*queued_at=clock_timestamp\(\)-interval '30 minutes'/);
 });

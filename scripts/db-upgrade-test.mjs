@@ -174,6 +174,7 @@ try {
   assert.match(firstRun, /applied 0064_shift_aware_sla_capacity\.sql/);
   assert.match(firstRun, /applied 0065_timezone_and_membership_state_hardening\.sql/);
   assert.match(firstRun, /applied 0066_causal_shift_timezone_snapshot\.sql/);
+  assert.match(firstRun, /applied 0067_sustained_demand_capacity_alert\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -205,14 +206,19 @@ try {
       has_function_privilege('zap_pronto_worker','list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') worker_execute,
       has_function_privilege('zap_pronto_api','list_inbox_sla_alerts_v0055(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)','EXECUTE') legacy_api_execute,
       pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
-        LIKE '%evaluate_unit_staff_shift_internal%' shift_aware,
-      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%get_unit_available_capacity_internal%' shift_aware,
+      pg_get_functiondef('get_unit_available_capacity_internal(uuid,uuid,timestamptz)'::regprocedure)
         LIKE '%active_counts AS MATERIALIZED%' active_counts_once,
+      pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure)
+        LIKE '%WITH capacity AS MATERIALIZED%' capacity_materialized,
+      (length(pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure))-
+       length(replace(pg_get_functiondef('list_inbox_sla_alerts(uuid,integer,text,text,timestamptz,integer,integer,timestamptz,timestamptz,uuid)'::regprocedure),
+         'get_unit_available_capacity_internal','')))/length('get_unit_available_capacity_internal')=1 helper_once,
       EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='human_handoffs'
         AND indexname='human_handoffs_active_assignee_capacity_idx'
         AND indexdef LIKE '%(tenant_id, unit_id, assigned_user_id)%' AND indexdef LIKE '%status = ''ACTIVE''%') capacity_index`);
     assert.deepEqual(shiftAwareSlaUpgrade.rows[0],{api_execute:true,worker_execute:false,legacy_api_execute:false,
-      shift_aware:true,active_counts_once:true,capacity_index:true});
+      shift_aware:true,active_counts_once:true,capacity_materialized:true,helper_once:true,capacity_index:true});
     const transferReplayUpgrade=await verify.query(`SELECT
       (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
         AND table_name='handoff_transfer_commands' AND column_name='unit_id') unit_nullable,
@@ -377,7 +383,7 @@ try {
       (SELECT version FROM users WHERE id='12000000-0000-4000-8000-000000000001') AS user_version,
       to_regprocedure('current_actor_has_permission(text,uuid)') IS NOT NULL AS permission_policy_exists`);
     assert.deepEqual(identityUpgrade.rows[0], {
-      role_count: 5, permission_count: 30, sla_policy_read_exists: true, sla_policy_manage_exists: true,
+      role_count: 5, permission_count: 31, sla_policy_read_exists: true, sla_policy_manage_exists: true,
       availability_supervise_exists:true,unit_timezone_read_exists:true,unit_timezone_manage_exists:true,
       provider_count: 0, identity_count: 0, membership_count: 1,
       normalized_email: `legacy-${suffix}@test.local`, generated_email: `legacy-${suffix}@test.local`, user_version: 1,

@@ -120,6 +120,7 @@ try {
       "0064_shift_aware_sla_capacity.sql",
       "0065_timezone_and_membership_state_hardening.sql",
       "0066_causal_shift_timezone_snapshot.sql",
+      "0067_sustained_demand_capacity_alert.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -169,6 +170,9 @@ try {
     const timezoneMembershipHardeningTestClient=new pg.Client({connectionString:targetUrl.toString()});await timezoneMembershipHardeningTestClient.connect();
     try{await timezoneMembershipHardeningTestClient.query(await readFile(resolve("database/tests","0010_timezone_membership_state_hardening.sql"),"utf8"));}
     finally{await timezoneMembershipHardeningTestClient.end();}
+    const capacityAlertTestClient=new pg.Client({connectionString:targetUrl.toString()});await capacityAlertTestClient.connect();
+    try{await capacityAlertTestClient.query(await readFile(resolve("database/tests","0011_capacity_alert.sql"),"utf8"));}
+    finally{await capacityAlertTestClient.end();}
 
     const assignmentRaceTenant="99100000-0000-4000-8000-000000000001",assignmentRaceUnit="99100000-0000-4000-8000-000000000002",
       assignmentRaceManager="99100000-0000-4000-8000-000000000003";
@@ -451,6 +455,7 @@ try {
     globalHiddenTables.push("unit_operational_timezone_commands","unit_operational_timezone_versions");
     globalHiddenTables.push("unit_shift_schedule_commands","unit_shift_schedule_versions");
     globalHiddenTables.push("unit_assignment_policies","unit_assignment_policy_commands");
+    globalHiddenTables.push("unit_capacity_alert_policy_versions","unit_capacity_alert_policy_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -543,6 +548,7 @@ try {
       "unit_operational_timezone_versions", "unit_operational_timezone_commands",
       "unit_shift_schedule_versions", "unit_shift_schedule_commands",
       "unit_assignment_policies", "unit_assignment_policy_commands",
+      "unit_capacity_alert_policy_versions", "unit_capacity_alert_policy_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",

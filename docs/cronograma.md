@@ -812,3 +812,10 @@ qualquer skip inesperado. A cadência permanece em 30 segundos para limitar o fa
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da
 fase correspondente. A interface local e a Inbox já estão implementadas e permanecem restritas ao
 overlay sintético até homologação externa.
+
+Checkpoint local incremental em 2026-08-19, migration `0067`: o módulo existente de Política de SLA
+passou a configurar, por capability `sla_alert.read/manage`, um alerta agregado opt-in com limiar de fila
+e janela sustentada. A Inbox exibe banner somente no estado `ACTIVE` e obtém o snapshot no mesmo ciclo
+single-flight de refresh/convergência, sem polling próprio. Falha não-autorizativa do snapshot sinaliza
+indisponibilidade sem derrubar a Inbox; `401/403` preservam purge fail-closed. O corte não cria painel,
+serviço, worker, ranking individual ou outbound paralelo.

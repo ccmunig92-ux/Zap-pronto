@@ -16,8 +16,8 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-O checkout canônico contém uma Inbox integrada à `main` até a migration `0064` e um incremento local
-validado até a migration `0066`, com:
+O checkout canônico contém uma Inbox integrada à `main` até a migration `0066` e um incremento local
+em validação até a migration `0067`, com:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
@@ -29,6 +29,8 @@ validado até a migration `0066`, com:
 - disponibilidade restaurada como `OFFLINE` após reativação de vínculo.
 - convergência automática near-real-time da Inbox por leituras periódicas dos contratos existentes,
   sem push, WebSocket, endpoint ou persistência paralelos.
+- alerta agregado opt-in de demanda sustentada quando há capacidade operacional, configurado no
+  módulo de SLA e lido no refresh canônico da Inbox, sem ranking individual nem envio externo.
 
 Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta
 contas Meta reais e mantém o transporte externo e Hermes desativados. O histórico de cortes e evidências

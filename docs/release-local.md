@@ -275,11 +275,18 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **candidato local 0066 validado**. O checkpoint
-`0064` já está integrado à `main`; o candidato atual está no branch
-`codex/phase-4-post-0064-hardening`. A promoção do `0065` à `main` exige PR,
+Com os gates locais verdes, a declaração permitida é **candidato local 0067 validado**. O checkpoint
+`0066` já está integrado à `main`; o candidato atual está no branch
+`codex/phase-4-operational-capacity-alert`. A promoção do `0067` à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
 force-push ou deleção da branch. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
 homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
 gates externos correspondentes.
+
+A migration `0067_sustained_demand_capacity_alert.sql` adiciona uma política unitária versionada e
+opt-in para alerta agregado. Ausência de configuração equivale a `DISABLED`; ativação exige limiar
+de fila e janela sustentada explícitos. O snapshot combina somente fila, tempo e capacidade operacional
+canônicos. A Inbox mostra apenas `ACTIVE`, inclui a leitura no refresh existente e trata falha isolada
+do snapshot sem derrubar fila, conversa ou disponibilidade. O refresh permanece somente `GET`; não há
+mensagem, Meta, Hermes, ranking individual, cron, worker ou polling adicional.
