@@ -119,6 +119,7 @@ try {
       "0063_assignment_policy_authorization_hardening.sql",
       "0064_shift_aware_sla_capacity.sql",
       "0065_timezone_and_membership_state_hardening.sql",
+      "0066_causal_shift_timezone_snapshot.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -310,6 +311,56 @@ try {
       (SELECT count(*)::int FROM unit_shift_schedule_versions WHERE tenant_id=$1) versions,
       (SELECT count(*)::int FROM audit_events WHERE tenant_id=$1 AND action='SHIFT_SCHEDULE_PUBLISHED') audits`,[policyRaceTenant])).rows[0];
     assert.deepEqual(shiftRaceEvidence,{commands:1,versions:1,audits:1});
+
+    // The timezone fence is causal: a schedule queued behind a timezone
+    // publication must bind the exact new timezone-version ID, regardless of
+    // when either function captured its local clock value.
+    const timezoneSnapshotUnit="94000000-0000-4000-8000-000000000008";
+    await target.query("INSERT INTO units(id,tenant_id,code,name) VALUES($2,$1,'TZ-SNAPSHOT','Timezone snapshot race')",
+      [policyRaceTenant,timezoneSnapshotUnit]);
+    await target.query("INSERT INTO user_units(tenant_id,user_id,unit_id,role) VALUES($1,$2,$3,'UNIT_MANAGER')",
+      [policyRaceTenant,policyRaceActor,timezoneSnapshotUnit]);
+    await target.query("INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,version,created_by_user_id) VALUES($1,$2,'America/Sao_Paulo',1,$3)",
+      [policyRaceTenant,timezoneSnapshotUnit,policyRaceActor]);
+    const timezonePublisher=new pg.Client({connectionString:targetUrl.toString()});
+    const schedulePublisher=new pg.Client({connectionString:targetUrl.toString()});
+    await timezonePublisher.connect();await schedulePublisher.connect();
+    try{
+      await timezonePublisher.query("BEGIN");await timezonePublisher.query("SET LOCAL ROLE zap_pronto_api");
+      await timezonePublisher.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','timezone-snapshot-publisher',true)",
+        [policyRaceTenant,policyRaceActor]);
+      await timezonePublisher.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text||':unit-timezone:'||$2::text,0))",
+        [policyRaceTenant,timezoneSnapshotUnit]);
+      await schedulePublisher.query("BEGIN");await schedulePublisher.query("SET LOCAL ROLE zap_pronto_api");
+      await schedulePublisher.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','timezone-snapshot-schedule',true)",
+        [policyRaceTenant,policyRaceActor]);
+      const schedulePublisherPid=(await schedulePublisher.query("SELECT pg_backend_pid() pid")).rows[0].pid;
+      const snapshotEffective=(await target.query("SELECT (transaction_timestamp() AT TIME ZONE 'UTC')::date::text effective")).rows[0].effective;
+      const snapshotScheduleInput={unitId:timezoneSnapshotUnit,userId:policyRaceActor,effectiveFrom:snapshotEffective,weeklySlots:[],exceptions:[],expectedVersion:0};
+      const snapshotScheduleFingerprint=createHash("sha256").update(JSON.stringify(snapshotScheduleInput)).digest("hex");
+      const blockedSchedule=schedulePublisher.query("SELECT * FROM set_unit_shift_schedule($1,$2,$3::date,'[]'::jsonb,'[]'::jsonb,0,'timezone-snapshot-schedule-key',$4)",
+        [timezoneSnapshotUnit,policyRaceActor,snapshotEffective,snapshotScheduleFingerprint]);
+      await new Promise(resolvePromise=>setTimeout(resolvePromise,50));
+      const lockWait=(await target.query("SELECT wait_event_type,wait_event FROM pg_stat_activity WHERE pid=$1",[schedulePublisherPid])).rows[0];
+      assert.deepEqual(lockWait,{wait_event_type:"Lock",wait_event:"advisory"});
+      const timezoneInput={unitId:timezoneSnapshotUnit,timeZone:"UTC",expectedVersion:1};
+      const timezoneFingerprint=createHash("sha256").update(JSON.stringify(timezoneInput)).digest("hex");
+      await timezonePublisher.query("SELECT * FROM set_unit_operational_timezone($1,'UTC',1,'timezone-snapshot-publish-key',$2)",
+        [timezoneSnapshotUnit,timezoneFingerprint]);
+      await timezonePublisher.query("COMMIT");
+      const scheduleResult=await blockedSchedule;assert.equal(scheduleResult.rows[0].time_zone,"UTC");
+      await schedulePublisher.query("COMMIT");
+      const snapshotProof=(await target.query(`SELECT schedule.time_zone,timezone.version timezone_version,
+          schedule.operational_timezone_version_id=timezone.id exact_snapshot
+        FROM unit_shift_schedule_versions schedule JOIN unit_operational_timezone_versions timezone
+          ON timezone.tenant_id=schedule.tenant_id AND timezone.unit_id=schedule.unit_id
+          AND timezone.id=schedule.operational_timezone_version_id
+        WHERE schedule.tenant_id=$1 AND schedule.unit_id=$2`,[policyRaceTenant,timezoneSnapshotUnit])).rows[0];
+      assert.deepEqual(snapshotProof,{time_zone:"UTC",timezone_version:2,exact_snapshot:true});
+    }finally{
+      await timezonePublisher.query("ROLLBACK").catch(()=>undefined);await schedulePublisher.query("ROLLBACK").catch(()=>undefined);
+      await timezonePublisher.end();await schedulePublisher.end();
+    }
     const teamQuery=async(actorId,unitId,limit=101,status=null,anchorName=null,anchorId=null)=>{const client=new pg.Client({connectionString:targetUrl.toString()});
       await client.connect();try{await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_api");
         await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.actor_id',$2,true),set_config('app.correlation_id','team-test',true)",[policyRaceTenant,actorId]);

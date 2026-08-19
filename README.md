@@ -17,7 +17,7 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 ## Estado atual
 
 O checkout canônico contém uma Inbox integrada à `main` até a migration `0064` e um incremento local
-validado até a migration `0065`, com:
+validado até a migration `0066`, com:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
@@ -25,7 +25,7 @@ validado até a migration `0065`, com:
 - administração de usuários e vínculos unitários;
 - contratos TypeBox/OpenAPI, cliente gerado, PostgreSQL/RLS, audit e outbox;
 - webhook Meta assinado e reconciliação sintética local, sem transporte outbound real.
-- escalas invalidadas de forma fail-closed quando o fuso operacional muda, até sua republicação;
+- escalas vinculadas causalmente à versão exata do fuso e invalidadas de forma fail-closed quando ele muda;
 - disponibilidade restaurada como `OFFLINE` após reativação de vínculo.
 
 Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta

@@ -2,14 +2,14 @@
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
 Ele não substitui o cronograma e não autoriza merge ou deploy. O checkpoint `0064` já foi integrado à
-`main`; o incremento local `0065` está no branch `codex/phase-4-post-0064-hardening`. Isso não homologa
+`main`; o incremento local `0066` está no branch `codex/phase-4-post-0064-hardening`. Isso não homologa
 Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
 - Cadeia append-only local validada de `0001_core.sql` até
-  `0065_timezone_and_membership_state_hardening.sql`.
+  `0066_causal_shift_timezone_snapshot.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -210,6 +210,18 @@ completo após rebuild limpo. As jornadas isoladas confirmaram a recusa do claim
 após reativação ainda `OFFLINE`, sem persistir comando de claim e sem outbound, Hermes ou Meta.
 Nenhum staging externo, IdP real, deploy ou conta externa foi usado.
 
+## Correção causal 0066
+
+A migration `0065` permanece byte a byte intacta para preservar os checksums já publicados. A nova
+`0066_causal_shift_timezone_snapshot.sql` substitui a inferência por timestamp por uma referência ao ID
+exato da versão do fuso observada pela escala sob o lock canônico `unit-timezone`. Escalas anteriores ao
+novo vínculo permanecem deliberadamente sem snapshot causal e são tratadas como não configuradas até
+republicação; o upgrade não tenta reconstruir causalidade a partir do relógio.
+
+PostgreSQL 18 limpo e upgrade passaram. A prova concorrente confirma que a publicação da escala espera
+o advisory lock mantido pela alteração de fuso e, após a liberação, persiste exatamente o ID da nova
+versão. A suíte completa, overlay e E2E OIDC permaneceram verdes, sem outbound, Hermes ou Meta.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
@@ -244,7 +256,7 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **candidato local 0065 validado**. O checkpoint
+Com os gates locais verdes, a declaração permitida é **candidato local 0066 validado**. O checkpoint
 `0064` já está integrado à `main`; o candidato atual está no branch
 `codex/phase-4-post-0064-hardening`. A promoção do `0065` à `main` exige PR,
 check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,

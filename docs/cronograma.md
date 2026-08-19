@@ -8,7 +8,7 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
 - Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
 - Fase atual: **Fase 4 — inbox multiusuário e produtividade**. O checkpoint `0064` foi integrado à
-  `main` pela PR #10; o incremento `0065` está validado localmente no branch
+  `main` pela PR #10; o incremento `0066` está validado localmente no branch
   `codex/phase-4-post-0064-hardening`.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
@@ -769,6 +769,13 @@ OIDC completo após rebuild limpo. As jornadas provaram invalidação por timezo
 revogação/reativação com retorno a `OFFLINE`, sem claim persistido na recusa e sem outbound, Hermes ou
 Meta. Este incremento não foi promovido a staging, não executou deploy e não usou IdP ou contas externas.
 
+Correção incremental `0066`: a comparação temporal introduzida no `0065` não era causal sob dois
+writers concorrentes. A migration append-only `0066_causal_shift_timezone_snapshot.sql` preserva o
+checksum publicado do `0065` e faz cada nova escala persistir o ID exato da versão de timezone observada
+sob o lock canônico da unidade. Escalas legadas ficam sem esse vínculo e falham fechado até republicação;
+não há backfill inferido por relógio. O teste PostgreSQL segura o lock de timezone, comprova a espera
+advisory da publicação concorrente e verifica que a escala resultante referencia exatamente a versão nova.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -781,7 +788,7 @@ Meta. Este incremento não foi promovido a staging, não executou deploy e não 
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica está integrada à `main` até `0064`, e o incremento `0065`
+   execução como evidência. A Inbox canônica está integrada à `main` até `0064`, e o incremento `0066`
    permanece local; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
