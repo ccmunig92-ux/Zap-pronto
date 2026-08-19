@@ -73,6 +73,7 @@ const maximumHistorySpanMs=366*24*60*60*1000;
 const automaticRefreshBaseMs=30_000,automaticRefreshMaximumMs=300_000,automaticRefreshRecoveryMs=1_000;
 const refreshWindowMaximumItems=400,refreshWindowMaximumRequests=4;
 type RefreshResult="success"|"skipped"|"retryable-failure"|"terminal-auth";
+type ConvergenceState={readonly kind:"updated"|"deferred"|"paused"|"unstable";readonly at?:string};
 function instantToLocalDateTime(value:string):string{const date=new Date(value),pad=(part:number)=>String(part).padStart(2,"0");return`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`}
 function historicalMessages(page:ListInboxMessagesResponse,resolvedAt:string):ListInboxMessagesResponse{
   return {...page,items:page.items.filter(message=>message.createdAt<=resolvedAt).map(message=>({...message,allowedActions:[]}))};
@@ -128,6 +129,9 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [sending, setSending] = useState(false);
   const [cancellingId, setCancellingId] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
+  const [convergence,setConvergence]=useState<ConvergenceState>({kind:"paused"});
+  const previousConvergence=useRef<ConvergenceState["kind"]>("paused");
+  const [convergenceAnnouncement,setConvergenceAnnouncement]=useState("Atualização automática pausada.");
   const [availability,setAvailability]=useState<InboxAvailability>();
   const [availabilityOpen,setAvailabilityOpen]=useState(false);
   const [availabilityStatus,setAvailabilityStatus]=useState<InboxAvailability["status"]>("OFFLINE");
@@ -175,6 +179,12 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   useEffect(()=>{onNavigationStateChange?.({blocked:navigationBlocked,dirty:navigationDirty})},
     [onNavigationStateChange,navigationBlocked,navigationDirty]);
   useEffect(()=>()=>navigationCallback.current?.({blocked:false,dirty:false}),[]);
+  useEffect(()=>{const previous=previousConvergence.current;previousConvergence.current=convergence.kind;
+    if(convergence.kind==="unstable")setConvergenceAnnouncement("Conexão instável; nova tentativa automática agendada.");
+    else if(convergence.kind==="paused")setConvergenceAnnouncement("Atualização automática pausada.");
+    else if(convergence.kind==="updated"&&previous!=="updated")setConvergenceAnnouncement("Sincronização retomada.");
+    else if(convergence.kind==="deferred")setConvergenceAnnouncement("");
+  },[convergence.kind]);
   const canSupervise=supervisedUnitIds.includes(unitId);
   const canReadHistory=historyUnitIds.includes(unitId);
   const canReadSlaAlerts=slaAlertReadUnitIds.includes(unitId);
@@ -256,6 +266,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     queuePageFlight.current = false; activePageFlight.current = false;supervisedPageFlight.current=false;resolvedPageFlight.current=false;slaAlertPageFlight.current=false;
     setClaiming(false); setResolving(false);setResolveOpen(false);setResolveDisposition(""); setRequeueing(false);setReopening(false);setReopenOpen(false);setReopenReason(""); setTransferring(false);setTakingOver(false);setTakeoverConfirmOpen(false);setLoadingTransferCandidates(false);setTransferCandidates(undefined);setTransferTargetUserId("");setTransferReason("");setTransferOpen(false); setSending(false); setCancellingId(undefined); setRefreshing(false);
     setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setLoadingSlaAlertPage(false);setAcknowledgingAlertId(undefined);setAvailabilityOpen(false);setSavingAvailability(false);
+    setConvergence({kind:"paused"});
   }
 
   function purgeSelection(notice?: string) {
@@ -308,7 +319,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("slaAlerts",slaAlertsFirst(unitId)),
       scoped("availability",client.getInboxAvailability(unitId)),
     ]).then(([queued, mine,others,closed,alerts,nextAvailability]) => {
-      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability); }
+      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
     }).catch((caught: unknown) => fail(caught, g)).finally(()=>{if(g===generation.current)initialLoadFlight.current=false});
     return () => { generation.current += 1;initialLoadFlight.current=false };
   }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
@@ -471,9 +482,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       .some(page=>(page?.items.length??0)>refreshWindowMaximumItems);
     const automaticBlocked=origin==="automatic"&&(initialLoadFlight.current||navigationDirty||navigationBlocked
       ||windowBudgetExceeded||queuePageFlight.current||activePageFlight.current||supervisedPageFlight.current||resolvedPageFlight.current||slaAlertPageFlight.current);
-    if (!unitId || refreshing || mutationBusy || authorizationFailed.current || automaticBlocked) return "skipped";
+    if (!unitId || authorizationFailed.current){if(origin==="automatic")setConvergence({kind:"paused"});return "skipped"}
+    if(refreshing||mutationBusy||automaticBlocked){if(origin==="automatic")setConvergence({kind:"deferred"});return "skipped"}
     const operationToken = acquireOperation();
-    if (!operationToken) return "skipped";
+    if (!operationToken){if(origin==="automatic")setConvergence({kind:"deferred"});return "skipped"}
     refreshFlight.current = true;
     const capturedUnit = unitId;
     const capturedSelected = selected;
@@ -519,7 +531,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         if("resolvedAt" in nextSelected){setDetail({...nextDetail,allowedActions:[],claimTarget:null,sendTextTarget:null,resolveTarget:null,requeueTarget:null,transferTarget:null,takeoverTarget:null});setMessages(historicalMessages(nextMessages,nextSelected.resolvedAt));setDraft("");clearIntents()}
         else{setDetail(nextDetail);setMessages(nextMessages);retainCoherentIntents(nextDetail,nextMessages,nextSelected)}
       }
-      if(!automatic)setError(undefined);
+      setConvergence({kind:"updated",at:new Date().toISOString()});if(!automatic)setError(undefined);
       return "success";
     } catch (caught) {
       if (g !== generation.current || capturedUnit !== unitId) return "skipped";
@@ -537,7 +549,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
             const listActual=(listFailure as Partial<ScopedReadError>).cause??listFailure;
             const terminal=listActual instanceof AuthenticationRequired||listActual instanceof ApiProblem&&[401,403].includes(listActual.problem.status);
             if(terminal||!automatic)fail(listFailure,g);
-            return terminal?"terminal-auth":"retryable-failure";
+            if(automatic)setConvergence({kind:terminal?"paused":"unstable"});return terminal?"terminal-auth":"retryable-failure";
           }
         } else {
           purgeSensitive();
@@ -545,7 +557,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
           return "success";
         }
       } else {const terminal=actual instanceof AuthenticationRequired||actual instanceof ApiProblem&&[401,403].includes(actual.problem.status);
-        if(terminal||!automatic)fail(caught,g);return terminal?"terminal-auth":"retryable-failure"}
+        if(terminal||!automatic)fail(caught,g);if(automatic)setConvergence({kind:terminal?"paused":"unstable"});return terminal?"terminal-auth":"retryable-failure"}
     } finally {
       releaseOperation(operationToken);
       if (g === generation.current) { refreshFlight.current = false; if(!automatic)setRefreshing(false); }
@@ -562,8 +574,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     const run=async()=>{cancel();if(!eligible())return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
       if(result==="retryable-failure")automaticRefreshFailures.current+=1;else if(result==="success")automaticRefreshFailures.current=0;
       const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;schedule(delay)};
-    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else cancel()};
-    const online=()=>schedule(automaticRefreshRecoveryMs),offline=()=>cancel();
+    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else{cancel();setConvergence({kind:"paused"})}};
+    const online=()=>schedule(automaticRefreshRecoveryMs),offline=()=>{cancel();setConvergence({kind:"paused"})};
     document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
     return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("offline",offline)};
   },[]);
@@ -885,9 +897,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   }
 
   const actionsDisabled = refreshing;
+  const convergenceLabel=convergence.kind==="updated"?"Atualizado":convergence.kind==="deferred"?"Atualização adiada enquanto há uma operação em andamento.":convergence.kind==="unstable"?"Conexão instável; nova tentativa automática agendada.":"Atualização automática pausada.";
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
-      <button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div>
+      <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
     <section aria-labelledby="availability-title"><h3 id="availability-title">Minha disponibilidade</h3>
       {!availability?<p>Carregando disponibilidade…</p>:<><p>Status: <strong>{availability.status==="AVAILABLE"?"Disponível":availability.status==="PAUSED"?"Pausado":"Offline"}</strong> · {availability.activeCount} de {availability.maxActive} ativos</p>
       {!availabilityOpen&&<button type="button" disabled={mutationBusy||refreshing} onClick={openAvailability}>Alterar disponibilidade</button>}</>}

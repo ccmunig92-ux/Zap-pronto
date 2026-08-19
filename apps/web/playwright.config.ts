@@ -7,7 +7,9 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: Number(process.env.E2E_OIDC_TEST_TIMEOUT_MS?.trim() || 90_000),
-  reporter: [["line"]],
+  reporter: process.env.E2E_FORBID_SKIPS === "true"
+    ? [["line"], ["./e2e/no-unexpected-skips-reporter.ts"]]
+    : [["line"]],
   use: {
     baseURL: process.env.E2E_BASE_URL?.trim() || "http://127.0.0.1:5173",
     browserName: "chromium",

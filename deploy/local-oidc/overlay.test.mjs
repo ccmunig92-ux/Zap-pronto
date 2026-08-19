@@ -166,9 +166,12 @@ test("controlador isola volumes pelo project name local fixo", async () => {
   assert.doesNotMatch(controller, /system\s+prune|volume\s+prune/);
 });
 
-test("Playwright recusa origem externa ou nonce ausente antes do browser",async()=>{const spec=await readFile(new URL("../../apps/web/e2e/shell-oidc.spec.ts",directory),"utf8");
+test("Playwright recusa origem externa, mutação observadora e skips inesperados",async()=>{const spec=await readFile(new URL("../../apps/web/e2e/shell-oidc.spec.ts",directory),"utf8");
+  const config=await readFile(new URL("../../apps/web/playwright.config.ts",directory),"utf8");const reporter=await readFile(new URL("../../apps/web/e2e/no-unexpected-skips-reporter.ts",directory),"utf8");const controller=await readFile(new URL("local-oidc.ps1",directory),"utf8");
   assert.match(spec,/E2E_LOCAL_DESTRUCTIVE_ALLOWED/);assert.match(spec,/https:\/\/zap-pronto\.127\.0\.0\.1\.nip\.io:18443/);
   assert.match(spec,/E2E_LOCAL_INSTANCE_NONCE/);assert.match(spec,/E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED/);
+  assert.match(spec,/transfere atendimento entre dois atendentes[\s\S]*Sob supervisão[\s\S]*Em atendimento[\s\S]*targetMutations\)\.toEqual\(\[\]\)/);
+  assert.match(config,/E2E_FORBID_SKIPS[\s\S]*no-unexpected-skips-reporter/);assert.match(reporter,/result\.status === "skipped"[\s\S]*UNEXPECTED_E2E_SKIPS[\s\S]*status: "failed"/);assert.match(controller,/hadE2EForbidSkips=Test-Path 'Env:E2E_FORBID_SKIPS'[\s\S]*previousE2EForbidSkips=\[Environment\]::GetEnvironmentVariable[\s\S]*E2E_FORBID_SKIPS='true'[\s\S]*if\(\$hadE2EForbidSkips\)\{Set-Item 'Env:E2E_FORBID_SKIPS' \$previousE2EForbidSkips\}else\{Remove-Item 'Env:E2E_FORBID_SKIPS'/);
   assert.match(spec,/gestor consulta disponibilidade da equipe sob demanda[\s\S]*gets[\s\S]*Atendente Local[\s\S]*Capacidade: 0\/100 · Restante: 100[\s\S]*selectOption\("PAUSED"\)[\s\S]*mutations\)\.toEqual\(\[\]\)[\s\S]*externalHosts\)\.toEqual\(\[\]\)/);
   assert.match(spec,/enforcement filtra destino fora do turno[\s\S]*Atendente Local 2[\s\S]*expectedVersion:1[\s\S]*type:"CLOSED"[\s\S]*status\(\)\)\.toBe\(409\)[\s\S]*O atendimento mudou antes da transferência\.[\s\S]*toHaveCount\(0\)[\s\S]*outboundRequests\)\.toEqual\(\[\]\)/);
   assert.match(spec,/alerta SLA preserva o item e zera a capacidade[\s\S]*Capacidade disponível: \[1-9\][\s\S]*type:"CLOSED"[\s\S]*Atualizar Inbox[\s\S]*Capacidade disponível: 0[\s\S]*initialAlertCount[\s\S]*outboundRequests\)\.toEqual\(\[\]\)/);});
