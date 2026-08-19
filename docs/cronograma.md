@@ -788,6 +788,11 @@ ao voltar, convergiu sem clique, sem mutação `/v1` própria e sem duplicar a m
 push nem realtime estrito, não adiciona API, tabela, migration ou worker e não executa Meta, Hermes,
 staging externo ou deploy.
 
+Hardening posterior: a interface distingue sincronização local atualizada, adiada, pausada e instável,
+sem anunciar o relógio repetidamente a leitores de tela. A jornada de transferência multi-sessão passou
+a exigir convergência de ownership sem reload, somente por `GET`, e o gate Playwright falha diante de
+qualquer skip inesperado. A cadência permanece em 30 segundos para limitar o fanout dos snapshots.
+
 1. Preservar o checkpoint local reproduzível: o controlador `local-oidc.ps1` já prova bootstrap
    vazio isolado, seed idempotente, descoberta/JWKS, login PKCE, RBAC, renovação, logout, restart
    e cleanup. O overlay não cria uma segunda API, frontend ou banco da aplicação.
@@ -800,8 +805,8 @@ staging externo ou deploy.
 3. Publicar o mesmo artefato imutável em staging somente depois de o proprietário provisionar domínio
    HTTPS, IdP real, client público PKCE, redirects, variáveis públicas, segredos escopados e duas contas
    sintéticas exclusivas. Em seguida, executar a jornada real de navegador e registrar SHA, digests e
-   execução como evidência. A Inbox canônica está integrada à `main` até `0064`, e o incremento `0066`
-   permanece local; staging deve
+   execução como evidência. A Inbox canônica, o hardening `0066` e a convergência automática já estão
+   integrados à `main`; staging deve
    homologar esse mesmo artefato, sem criar uma segunda API, frontend, banco ou fluxo E2E paralelo.
 
 Não ativar Hermes, transporte Meta real ou contas externas sem o gate e a autorização explícita da

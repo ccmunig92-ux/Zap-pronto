@@ -235,6 +235,12 @@ duas sessões confirmou que a observadora não fez mutação `/v1`, não atualiz
 após recovery, executou somente leituras e exibiu uma única cópia da mensagem criada pela outra sessão.
 Nenhuma API, banco, Meta, Hermes, staging externo ou deploy foi alterado.
 
+O hardening seguinte tornou a frescura observável sem criar outro fluxo: a tela informa última
+sincronização local e diferencia adiamento, pausa e falha transitória. A jornada de transferência agora
+prova mudança de ownership no observador sem reload e sem mutação HTTP; o reporter dedicado falha o gate
+se qualquer teste selecionado for ignorado. A cadência continua em 30 segundos e o backoff permanece
+`30/60/120/240/300` segundos com jitter.
+
 ## Gates obrigatórios
 
 Execute no checkout canônico, nesta ordem:
