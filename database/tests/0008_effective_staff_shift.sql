@@ -15,8 +15,7 @@ INSERT INTO unit_operational_timezone_versions(tenant_id,unit_id,time_zone,versi
  ('98000000-0000-4000-8000-000000000001','98000000-0000-4000-8000-000000000002','America/Sao_Paulo',1,'98000000-0000-4000-8000-000000000003');
 INSERT INTO unit_shift_schedule_versions(tenant_id,unit_id,user_id,version,effective_from,time_zone,weekly_slots,exceptions,created_by_user_id)VALUES
  ('98000000-0000-4000-8000-000000000001','98000000-0000-4000-8000-000000000002','98000000-0000-4000-8000-000000000004',1,'2026-08-17','America/Sao_Paulo','[{"weekday":1,"start":"08:00","end":"12:00"}]','[{"date":"2026-08-18","type":"CLOSED"},{"date":"2026-08-19","type":"REPLACE","slots":[{"start":"14:00","end":"15:00"}]}]','98000000-0000-4000-8000-000000000003'),
- ('98000000-0000-4000-8000-000000000001','98000000-0000-4000-8000-000000000002','98000000-0000-4000-8000-000000000004',2,'2026-09-01','UTC','[{"weekday":1,"start":"00:00","end":"01:00"}]','[]','98000000-0000-4000-8000-000000000003'),
- ('98000000-0000-4000-8000-000000000001','98000000-0000-4000-8000-000000000002','98000000-0000-4000-8000-000000000004',3,'2026-10-01','America/New_York','[{"weekday":7,"start":"01:00","end":"02:00"}]','[]','98000000-0000-4000-8000-000000000003');
+ ('98000000-0000-4000-8000-000000000001','98000000-0000-4000-8000-000000000002','98000000-0000-4000-8000-000000000004',2,'2026-09-01','America/Sao_Paulo','[{"weekday":1,"start":"00:00","end":"01:00"}]','[]','98000000-0000-4000-8000-000000000003');
 SELECT set_config('app.tenant_id','98000000-0000-4000-8000-000000000001',true),set_config('app.actor_id','98000000-0000-4000-8000-000000000003',true),set_config('app.correlation_id','effective-shift-test',true);
 DO $$DECLARE r record;before_versions bigint;before_commands bigint;BEGIN
  SELECT count(*) INTO before_versions FROM unit_shift_schedule_versions;SELECT count(*) INTO before_commands FROM unit_shift_schedule_commands;

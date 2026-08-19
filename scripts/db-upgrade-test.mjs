@@ -173,6 +173,7 @@ try {
   assert.match(firstRun, /applied 0063_assignment_policy_authorization_hardening\.sql/);
   assert.match(firstRun, /applied 0064_shift_aware_sla_capacity\.sql/);
   assert.match(firstRun, /applied 0065_timezone_and_membership_state_hardening\.sql/);
+  assert.match(firstRun, /applied 0066_causal_shift_timezone_snapshot\.sql/);
 
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
@@ -389,6 +390,25 @@ try {
       has_function_privilege('zap_pronto_app','list_unit_team_availability(uuid,integer,text,text,uuid)','EXECUTE') app_execute`);
     assert.deepEqual(teamAvailabilityUpgrade.rows[0],{roles:["SUPERVISOR","TENANT_ADMIN","UNIT_MANAGER"],
       api_execute:true,worker_execute:false,app_execute:false});
+    const causalTimezoneSnapshotUpgrade=await verify.query(`SELECT
+      (SELECT is_nullable FROM information_schema.columns WHERE table_schema='public'
+        AND table_name='unit_shift_schedule_versions' AND column_name='operational_timezone_version_id') snapshot_nullable,
+      EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='unit_shift_schedule_versions'::regclass
+        AND conname='unit_shift_schedule_timezone_version_fk') snapshot_fk,
+      EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='unit_shift_schedule_versions'::regclass
+        AND tgname='unit_shift_schedule_bind_timezone_version' AND NOT tgisinternal) snapshot_trigger,
+      has_function_privilege('zap_pronto_api','bind_shift_schedule_timezone_version()','EXECUTE') trigger_api,
+      has_function_privilege('zap_pronto_worker','bind_shift_schedule_timezone_version()','EXECUTE') trigger_worker,
+      pg_get_functiondef('evaluate_unit_staff_shift_internal(uuid,uuid,uuid,timestamptz)'::regprocedure)
+        LIKE '%operational_timezone_version_id=current_timezone_version_id%' evaluator_causal,
+      pg_get_functiondef('get_unit_assignment_policy_readiness(uuid)'::regprocedure)
+        LIKE '%operational_timezone_version_id=timezone_version_id%' readiness_causal`);
+    assert.deepEqual(causalTimezoneSnapshotUpgrade.rows[0],{
+      // Legacy schedules remain NULL deliberately: their observed timezone
+      // version cannot be reconstructed from non-causal timestamps.
+      snapshot_nullable:"YES",snapshot_fk:true,snapshot_trigger:true,trigger_api:false,trigger_worker:false,
+      evaluator_causal:true,readiness_causal:true,
+    });
     const unitMembershipCatalogUpgrade=await verify.query(`SELECT
       to_regprocedure('admin_list_unit_memberships(uuid,text,uuid,integer)') IS NOT NULL function_exists,
       has_function_privilege('zap_pronto_api','admin_list_unit_memberships(uuid,text,uuid,integer)','EXECUTE') api_execute,
