@@ -17,6 +17,7 @@ import { registerInboxAvailabilityRoutes } from "./routes/inbox-availability.js"
 import { registerInboxTeamAvailabilityRoute } from "./routes/inbox-team-availability.js";
 import { registerInboxSlaAlertRoutes } from "./routes/inbox-sla-alerts.js";
 import { registerUnitSlaPolicyRoutes } from "./routes/unit-sla-policy.js";
+import { registerUnitCapacityAlertRoutes } from "./routes/unit-capacity-alert.js";
 import { registerUnitOperationalTimezoneRoutes } from "./routes/unit-operational-timezone.js";
 import { registerStaffScheduleRoutes } from "./routes/staff-schedules.js";
 import { registerUnitAssignmentPolicyRoutes } from "./routes/unit-assignment-policy.js";
@@ -98,6 +99,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerInboxTeamAvailabilityRoute(app, options.pool ?? unavailablePool);
   registerInboxSlaAlertRoutes(app, options.pool ?? unavailablePool);
   registerUnitSlaPolicyRoutes(app, options.pool ?? unavailablePool);
+  registerUnitCapacityAlertRoutes(app, options.pool ?? unavailablePool);
   registerUnitOperationalTimezoneRoutes(app, options.pool ?? unavailablePool);
   registerStaffScheduleRoutes(app, options.pool ?? unavailablePool);
   registerUnitAssignmentPolicyRoutes(app, options.pool ?? unavailablePool);

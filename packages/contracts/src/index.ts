@@ -29,7 +29,7 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage", "shift.read", "shift.manage",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.manage", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage", "shift.read", "shift.manage",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
@@ -440,6 +440,25 @@ export const AcknowledgeInboxSlaAlertRequestSchema=Type.Object({expectedVersion:
 export type AcknowledgeInboxSlaAlertRequest=Static<typeof AcknowledgeInboxSlaAlertRequestSchema>;
 export const AcknowledgeInboxSlaAlertResponseSchema=Type.Object({handoffId:Type.String({format:"uuid"}),acknowledgedAt:Type.String({format:"date-time"}),acknowledgedByUserId:Type.String({format:"uuid"}),version:Type.Integer({minimum:1}),replayed:Type.Boolean()},{$id:"AcknowledgeInboxSlaAlertResponse",additionalProperties:false});
 export type AcknowledgeInboxSlaAlertResponse=Static<typeof AcknowledgeInboxSlaAlertResponseSchema>;
+export const CapacityAlertPolicyModeSchema=Type.Union([Type.Literal("DISABLED"),Type.Literal("ENABLED")],{$id:"CapacityAlertPolicyMode"});
+export type CapacityAlertPolicyMode=Static<typeof CapacityAlertPolicyModeSchema>;
+export const UnitCapacityAlertPolicyParamsSchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export const UnitCapacityAlertPolicySchema=Type.Object({unitId:Type.String({format:"uuid"}),mode:CapacityAlertPolicyModeSchema,
+  minimumQueued:Type.Union([Type.Integer({minimum:1,maximum:100}),Type.Null()]),sustainedMinutes:Type.Union([Type.Integer({minimum:1,maximum:120}),Type.Null()]),
+  version:Type.Integer({minimum:0}),updatedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()])},{additionalProperties:false});
+export type UnitCapacityAlertPolicy=Static<typeof UnitCapacityAlertPolicySchema>;
+export const SetUnitCapacityAlertPolicyRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:0}),mode:CapacityAlertPolicyModeSchema,
+  minimumQueued:Type.Integer({minimum:1,maximum:100}),sustainedMinutes:Type.Integer({minimum:1,maximum:120})},{additionalProperties:false});
+export type SetUnitCapacityAlertPolicyRequest=Static<typeof SetUnitCapacityAlertPolicyRequestSchema>;
+export const SetUnitCapacityAlertPolicyResponseSchema=Type.Composite([UnitCapacityAlertPolicySchema,Type.Object({replayed:Type.Boolean()},{additionalProperties:false})],{additionalProperties:false});
+export type SetUnitCapacityAlertPolicyResponse=Static<typeof SetUnitCapacityAlertPolicyResponseSchema>;
+export const InboxCapacityAlertQuerySchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
+export type InboxCapacityAlertQuery=Static<typeof InboxCapacityAlertQuerySchema>;
+export const InboxCapacityAlertSnapshotSchema=Type.Object({unitId:Type.String({format:"uuid"}),policyVersion:Type.Integer({minimum:0}),
+  enabled:Type.Boolean(),minimumQueued:Type.Union([Type.Integer({minimum:1,maximum:100}),Type.Null()]),sustainedMinutes:Type.Union([Type.Integer({minimum:1,maximum:120}),Type.Null()]),
+  queuedCount:Type.Integer({minimum:0}),sustainedQueuedCount:Type.Integer({minimum:0}),oldestQueuedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
+  availableCapacity:Type.Integer({minimum:0}),state:Type.Union([Type.Literal("ACTIVE"),Type.Literal("CLEAR")]),evaluatedAt:Type.String({format:"date-time"})},{additionalProperties:false});
+export type InboxCapacityAlertSnapshot=Static<typeof InboxCapacityAlertSnapshotSchema>;
 export const UnitSlaPolicyParamsSchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
 export const UnitSlaTargetSchema=Type.Object({priority:HandoffPrioritySchema,targetMinutes:Type.Integer({minimum:1,maximum:10080})},{additionalProperties:false});
 export type UnitSlaTarget=Static<typeof UnitSlaTargetSchema>;

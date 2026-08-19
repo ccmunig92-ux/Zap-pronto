@@ -120,12 +120,22 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     .map(membership=>({id:membership.unitId,name:membership.unitName}));
   const canReadTenantSlaPolicy=currentUser.grants.some(grant=>grant.permission==="sla_policy.read"&&grant.scope==="TENANT");
   const canManageTenantSlaPolicy=currentUser.grants.some(grant=>grant.permission==="sla_policy.manage"&&grant.scope==="TENANT");
-  const slaPolicyUnits=currentUser.memberships.filter(membership=>canReadTenantSlaPolicy||canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+  const canReadTenantCapacityAlert=currentUser.grants.some(grant=>grant.permission==="sla_alert.read"&&grant.scope==="TENANT");
+  const canManageTenantCapacityAlert=currentUser.grants.some(grant=>grant.permission==="sla_alert.manage"&&grant.scope==="TENANT");
+  const slaPolicyUnits=currentUser.memberships.filter(membership=>canReadTenantSlaPolicy||canManageTenantSlaPolicy||canReadTenantCapacityAlert||canManageTenantCapacityAlert||currentUser.grants.some(grant=>
     grant.permission==="sla_policy.read"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId||
-    grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
+    grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId||
+    grant.permission==="sla_alert.read"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId||
+    grant.permission==="sla_alert.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId))
     .map(membership=>({id:membership.unitId,name:membership.unitName}));
+  const readableSlaPolicyUnitIds=currentUser.memberships.filter(membership=>canReadTenantSlaPolicy||canManageTenantSlaPolicy||currentUser.grants.some(grant=>
+    (grant.permission==="sla_policy.read"||grant.permission==="sla_policy.manage")&&grant.scope==="UNIT"&&grant.unitId===membership.unitId)).map(membership=>membership.unitId);
   const manageableSlaPolicyUnitIds=currentUser.memberships.filter(membership=>canManageTenantSlaPolicy||currentUser.grants.some(grant=>
     grant.permission==="sla_policy.manage"&&grant.scope==="UNIT"&&grant.unitId===membership.unitId)).map(membership=>membership.unitId);
+  const manageableCapacityAlertUnitIds=currentUser.memberships.filter(membership=>currentUser.grants.some(grant=>
+    grant.permission==="sla_alert.manage"&&(grant.scope==="TENANT"||grant.scope==="UNIT"&&grant.unitId===membership.unitId))).map(membership=>membership.unitId);
+  const readableCapacityAlertUnitIds=currentUser.memberships.filter(membership=>currentUser.grants.some(grant=>
+    grant.permission==="sla_alert.read"&&(grant.scope==="TENANT"||grant.scope==="UNIT"&&grant.unitId===membership.unitId))).map(membership=>membership.unitId);
   const inboxUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="conversation.read"&&g.scope==="UNIT"&&g.unitId===m.unitId)).map(m=>({id:m.unitId,name:m.unitName}));
   const teamAvailabilityUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="availability.supervise"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
   const timezoneUnits=currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="unit_timezone.read"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId))||g.permission==="unit_timezone.manage"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>({id:m.unitId,name:m.unitName}));
@@ -178,7 +188,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       authorizedUnits={managedUnits} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-memberships"]}/>}
     {activeModule==="UNIT_SLA_POLICY"&&slaPolicyUnits.length>0&&<UnitSlaPolicyPanel client={slaPolicyClient}
-      readableUnits={slaPolicyUnits} manageableUnitIds={manageableSlaPolicyUnitIds} onAuthenticationRequired={invalidateAuthentication}
+      readableUnits={slaPolicyUnits} slaPolicyReadableUnitIds={readableSlaPolicyUnitIds} manageableUnitIds={manageableSlaPolicyUnitIds} capacityAlertReadableUnitIds={readableCapacityAlertUnitIds} capacityAlertManageableUnitIds={manageableCapacityAlertUnitIds} onAuthenticationRequired={invalidateAuthentication}
       onAuthorizationChanged={refreshAuthorization} onNavigationStateChange={navigationReporters["unit-sla-policy"]}/>}
     {activeModule==="UNIT_OPERATIONAL_TIMEZONE"&&timezoneUnits.length>0&&<UnitOperationalTimezonePanel client={operationalTimezoneClient}
       readableUnits={timezoneUnits} manageableUnitIds={manageableTimezoneUnitIds} onAuthenticationRequired={invalidateAuthentication}

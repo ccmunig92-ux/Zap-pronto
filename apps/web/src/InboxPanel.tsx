@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AcknowledgeInboxSlaAlertResponse, InboxAvailability, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxSlaAlertsResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
+import type { AcknowledgeInboxSlaAlertResponse, InboxAvailability, InboxCapacityAlertSnapshot, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxSlaAlertsResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 
 function DeliveryLabel({ message }: { readonly message: InboxMessage }) {
@@ -56,6 +56,7 @@ export interface InboxClient {
   reopenInboxHandoff(sourceHandoffId:string,expectedVersion:number,reason:ReopenReason,idempotencyKey:string):Promise<unknown>;
   listInboxSlaAlerts(input:{unitId:string;limit?:number;cursor?:string;severity?:SlaAlertSeverity;priority?:InboxHandoff["priority"]}):Promise<ListInboxSlaAlertsResponse>;
   acknowledgeInboxSlaAlert(handoffId:string,expectedVersion:number,idempotencyKey:string):Promise<AcknowledgeInboxSlaAlertResponse>;
+  getInboxCapacityAlert?(unitId:string):Promise<InboxCapacityAlertSnapshot>;
   getInboxConversation(id: string): Promise<InboxConversation>;
   listInboxConversationMessages(id: string, input?: { limit?: number; cursor?: string; before?:string }): Promise<ListInboxMessagesResponse>;
   sendHumanTextMessage(id: string, input: { body: string; expectedConversationVersion: number }, idempotencyKey: string): Promise<unknown>;
@@ -65,7 +66,7 @@ export interface InboxClient {
 type TransferReason = "SHIFT_CHANGE" | "LOAD_BALANCING" | "SPECIALIZED_SUPPORT" | "OPERATIONAL_CONTINUITY";
 type ResolveDisposition = "RESOLVED" | "DUPLICATE" | "CUSTOMER_WITHDREW" | "EXTERNAL_REFERRAL";
 
-type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "slaAlerts" | "detail" | "messages" | "availability"; readonly cause: unknown };
+type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "slaAlerts" | "capacityAlert" | "detail" | "messages" | "availability"; readonly cause: unknown };
 type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
@@ -98,6 +99,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [supervised,setSupervised]=useState<ListHandoffsResponse>();
   const [resolved,setResolved]=useState<ListResolvedHandoffsResponse>();
   const [slaAlerts,setSlaAlerts]=useState<ListInboxSlaAlertsResponse>();
+  const [capacityAlert,setCapacityAlert]=useState<InboxCapacityAlertSnapshot>();
+  const [capacityAlertUnavailable,setCapacityAlertUnavailable]=useState(false);
   const [slaAlertSeverity,setSlaAlertSeverity]=useState<""|SlaAlertSeverity>("");
   const [slaAlertPriority,setSlaAlertPriority]=useState<""|InboxHandoff["priority"]>("");
   const [loadingSlaAlertPage,setLoadingSlaAlertPage]=useState(false);
@@ -207,6 +210,13 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     :Promise.resolve({items:[]} satisfies ListResolvedHandoffsResponse);
   function slaAlertInput(capturedUnit:string,cursor?:string){return{unitId:capturedUnit,limit:25,...(cursor?{cursor}:{}),...(slaAlertSeverity?{severity:slaAlertSeverity}:{}),...(slaAlertPriority?{priority:slaAlertPriority}:{})}}
   const slaAlertsFirst=(capturedUnit:string)=>slaAlertReadUnitIds.includes(capturedUnit)?client.listInboxSlaAlerts(slaAlertInput(capturedUnit)):Promise.resolve({items:[]} satisfies ListInboxSlaAlertsResponse);
+  const capacityAlertFirst=async(capturedUnit:string):Promise<{snapshot?:InboxCapacityAlertSnapshot;unavailable:boolean}>=>{
+    if(!slaAlertReadUnitIds.includes(capturedUnit)||!client.getInboxCapacityAlert)return{unavailable:false};
+    try{return{snapshot:await client.getInboxCapacityAlert(capturedUnit),unavailable:false}}catch(cause){
+      if(cause instanceof AuthenticationRequired||cause instanceof ApiProblem&&(cause.problem.status===401||cause.problem.status===403))throw cause;
+      return{unavailable:true};
+    }
+  };
 
   function queueInput(capturedUnit: string, cursor?: string,
     priority: typeof priorityFilter = priorityFilter, slaStatus: typeof slaFilter = slaFilter) {
@@ -259,7 +269,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   }
 
   function purgeSensitive() {
-    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setSlaAlerts(undefined);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
+    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setSlaAlerts(undefined);setCapacityAlert(undefined);setCapacityAlertUnavailable(false);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
     setDraft(""); setClosedNotice(undefined); setError(undefined); clearIntents();
     operationLock.current = undefined;
     refreshFlight.current = false;
@@ -317,9 +327,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("supervised",supervisedFirst(unitId)),
       scoped("resolved",resolvedFirst(unitId)),
       scoped("slaAlerts",slaAlertsFirst(unitId)),
+      scoped("capacityAlert",capacityAlertFirst(unitId)),
       scoped("availability",client.getInboxAvailability(unitId)),
-    ]).then(([queued, mine,others,closed,alerts,nextAvailability]) => {
-      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
+    ]).then(([queued, mine,others,closed,alerts,nextCapacityAlert,nextAvailability]) => {
+      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
     }).catch((caught: unknown) => fail(caught, g)).finally(()=>{if(g===generation.current)initialLoadFlight.current=false});
     return () => { generation.current += 1;initialLoadFlight.current=false };
   }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
@@ -504,6 +515,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("supervised",supervisedUnitIds.includes(capturedUnit)?collectWindow(supervisedTarget,limit=>client.listSupervisedInboxHandoffs({unitId:capturedUnit,limit}),(cursor,limit)=>client.listSupervisedInboxHandoffs({unitId:capturedUnit,limit,cursor})):Promise.resolve({items:[]} satisfies ListHandoffsResponse)),
       scoped("resolved",historyUnitIds.includes(capturedUnit)?collectWindow(resolvedTarget,limit=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit),limit}),(cursor,limit)=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListResolvedHandoffsResponse)),
       scoped("slaAlerts",slaAlertReadUnitIds.includes(capturedUnit)?collectWindow(alertsTarget,limit=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit),limit}),(cursor,limit)=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListInboxSlaAlertsResponse)),
+      scoped("capacityAlert",capacityAlertFirst(capturedUnit)),
       scoped("availability",client.getInboxAvailability(capturedUnit)),
     ]);
     const selectionPromise: Promise<readonly [InboxConversation | undefined, ListInboxMessagesResponse | undefined]> = capturedSelected
@@ -514,7 +526,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ])
       : Promise.resolve([undefined, undefined] as const);
     try {
-      const [[queued, mine,others,closed,alerts,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
+      const [[queued, mine,others,closed,alerts,nextCapacityAlert,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
       if (g !== generation.current || capturedUnit !== unitId) return "skipped";
       let nextSelected: InboxSelection | undefined;
       if (capturedSelected) nextSelected = queued.items.find(item => item.id === capturedSelected.id)
@@ -523,7 +535,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         ?? closed.items.find(item=>item.id===capturedSelected.id)
         ?? (nextDetail?.conversationId === capturedSelected.conversationId && nextDetail.unitId === capturedUnit
           ? capturedSelected : undefined);
-      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setAvailability(nextAvailability);
+      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);
       if (capturedSelected && (!nextSelected || !nextDetail || !nextMessages)) {
         purgeSelection("Atendimento não está mais disponível.");
       } else if (nextSelected && nextDetail && nextMessages) {
@@ -901,6 +913,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
       <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
+    {canReadSlaAlerts&&capacityAlert?.state==="ACTIVE"&&<aside role="alert" aria-labelledby="capacity-alert-title"><h3 id="capacity-alert-title">Demanda sustentada com capacidade disponível</h3><p>{capacityAlert.sustainedQueuedCount} atendimentos permanecem na fila há pelo menos {capacityAlert.sustainedMinutes} minutos, com capacidade agregada de {capacityAlert.availableCapacity}.</p><p>Distribua a fila conforme prioridade, SLA e regras de atribuição. Este alerta não classifica integrantes.</p></aside>}
+    {canReadSlaAlerts&&capacityAlertUnavailable&&<p role="status">Alerta agregado temporariamente indisponível.</p>}
     <section aria-labelledby="availability-title"><h3 id="availability-title">Minha disponibilidade</h3>
       {!availability?<p>Carregando disponibilidade…</p>:<><p>Status: <strong>{availability.status==="AVAILABLE"?"Disponível":availability.status==="PAUSED"?"Pausado":"Offline"}</strong> · {availability.activeCount} de {availability.maxActive} ativos</p>
       {!availabilityOpen&&<button type="button" disabled={mutationBusy||refreshing} onClick={openAvailability}>Alterar disponibilidade</button>}</>}
