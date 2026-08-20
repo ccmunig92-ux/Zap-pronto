@@ -234,6 +234,8 @@ test("tenant-scoped target lookup returns a generic 404 without cross-tenant exi
 
 test("administrative invitation creation returns a one-time token and replay omits it", async () => {
   let replayed = false;
+  const invitationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const reissuedExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
   const connection: TenantTransactionConnection = { async query(sql) {
     if (sql.includes("resolve_oidc_principal")) return { rows: [{ tenant_id: "11111111-1111-4111-8111-111111111111",
       user_id: "22222222-2222-4222-8222-222222222222" }] };
@@ -243,7 +245,7 @@ test("administrative invitation creation returns a one-time token and replay omi
       code: "CENTRO", name: "Centro" }] };
     if (sql.includes("admin_create_user_invitation")) return { rowCount: 1, rows: [{
       id: "44444444-4444-4444-8444-444444444444", email: "user@example.test", display_name: "User",
-      status: "PENDING", expires_at: "2026-08-20T12:00:00.000Z", oidc_provider_code: "primary",
+      status: "PENDING", expires_at: invitationExpiresAt, oidc_provider_code: "primary",
       assignments: [{ unitId: "33333333-3333-4333-8333-333333333333", unitCode: "CENTRO",
         unitName: "Centro", role: "ATTENDANT" }], replayed }] };
     if (sql.includes("WITH admin_count")) return { rows: [{ id: "55555555-5555-4555-8555-555555555555",
@@ -254,11 +256,11 @@ test("administrative invitation creation returns a one-time token and replay omi
       user_id: "55555555-5555-4555-8555-555555555555", status: "BLOCKED", version: 3, replayed: false }] };
     if (sql.includes("admin_revoke_user_invitation")) return { rowCount: 1, rows: [{
       id: "44444444-4444-4444-8444-444444444444", email: "user@example.test", display_name: "User",
-      status: "REVOKED", expires_at: "2026-08-20T12:00:00.000Z", oidc_provider_code: "primary",
+      status: "REVOKED", expires_at: invitationExpiresAt, oidc_provider_code: "primary",
       assignments: [], replayed: false }] };
     if (sql.includes("admin_reissue_user_invitation")) return { rowCount: 1, rows: [{
       id: "66666666-6666-4666-8666-666666666666", email: "user@example.test", display_name: "User",
-      status: "PENDING", expires_at: "2026-08-21T12:00:00.000Z", oidc_provider_code: "primary",
+      status: "PENDING", expires_at: reissuedExpiresAt, oidc_provider_code: "primary",
       assignments: [], replayed: false }] };
     return { rows: [] };
   }, release() {} };
@@ -270,7 +272,7 @@ test("administrative invitation creation returns a one-time token and replay omi
   assert.equal(options.statusCode, 200);
   assert.deepEqual(options.json().roles, ["UNIT_MANAGER", "SUPERVISOR", "ATTENDANT", "AUDITOR"]);
   const payload = { email: "user@example.test", displayName: "User", providerCode: "primary",
-    expiresAt: "2026-08-20T12:00:00.000Z", assignments: [{
+    expiresAt: invitationExpiresAt, assignments: [{
       unitId: "33333333-3333-4333-8333-333333333333", role: "ATTENDANT" }] };
   const invalid = await app.inject({ method: "POST", url: "/v1/users/invitations",
     headers: { authorization: "Bearer accepted" }, payload });
@@ -303,7 +305,7 @@ test("administrative invitation creation returns a one-time token and replay omi
   const reissued = await app.inject({ method: "POST",
     url: "/v1/users/invitations/44444444-4444-4444-8444-444444444444/reissue", headers: {
       authorization: "Bearer accepted", "idempotency-key": "reissue-command-1" },
-    payload: { reason: "New expiry", expiresAt: "2026-08-21T12:00:00.000Z" } });
+    payload: { reason: "New expiry", expiresAt: reissuedExpiresAt } });
   assert.equal(reissued.statusCode, 201); assert.equal(reissued.json().invitationToken.length, 43);
   await app.close();
 });
