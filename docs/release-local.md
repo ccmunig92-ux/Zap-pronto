@@ -1,15 +1,15 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma e não autoriza merge ou deploy. O checkpoint `0064` já foi integrado à
-`main`; o incremento local `0066` está no branch `codex/phase-4-post-0064-hardening`. Isso não homologa
+Ele não substitui o cronograma e não autoriza deploy. O checkpoint `0067` foi integrado à `main` pela
+PR #15, com CI pós-merge `32429870452` verde. Isso não homologa
 Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
 - Cadeia append-only local validada de `0001_core.sql` até
-  `0066_causal_shift_timezone_snapshot.sql`.
+  `0067_sustained_demand_capacity_alert.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -275,11 +275,8 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **candidato local 0067 validado**. O checkpoint
-`0066` já está integrado à `main`; o candidato atual está no branch
-`codex/phase-4-operational-capacity-alert`. A promoção do `0067` à `main` exige PR,
-check `validate` atualizado, um approval distinto e conversas resolvidas, sem bypass administrativo,
-force-push ou deleção da branch. Staging continua bloqueado até
+Com os gates locais verdes, a declaração permitida é **checkpoint 0067 integrado à `main`**. A PR #15
+teve aprovação distinta, checks `validate` verdes e CI pós-merge `32429870452` verde. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
 homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
 gates externos correspondentes.

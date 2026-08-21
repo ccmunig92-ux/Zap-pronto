@@ -2,14 +2,14 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 07/08/2026
+## Status de execução — 20/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
 - Fase 2: integrada ao `main` pelo PR #2, com os dois gates do SHA final aprovados.
 - Fase atual: **Fase 4 — inbox multiusuário e produtividade**. O checkpoint `0064` foi integrado à
-  `main` pela PR #10; o incremento `0066` está validado localmente no branch
-  `codex/phase-4-post-0064-hardening`.
+  `main` pela PR #10; as migrations `0065`, `0066` e `0067` também foram integradas à `main` pela
+  PR #15, com CI pós-merge `32429870452` verde.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.
@@ -819,3 +819,8 @@ e janela sustentada. A Inbox exibe banner somente no estado `ACTIVE` e obtém o 
 single-flight de refresh/convergência, sem polling próprio. Falha não-autorizativa do snapshot sinaliza
 indisponibilidade sem derrubar a Inbox; `401/403` preservam purge fail-closed. O corte não cria painel,
 serviço, worker, ranking individual ou outbound paralelo.
+
+O checkpoint `0067` foi promovido à `main` pela PR #15 após aprovação distinta, com os gates remotos
+de validação e o CI pós-merge `32429870452` concluídos com sucesso. Essa integração não homologa
+staging, IdP externo, Meta, Hermes ou produção; esses continuam dependentes dos gates e autorizações
+das fases correspondentes.
