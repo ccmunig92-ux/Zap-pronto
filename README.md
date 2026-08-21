@@ -16,8 +16,8 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-O checkout canônico contém uma Inbox integrada à `main` até a migration `0066` e um incremento local
-em validação até a migration `0067`, com:
+O checkout canônico contém uma Inbox integrada à `main` até a migration `0067`, incorporada pela PR
+#15 após aprovação distinta e CI pós-merge verde, com:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
