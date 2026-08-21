@@ -44,7 +44,7 @@ DO $$DECLARE effective date:=(transaction_timestamp() AT TIME ZONE 'America/Sao_
 UPDATE user_units SET status='ACTIVE',version=version+1,state_changed_at=clock_timestamp(),revoked_at=NULL,revoked_by_user_id=NULL,revocation_reason=NULL
 WHERE tenant_id='97000000-0000-4000-8000-000000000001' AND unit_id='97000000-0000-4000-8000-000000000002' AND user_id='97000000-0000-4000-8000-000000000004';
 SELECT set_config('app.actor_id','97000000-0000-4000-8000-000000000005',true);
-DO $$DECLARE effective date:=(transaction_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date;fingerprint text;BEGIN
+DO $$DECLARE effective date:=(transaction_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date;weekly jsonb:='[{"weekday":1,"start":"08:00","end":"12:00"},{"weekday":1,"start":"12:00","end":"17:00"}]';fingerprint text;BEGIN
  BEGIN PERFORM list_unit_shift_members('97000000-0000-4000-8000-000000000002');EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SUPERVISOR_READ_DENIED';END;
  fingerprint:=encode(digest(convert_to(format('{"unitId":"%s","userId":"%s","effectiveFrom":"%s","weeklySlots":%s,"exceptions":[],"expectedVersion":1}',
   '97000000-0000-4000-8000-000000000002','97000000-0000-4000-8000-000000000004',effective,
