@@ -46,8 +46,9 @@ WHERE tenant_id='97000000-0000-4000-8000-000000000001' AND unit_id='97000000-000
 SELECT set_config('app.actor_id','97000000-0000-4000-8000-000000000005',true);
 DO $$DECLARE effective date:=(transaction_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date;fingerprint text;BEGIN
  BEGIN PERFORM list_unit_shift_members('97000000-0000-4000-8000-000000000002');EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'SUPERVISOR_READ_DENIED';END;
- fingerprint:=encode(digest(convert_to(format('{"unitId":"%s","userId":"%s","effectiveFrom":"%s","weeklySlots":[],"exceptions":[],"expectedVersion":1}',
-  '97000000-0000-4000-8000-000000000002','97000000-0000-4000-8000-000000000004',effective),'UTF8'),'sha256'),'hex');
- BEGIN PERFORM set_unit_shift_schedule('97000000-0000-4000-8000-000000000002','97000000-0000-4000-8000-000000000004',effective,'[]','[]',1,'shift-key-0003',fingerprint);
+ fingerprint:=encode(digest(convert_to(format('{"unitId":"%s","userId":"%s","effectiveFrom":"%s","weeklySlots":%s,"exceptions":[],"expectedVersion":1}',
+  '97000000-0000-4000-8000-000000000002','97000000-0000-4000-8000-000000000004',effective,
+  regexp_replace(weekly::text,'\s','','g')),'UTF8'),'sha256'),'hex');
+ BEGIN PERFORM set_unit_shift_schedule('97000000-0000-4000-8000-000000000002','97000000-0000-4000-8000-000000000004',effective,weekly,'[]',1,'shift-key-0003',fingerprint);
   RAISE EXCEPTION 'SUPERVISOR_MANAGE_ACCEPTED';EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'SHIFT_SCHEDULE_NOT_FOUND' THEN RAISE;END IF;END;END$$;
 ROLLBACK;
