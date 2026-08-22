@@ -29,10 +29,21 @@ export const permissionValues = [
   "tenant.users.manage", "unit.members.manage", "handoff.read", "handoff.history.read", "handoff.claim", "handoff.resolve", "handoff.reopen", "handoff.requeue", "handoff.transfer", "handoff.takeover", "conversation.read", "conversation.supervise",
   "quote.read", "quote.review", "quote.publish", "medical_order.read", "medical_order.review",
   "inbound.routing.read", "inbound.routing.resolve",
-  "message.send", "message.cancel", "sla_alert.read", "sla_alert.manage", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage", "shift.read", "shift.manage",
+  "message.send", "message.cancel", "sla_alert.read", "sla_alert.manage", "sla_alert.acknowledge", "sla_policy.read", "sla_policy.manage", "availability.supervise", "unit_timezone.read", "unit_timezone.manage", "shift.read", "shift.manage", "channel_connections.read", "channel_connections.manage",
 ] as const;
 export const PermissionSchema = Type.Union(permissionValues.map((permission) => Type.Literal(permission)));
 export type Permission = Static<typeof PermissionSchema>;
+
+export const ChannelConnectionSchema = Type.Object({
+  id: Type.String({ format: "uuid" }), type: Type.Literal("WHATSAPP"),
+  scope: Type.Union([Type.Literal("CORPORATE"), Type.Literal("SINGLE_UNIT"), Type.Literal("SELECTED_UNITS")]),
+  displayName: Type.Optional(Type.String()), wabaId: Type.String(), phoneNumberId: Type.String(),
+  status: Type.String(), secretConfigured: Type.Boolean(), unitIds: Type.Array(Type.String({ format: "uuid" })),
+}, { $id: "ChannelConnection", additionalProperties: false });
+export type ChannelConnection = Static<typeof ChannelConnectionSchema>;
+export const ChannelConnectionsPageSchema = Type.Object({ items: Type.Array(ChannelConnectionSchema) },
+  { $id: "ChannelConnectionsPage", additionalProperties: false });
+export type ChannelConnectionsPage = Static<typeof ChannelConnectionsPageSchema>;
 
 export const UserMembershipSchema = Type.Object({
   unitId: Type.String({ format: "uuid" }),

@@ -22,6 +22,7 @@ import { registerUnitOperationalTimezoneRoutes } from "./routes/unit-operational
 import { registerStaffScheduleRoutes } from "./routes/staff-schedules.js";
 import { registerUnitAssignmentPolicyRoutes } from "./routes/unit-assignment-policy.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
+import { registerChannelConnectionRoutes } from "./routes/channel-connections.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
@@ -103,6 +104,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerUnitOperationalTimezoneRoutes(app, options.pool ?? unavailablePool);
   registerStaffScheduleRoutes(app, options.pool ?? unavailablePool);
   registerUnitAssignmentPolicyRoutes(app, options.pool ?? unavailablePool);
+  registerChannelConnectionRoutes(app, options.pool ?? unavailablePool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }
