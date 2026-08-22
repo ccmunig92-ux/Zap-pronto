@@ -31,6 +31,7 @@ printf '%s' 'postgresql://zap_pronto_runtime:runtime-smoke-password@postgres:543
   > "$secret_dir/database-runtime-url"
 printf '%s' 'postgresql://zap_pronto_worker_runtime:worker-smoke-password@postgres:5432/zap_pronto' \
   > "$secret_dir/database-worker-url"
+printf '%s' 'synthetic-ci-token-not-for-production' > "$secret_dir/meta-whatsapp-access-token"
 # Synthetic CI-only values must be readable by the non-root container UIDs.
 # Real staging files use the stricter ownership documented in deploy/staging/README.md.
 chmod 644 "$secret_dir"/*
@@ -41,6 +42,7 @@ export POSTGRES_PASSWORD_FILE="$secret_dir/postgres-password"
 export DATABASE_MIGRATION_URL_FILE="$secret_dir/database-migration-url"
 export DATABASE_RUNTIME_URL_FILE="$secret_dir/database-runtime-url"
 export DATABASE_WORKER_URL_FILE="$secret_dir/database-worker-url"
+export META_WHATSAPP_ACCESS_TOKEN_FILE="$secret_dir/meta-whatsapp-access-token"
 export STAGING_HTTP_PORT=${STAGING_HTTP_PORT:-18080}
 
 compose() {
