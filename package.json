@@ -56,6 +56,7 @@
       ,"./domain/unit-operational-timezone": { "types": "./src/domain/unit-operational-timezone.ts", "default": "./dist/domain/unit-operational-timezone.js" }
       ,"./domain/shift-schedule": { "types": "./src/domain/shift-schedule.ts", "default": "./dist/domain/shift-schedule.js" }
       ,"./domain/capacity-alert": { "types": "./src/domain/capacity-alert.ts", "default": "./dist/domain/capacity-alert.js" }
+      ,"./domain/channel-connections": { "types": "./src/domain/channel-connections.ts", "default": "./dist/domain/channel-connections.js" }
   },
   "types": "./src/index.ts"
 }

@@ -2,6 +2,7 @@ export * from "./domain/contracts.js";
 export * from "./domain/invariants.js";
 export * from "./domain/handoffs.js";
 export * from "./domain/channel-inbound.js";
+export * from "./domain/channel-connections.js";
 export * from "./domain/meta-webhook-signature.js";
 export * from "./domain/meta-callback.js";
 export * from "./domain/meta-delivery-status.js";
