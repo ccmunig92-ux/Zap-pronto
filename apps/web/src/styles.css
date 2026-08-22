@@ -26,6 +26,28 @@ fieldset { display: grid; gap: .75rem; border: 1px solid #dfe4ec; }
   border-radius: .75rem; box-shadow: 0 1rem 4rem rgb(23 32 51 / 25%); }
 .delivery-dialog output { display: block; overflow-wrap: anywhere; padding: .75rem; margin: 1rem 0;
   background: #f0f3f8; font-family: ui-monospace, monospace; }
+.connections-panel .panel-heading, .connection-card-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.connections-panel h2, .connections-panel h3 { margin-top: 0; }
+.eyebrow { margin: 0 0 .25rem; color: #2563eb; font-size: .72rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+.connection-status, .connection-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .25rem .55rem; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.connection-status-pending { background: #fef3c7; color: #92400e; }
+.connection-badge { background: #f1f5f9; color: #475569; }
+.muted, .connection-note { color: #657089; font-size: .875rem; }
+.connection-card { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid #dfe4ec; border-radius: .65rem; background: #fbfdff; }
+.connection-card h3 { margin-bottom: .35rem; }
+.connection-card p { margin: .25rem 0; }
+.connection-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem 1rem; margin: 1.25rem 0; }
+.connection-metadata div { padding: .7rem; border: 1px solid #edf0f4; border-radius: .45rem; background: #fff; }
+.connection-metadata dt { color: #657089; font-size: .72rem; font-weight: 700; text-transform: uppercase; }
+.connection-metadata dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
+.connection-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.connection-actions button:first-child { border-color: #2563eb; background: #2563eb; color: white; font-weight: 650; }
+.connection-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.connection-note { margin-top: 1rem !important; line-height: 1.5; }
+.connection-prerequisites { margin-top: 1rem; padding: 1rem; border-left: .25rem solid #93c5fd; background: #eff6ff; }
+.connection-prerequisites ul { margin: .55rem 0 0; gap: .35rem; list-style: disc; padding-left: 1.25rem; }
+.connection-prerequisites li { display: list-item; border: 0; padding: 0; }
+@media (max-width: 40rem) { .connections-panel .panel-heading, .connection-card-title { display: grid; } .connection-metadata { grid-template-columns: 1fr; } }
 
 /* Inbox: integração visual nativa, sem dependências ou view-models paralelos. */
 .inbox { --inbox-primary: #2563eb; --inbox-border: #e2e8f0; --inbox-muted: #64748b;
