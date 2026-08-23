@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiProblem, AuthenticationRequired, createApiClient, InvalidApiResponse } from "./client.js";
 
+test("channel connection metadata client sends scoped opaque reference and idempotency", async () => {
+  let request: Request | undefined;
+  const client = createApiClient({ baseUrl: "https://api.example.test", getAccessToken: async () => "token", fetch: async input => {
+    request = input;
+    return Response.json({ connection: { id: "33333333-3333-4333-8333-333333333333", type: "WHATSAPP", scope: "CORPORATE",
+      wabaId: "123456789012345", phoneNumberId: "123456789012345", status: "DISCONNECTED", secretConfigured: true, unitIds: [] }, replayed: false });
+  } });
+  await client.setChannelConnectionMetadata({ scope: "CORPORATE", wabaId: "123456789012345", phoneNumberId: "123456789012345",
+    status: "DISCONNECTED", secretReference: "meta-prod", unitIds: [] }, "connection-command-1");
+  assert.equal(new URL(request!.url).pathname, "/v1/channel-connections");
+  assert.equal(request!.headers.get("authorization"), "Bearer token");
+  assert.equal(request!.headers.get("idempotency-key"), "connection-command-1");
+  assert.deepEqual(await request!.json(), { scope: "CORPORATE", wabaId: "123456789012345", phoneNumberId: "123456789012345",
+    status: "DISCONNECTED", secretReference: "meta-prod", unitIds: [] });
+});
+
 test("team availability client sends the scoped filtered keyset query",async()=>{let request:Request|undefined;const unitId="33333333-3333-4333-8333-333333333333",userId="22222222-2222-4222-8222-222222222222";const client=createApiClient({baseUrl:"https://api.example.test",getAccessToken:async()=>"token",fetch:async input=>{request=input;return Response.json({items:[{userId,displayName:"Atendente",role:"ATTENDANT",status:"AVAILABLE",maxActive:5,activeCount:2,remainingCapacity:3,pauseReason:null,pausedUntil:null,updatedAt:"2026-08-13T12:00:00.000Z"}],nextCursor:"team-cursor"})}});const page=await client.listInboxTeamAvailability({unitId,limit:10,status:"AVAILABLE",cursor:"previous-cursor"});const url=new URL(request!.url);assert.equal(url.pathname,"/v1/inbox/team-availability");assert.equal(url.searchParams.get("unitId"),unitId);assert.equal(url.searchParams.get("status"),"AVAILABLE");assert.equal(url.searchParams.get("cursor"),"previous-cursor");assert.equal(page.items[0]?.remainingCapacity,3)});
 
 test("generated client sends only Bearer authentication to GET /v1/me", async () => {

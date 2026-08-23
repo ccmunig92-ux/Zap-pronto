@@ -125,6 +125,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
     .map(({ method, url, policy, permission, scope }) => [method, url, policy, permission ?? null, scope ?? null]);
   assert.deepEqual(policies.sort((left, right) => String(left).localeCompare(String(right))), [
     ["GET", "/v1/channel-connections", "permission", "channel_connections.read", "tenant"],
+    ["POST", "/v1/channel-connections", "permission", "channel_connections.manage", "tenant"],
     ["GET", "/v1/inbox/active", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/availability", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/capacity-alert", "permission", "sla_alert.read", "unit"],
@@ -178,6 +179,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
   const document = app.swagger() as { paths: Record<string, Record<string, { responses?: Record<string, unknown> }>> };
   const expectedErrors: Record<string, readonly number[]> = {
     "GET /v1/channel-connections": [400, 401, 403, 409, 500, 503],
+    "POST /v1/channel-connections": [400, 401, 403, 409, 500, 503],
     "GET /v1/inbox/active": [400,401,403,404,409],
     "GET /v1/inbox/capacity-alert-episodes": [400,401,403,404,409,500,503],
     "GET /v1/inbox/conversations/:conversationId": [400,401,403,404],
