@@ -1,4 +1,5 @@
 import { buildApp } from "./app.js";
+import type { InboxNotificationPool } from "./realtime/inbox-events.js";
 import pg from "pg";
 import { createOidcIdentityVerifier } from "./auth/oidc-verifier.js";
 import { loadOidcRuntimeConfig } from "./auth/oidc-readiness.js";
@@ -12,6 +13,7 @@ const pool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
 });
 const identityVerifier = createOidcIdentityVerifier(oidc);
-const app = await buildApp({ pool, identityVerifier, metaWebhook: runtime.metaWebhook });
+const notificationPool = pool as unknown as InboxNotificationPool;
+const app = await buildApp({ pool, notificationPool, identityVerifier, metaWebhook: runtime.metaWebhook });
 app.addHook("onClose", async () => { await pool.end(); });
 await app.listen({ host: runtime.host, port: runtime.port });
