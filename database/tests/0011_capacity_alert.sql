@@ -34,6 +34,25 @@ DO $$ DECLARE missing record;published record;replayed record;snapshot record;bl
  IF NOT blocked THEN RAISE EXCEPTION 'CAPACITY_ALERT_DIVERGENT_REPLAY_ACCEPTED';END IF;
  SELECT * INTO snapshot FROM get_unit_capacity_alert_snapshot('a2000000-0000-4000-8000-000000000001','2026-01-01 10:00Z');
  IF snapshot.state<>'ACTIVE' OR snapshot.queued_count<>4 OR snapshot.sustained_queued_count<>3 OR snapshot.available_capacity<>2 OR snapshot.oldest_queued_at<>'2026-01-01 09:30Z'::timestamptz THEN RAISE EXCEPTION 'CAPACITY_ALERT_ACTIVE_INVALID';END IF;
+ -- Episode lifecycle is durable and deduplicated: the first evaluation opens
+ -- one episode, repeated evaluations stay inside cooldown, acknowledgement
+ -- persists a reason, and the next eligible evaluation escalates it.
+ <<episode_lifecycle>>
+ DECLARE episode record;repeat_episode record;ack record;escalated record;episode_key text:='capacity-episode-ack-1';episode_fp text;
+ BEGIN
+   SELECT * INTO episode FROM evaluate_unit_capacity_alert_episode('a2000000-0000-4000-8000-000000000001','2026-01-01 10:00Z');
+   IF episode.status<>'OPEN' OR NOT episode.should_notify OR episode.escalation_level<>0 OR episode.recipient_count<>1 THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_OPEN_INVALID';END IF;
+   SELECT * INTO repeat_episode FROM evaluate_unit_capacity_alert_episode('a2000000-0000-4000-8000-000000000001','2026-01-01 10:05Z');
+   IF repeat_episode.episode_id<>episode.episode_id OR repeat_episode.should_notify OR repeat_episode.version<>episode.version+1 THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_COOLDOWN_INVALID';END IF;
+   episode_fp:=encode(digest(convert_to(format('{"expectedVersion":%s,"episodeId":"%s","reason":"%s"}',repeat_episode.version,
+     lower(repeat_episode.episode_id::text),'Supervisor reviewed queue'),'UTF8'),'sha256'),'hex');
+   SELECT * INTO ack FROM acknowledge_capacity_alert_episode(repeat_episode.episode_id,repeat_episode.version,'Supervisor reviewed queue',episode_key,episode_fp);
+   IF ack.status<>'ACKNOWLEDGED' OR ack.replayed OR ack.version<>repeat_episode.version+1 THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_ACK_INVALID';END IF;
+   SELECT * INTO escalated FROM evaluate_unit_capacity_alert_episode('a2000000-0000-4000-8000-000000000001','2026-01-01 10:16Z');
+   IF escalated.episode_id<>episode.episode_id OR escalated.status<>'ESCALATED' OR NOT escalated.should_notify OR escalated.escalation_level<>1 THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_ESCALATION_INVALID';END IF;
+   IF (SELECT count(*) FROM unit_capacity_alert_episode_recipients WHERE tenant_id='a1000000-0000-4000-8000-000000000001' AND episode_id=episode.episode_id)<>1
+     OR (SELECT acknowledgement_reason FROM unit_capacity_alert_episodes WHERE id=episode.episode_id)<>'Supervisor reviewed queue' THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_RECIPIENT_OR_REASON_INVALID';END IF;
+ END episode_lifecycle;
  UPDATE human_handoffs SET status='RESOLVED',resolved_at='2026-01-01 09:50Z' WHERE id='a9000000-0000-4000-8000-000000000005';
  SELECT * INTO snapshot FROM get_unit_capacity_alert_snapshot('a2000000-0000-4000-8000-000000000001','2026-01-01 10:00Z');
  IF snapshot.available_capacity<>3 OR snapshot.state<>'ACTIVE' THEN RAISE EXCEPTION 'CAPACITY_ALERT_ACTIVE_LOAD_NOT_COUNTED_ONCE';END IF;
