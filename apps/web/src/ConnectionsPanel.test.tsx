@@ -31,6 +31,7 @@ describe("ConnectionsPanel", () => {
     }] }) };
     render(<ConnectionsPanel client={connectedClient} canManage />);
     await waitFor(() => expect(screen.getByText("waba-1")).toBeTruthy());
+    expect(screen.getByText("Conexão cadastrada").classList.contains("connection-status-active")).toBe(true);
     expect(screen.getByText("Configurado no servidor")).toBeTruthy();
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
   });
