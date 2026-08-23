@@ -23,4 +23,5 @@ export * from "./domain/unit-operational-timezone.js";
 export * from "./domain/shift-schedule.js";
 export * from "./domain/team-availability.js";
 export * from "./domain/capacity-alert.js";
+export * from "./domain/capacity-alert-episodes.js";
 export * from "./domain/unit-operational-timezone.js";

@@ -128,6 +128,7 @@ try {
       "0072_outbound_session_window.sql",
       "0073_outbound_meta_template.sql",
       "0074_capacity_alert_episode_lifecycle.sql",
+      "0075_capacity_alert_episode_api.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
