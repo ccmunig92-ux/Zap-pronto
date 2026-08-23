@@ -6,6 +6,7 @@ compose_file="$repo_root/deploy/staging/compose.yaml"
 env_file="$repo_root/deploy/staging/.env.example"
 work_dir=$(mktemp -d)
 secret_dir="$work_dir/secrets"
+meta_secret_dir="$secret_dir/meta"
 backup_dir="$work_dir/backups"
 project="zap-pronto-backup-smoke-$$"
 
@@ -23,6 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 mkdir -m 700 "$secret_dir" "$backup_dir"
+mkdir -m 700 "$meta_secret_dir"
 printf '%s' owner-backup-smoke > "$secret_dir/postgres-password"
 printf '%s' 'postgresql://zap_pronto_owner:owner-backup-smoke@postgres:5432/zap_pronto' \
   > "$secret_dir/database-migration-url"
@@ -38,6 +40,7 @@ export POSTGRES_PASSWORD_FILE="$secret_dir/postgres-password"
 export DATABASE_MIGRATION_URL_FILE="$secret_dir/database-migration-url"
 export DATABASE_RUNTIME_URL_FILE="$secret_dir/database-runtime-url"
 export DATABASE_WORKER_URL_FILE="$secret_dir/database-worker-url"
+export META_WHATSAPP_SECRET_ROOT="$meta_secret_dir"
 export STAGING_HTTP_PORT=${STAGING_HTTP_PORT:-18081}
 export STAGING_COMPOSE_PROJECT="$project"
 export STAGING_COMPOSE_FILE="$compose_file"
