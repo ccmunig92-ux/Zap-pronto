@@ -11,7 +11,7 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
-- Os quatro arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
+- Os seis arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
   Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
   imagem PostgreSQL Alpine e as três URLs (`database_migration_url`, `database_runtime_url` e
   `database_worker_url`) ao UID/GID 1000 da imagem API, todos com modo `0400`; modo `0600`
@@ -28,6 +28,10 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   bind read-only no worker em `/run/zap-pronto-secrets/meta`; cada arquivo deve seguir
   `<tenantId>/<channelConnectionId>/<secret_reference>`. O worker permanece desabilitado até esse diretório
   conter referências reais provisionadas pelo operador; nenhum token é lido do `.env`.
+- `META_WEBHOOK_ENABLED` permanece `false` por padrão. Para habilitá-lo, o operador deve criar os arquivos
+  externos `META_APP_SECRET_FILE` e `META_VERIFY_TOKEN_FILE`, ambos com modo `0400`, pertencentes ao UID/GID
+  1000 da imagem API. O Compose os monta apenas na API em `/run/secrets/meta_app_secret` e
+  `/run/secrets/meta_verify_token`; nenhum segredo aparece no `.env`, logs ou imagem.
 
 Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels ou no repositório.
 

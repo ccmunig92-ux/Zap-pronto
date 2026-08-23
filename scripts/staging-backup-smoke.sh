@@ -32,6 +32,8 @@ printf '%s' 'postgresql://zap_pronto_runtime:runtime-backup-smoke@postgres:5432/
   > "$secret_dir/database-runtime-url"
 printf '%s' 'postgresql://zap_pronto_worker_runtime:worker-backup-smoke@postgres:5432/zap_pronto' \
   > "$secret_dir/database-worker-url"
+printf '%s' 'smoke-meta-app-secret' > "$secret_dir/meta-app-secret"
+printf '%s' 'smoke-meta-verify-token' > "$secret_dir/meta-verify-token"
 chmod 644 "$secret_dir"/*
 
 export ZAP_API_IMAGE=${ZAP_API_IMAGE:-zap-pronto-api:ci}
@@ -40,6 +42,8 @@ export POSTGRES_PASSWORD_FILE="$secret_dir/postgres-password"
 export DATABASE_MIGRATION_URL_FILE="$secret_dir/database-migration-url"
 export DATABASE_RUNTIME_URL_FILE="$secret_dir/database-runtime-url"
 export DATABASE_WORKER_URL_FILE="$secret_dir/database-worker-url"
+export META_APP_SECRET_FILE="$secret_dir/meta-app-secret"
+export META_VERIFY_TOKEN_FILE="$secret_dir/meta-verify-token"
 export META_WHATSAPP_SECRET_ROOT="$meta_secret_dir"
 export STAGING_HTTP_PORT=${STAGING_HTTP_PORT:-18081}
 export STAGING_COMPOSE_PROJECT="$project"

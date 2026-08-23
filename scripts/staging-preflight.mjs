@@ -4,12 +4,14 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const IMAGE = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/;
-const SECRET_NAMES = ["POSTGRES_PASSWORD_FILE", "DATABASE_MIGRATION_URL_FILE", "DATABASE_RUNTIME_URL_FILE", "DATABASE_WORKER_URL_FILE"];
+const SECRET_NAMES = ["POSTGRES_PASSWORD_FILE", "DATABASE_MIGRATION_URL_FILE", "DATABASE_RUNTIME_URL_FILE", "DATABASE_WORKER_URL_FILE", "META_APP_SECRET_FILE", "META_VERIFY_TOKEN_FILE"];
 const SECRET_OWNERSHIP = Object.freeze({
   POSTGRES_PASSWORD_FILE: { uid: 70, gid: 70 },
   DATABASE_MIGRATION_URL_FILE: { uid: 1000, gid: 1000 },
   DATABASE_RUNTIME_URL_FILE: { uid: 1000, gid: 1000 },
   DATABASE_WORKER_URL_FILE: { uid: 1000, gid: 1000 },
+  META_APP_SECRET_FILE: { uid: 1000, gid: 1000 },
+  META_VERIFY_TOKEN_FILE: { uid: 1000, gid: 1000 },
 });
 const MINIMUMS = Object.freeze({
   postgres: { cpus: 1.5, memory: 1536 }, migrate: { cpus: 1, memory: 512 },
@@ -108,7 +110,7 @@ export function validateResources(compose) {
 const EXPECTED_SECRETS = Object.freeze({
   postgres:["postgres_password"], migrate:["database_migration_url"],
   "provision-runtime":["database_migration_url","database_runtime_url","database_worker_url"],
-  api:["database_runtime_url"],worker:["database_worker_url"],web:[],
+  api:["database_runtime_url","meta_app_secret","meta_verify_token"],worker:["database_worker_url"],web:[],
 });
 const EXPECTED_DEPENDS = Object.freeze({
   postgres:{}, migrate:{postgres:"service_healthy"}, "provision-runtime":{migrate:"service_completed_successfully"},
@@ -138,6 +140,11 @@ export function validateComposeInvariants(compose) {
     if (serviceName === "worker") {
       const metaMounts = (service.volumes ?? []).filter((entry) => entry?.target === "/run/zap-pronto-secrets/meta");
       if (metaMounts.length !== 1 || metaMounts[0].type !== "bind" || metaMounts[0].read_only !== true) fail("WORKER_META_SECRET_MOUNT_INVALID");
+    }
+    if (serviceName === "api") {
+      const environment = service.environment ?? {};
+      if (!/^(true|false)$/.test(String(environment.META_WEBHOOK_ENABLED ?? ""))) fail("API_META_WEBHOOK_ENABLED_INVALID");
+      if (environment.META_APP_SECRET_FILE !== "/run/secrets/meta_app_secret" || environment.META_VERIFY_TOKEN_FILE !== "/run/secrets/meta_verify_token") fail("API_META_WEBHOOK_SECRET_PATH_INVALID");
     }
   }
 }
