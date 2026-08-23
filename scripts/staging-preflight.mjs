@@ -62,6 +62,9 @@ export function validateEnvironment(env) {
 export async function validateSecrets(env, repoRoot) {
   if (typeof process.getuid !== "function") fail("POSIX_SECRET_METADATA_REQUIRED");
   const root = await realpath(repoRoot);
+  if (env.META_WHATSAPP_SECRET_ROOT?.trim()) {
+    await validateMetaSecretRoot(env.META_WHATSAPP_SECRET_ROOT, root);
+  }
   const seen = new Set();
   for (const name of SECRET_NAMES) {
     const file = required(env, name);
@@ -72,6 +75,19 @@ export async function validateSecrets(env, repoRoot) {
     validateSecretMetadata(name, canonical, metadata, root, seen, SECRET_OWNERSHIP[name]);
     seen.add(canonical);
   }
+}
+
+export async function validateMetaSecretRoot(configuredRoot, repositoryRoot) {
+  if (!isAbsolute(configuredRoot)) fail("META_WHATSAPP_SECRET_ROOT_NOT_ABSOLUTE");
+  await assertNoSymlinkPath("META_WHATSAPP_SECRET_ROOT", configuredRoot);
+  let canonical;
+  let metadata;
+  try { canonical = await realpath(configuredRoot); metadata = await stat(canonical); } catch { fail("META_WHATSAPP_SECRET_ROOT_UNREADABLE"); }
+  const relation = relative(repositoryRoot, canonical);
+  if (!relation.startsWith("..") && !isAbsolute(relation)) fail("META_WHATSAPP_SECRET_ROOT_INSIDE_REPOSITORY");
+  if (!metadata.isDirectory()) fail("META_WHATSAPP_SECRET_ROOT_NOT_DIRECTORY");
+  if ((metadata.mode & 0o777) !== 0o750) fail("META_WHATSAPP_SECRET_ROOT_MODE_NOT_0750");
+  if (metadata.uid !== 1000 || metadata.gid !== 1000) fail("META_WHATSAPP_SECRET_ROOT_OWNER_MISMATCH");
 }
 
 async function assertNoSymlinkPath(name, file) {
