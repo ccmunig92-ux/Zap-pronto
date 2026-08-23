@@ -30,12 +30,13 @@ const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resou
   networks:Object.fromEntries(networks.map((name)=>[name,null])),secrets:secrets.map((source)=>({source})),depends_on,
   read_only:true,cap_drop:["ALL"],security_opt:["no-new-privileges:true"],
   logging:{driver:"json-file",options:{"max-size":"10m","max-file":"5"}}});
+const workerMetaSecretMount = [{type:"bind",source:"/srv/zap-pronto/secrets/staging/meta",target:"/run/zap-pronto-secrets/meta",read_only:true}];
 const compose = { networks:{data:{internal:true}}, services: {
   postgres:{...hardened("1.50","1536M",["data"],["postgres_password"]),read_only:undefined,cap_drop:undefined},
   migrate:hardened("1","512M",["data"],["database_migration_url"],{postgres:{condition:"service_healthy"}}),
   "provision-runtime":hardened("0.5","256M",["data"],["database_migration_url","database_runtime_url","database_worker_url"],{migrate:{condition:"service_completed_successfully"}}),
   api:hardened("1","768M",["app","data"],["database_runtime_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),
-  worker:hardened("0.5","384M",["data"],["database_worker_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),
+  worker:{...hardened("0.5","384M",["data"],["database_worker_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),volumes:workerMetaSecretMount},
   web:{...hardened("0.5","256M",["app"],[],{api:{condition:"service_healthy"}}),ports:[{host_ip:"127.0.0.1",target:8080,protocol:"tcp"}]},
 } };
 
@@ -50,6 +51,7 @@ test("rejects exposed internal services, topology drift and weakened hardening",
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,api:{...compose.services.api,read_only:false}}}), /API_HARDENING_INVALID/);
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,migrate:{...compose.services.migrate,secrets:[]}}}), /MIGRATE_SECRETS_INVALID/);
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,web:{...compose.services.web,depends_on:{}}}}), /WEB_DEPENDENCY_INVALID/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,worker:{...compose.services.worker,volumes:[]}}}), /WORKER_META_SECRET_MOUNT_INVALID/);
 });
 
 test("rejects mutable images and unsafe or divergent OIDC endpoints", () => {

@@ -5,12 +5,12 @@ export interface OutboundWorkerClient { query(text:string,values?:unknown[]):Pro
 export interface OutboundWorkerPool { connect():Promise<OutboundWorkerClient>; }
 export interface OutboundWorkerOptions { batchSize:number;leaseSeconds:number;pollIntervalMs:number;backoffSeconds:number; }
 export interface OutboundTransportInput { tenantId:string;messageId:string;channelConnectionId:string;
-  channelAccountId:string;secretReference:string;recipientExternalId:string;body:string; }
+  channelAccountId:string;secretReference:string;recipientExternalId:string;body:string;sessionOpen:boolean; }
 export interface OutboundTransportResult { externalMessageId:string; }
 export interface OutboundTransport { sendText(input:OutboundTransportInput,signal:AbortSignal):Promise<OutboundTransportResult>; }
 
 interface ClaimedOutbound { tenant_id:string;outbox_id:string;message_id:string;channel_connection_id:string;
-  channel_account_id:string;secret_reference:string;recipient_external_id:string;body:string;event_type:string;payload_version:number;lease_token:string; }
+  channel_account_id:string;secret_reference:string;recipient_external_id:string;body:string;session_open:boolean;event_type:string;payload_version:number;lease_token:string; }
 
 function nonEmpty(value:unknown,maximum:number):value is string{
   return typeof value==="string"&&value.length>=1&&value.length<=maximum&&value===value.trim()&&!/[\u0000-\u001f\u007f]/.test(value);
@@ -21,7 +21,7 @@ function claimed(row:unknown):ClaimedOutbound{
   if(!UUID.test(String(value.tenant_id))||!UUID.test(String(value.outbox_id))||!UUID.test(String(value.message_id))||
     !UUID.test(String(value.channel_connection_id))||!UUID.test(String(value.lease_token))||
     !nonEmpty(value.channel_account_id,512)||!nonEmpty(value.secret_reference,512)||!nonEmpty(value.recipient_external_id,512)||
-    !nonEmpty(value.body,4096)||value.event_type!=="channel.outbound.requested"||value.payload_version!==1)
+    !nonEmpty(value.body,4096)||typeof value.session_open!=="boolean"||value.event_type!=="channel.outbound.requested"||value.payload_version!==1)
     throw new Error("OUTBOUND_CLAIM_INVALID");
   return value as unknown as ClaimedOutbound;
 }
@@ -67,11 +67,14 @@ export async function processOutboundClaim(pool:OutboundWorkerPool,job:ClaimedOu
     const result=await transport.sendText({tenantId:job.tenant_id,messageId:job.message_id,
       channelConnectionId:job.channel_connection_id,channelAccountId:job.channel_account_id,
       secretReference:job.secret_reference,
-      recipientExternalId:job.recipient_external_id,body:job.body},signal);
+      recipientExternalId:job.recipient_external_id,body:job.body,sessionOpen:job.session_open},signal);
     if(signal.aborted)throw new Error("OUTBOUND_ABORTED");
     await finalizeClaim(pool,job,externalMessageId(result));
   }catch(error){
-    await failClaim(pool,job,options).catch(()=>undefined);
+    const errorCode=error instanceof Error&&error.message==="META_WHATSAPP_TEMPLATE_REQUIRED"
+      ? "OUTBOUND_TEMPLATE_REQUIRED" : "OUTBOUND_TRANSPORT_FAILED";
+    await transaction(pool,async client=>{await client.query("SELECT fail_outbound_delivery_event($1,$2,$3,$4)",
+      [job.outbox_id,job.lease_token,errorCode,options.backoffSeconds]);}).catch(()=>undefined);
     throw new Error("OUTBOUND_DELIVERY_FAILED",{cause:error});
   }
 }

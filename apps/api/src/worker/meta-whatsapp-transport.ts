@@ -94,6 +94,7 @@ export function createMetaWhatsAppTransport(
         tenantId: input.tenantId, channelConnectionId: input.channelConnectionId, secretReference: input.secretReference,
       }));
       if (!RECIPIENT.test(input.recipientExternalId)) throw new Error("META_WHATSAPP_RECIPIENT_INVALID");
+      if (!input.sessionOpen) throw new Error("META_WHATSAPP_TEMPLATE_REQUIRED");
       if (!input.body || input.body.length > 4096 || /[\u0000-\u001f\u007f]/.test(input.body)) {
         throw new Error("META_WHATSAPP_BODY_INVALID");
       }

@@ -4,7 +4,7 @@ import { createMetaWhatsAppTransport, createFileSecretResolver, loadMetaWhatsApp
 
 const input={tenantId:"10000000-0000-4000-8000-000000000001",messageId:"30000000-0000-4000-8000-000000000001",
   channelConnectionId:"40000000-0000-4000-8000-000000000001",channelAccountId:"997041050169954",
-  recipientExternalId:"5511999999999",secretReference:"meta-access-token",body:"Olá"};
+  recipientExternalId:"5511999999999",secretReference:"meta-access-token",body:"Olá",sessionOpen:true};
 const config={graphApiVersion:"v23.0",timeoutMs:500};
 const resolver={resolve:async()=>"token-not-real"};
 
@@ -23,6 +23,13 @@ test("Meta transport fails closed for invalid channel data and provider errors",
   const transport=createMetaWhatsAppTransport(config,{fetch:async()=>new Response("provider-secret",{status:500}),secretResolver:resolver});
   await assert.rejects(transport.sendText({...input,channelAccountId:"local-e2e-account"},new AbortController().signal),/META_WHATSAPP_PHONE_NUMBER_ID_INVALID/);
   await assert.rejects(transport.sendText(input,new AbortController().signal),/META_WHATSAPP_HTTP_500/);
+});
+
+test("Meta transport never sends free-form text after the customer-service window",async()=>{
+  let called=false;
+  const transport=createMetaWhatsAppTransport(config,{fetch:async()=>{called=true;return Response.json({messages:[{id:"wamid.must-not-send"}]})},secretResolver:resolver});
+  await assert.rejects(transport.sendText({...input,sessionOpen:false},new AbortController().signal),/META_WHATSAPP_TEMPLATE_REQUIRED/);
+  assert.equal(called,false);
 });
 
 test("Meta config requires only version; token is resolved per connection",async()=>{

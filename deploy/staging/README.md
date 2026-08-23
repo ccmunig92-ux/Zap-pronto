@@ -24,6 +24,10 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   runtime apontam ao mesmo banco, remove memberships e grants diretos residuais, recusa ownership/default
   privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
 - O password do owner contido na migration URL corresponde a `postgres_password`.
+- `META_WHATSAPP_SECRET_ROOT` é um diretório absoluto fora do checkout. O Compose o monta somente como
+  bind read-only no worker em `/run/zap-pronto-secrets/meta`; cada arquivo deve seguir
+  `<tenantId>/<channelConnectionId>/<secret_reference>`. O worker permanece desabilitado até esse diretório
+  conter referências reais provisionadas pelo operador; nenhum token é lido do `.env`.
 
 Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels ou no repositório.
 
