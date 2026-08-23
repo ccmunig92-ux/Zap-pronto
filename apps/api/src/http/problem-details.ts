@@ -14,6 +14,7 @@ import { UnitOperationalTimezoneError } from "../routes/unit-operational-timezon
 import { StaffScheduleError } from "../routes/staff-schedules.js";
 import { AssignmentPolicyError } from "../routes/unit-assignment-policy.js";
 import { CapacityAlertError } from "../routes/unit-capacity-alert.js";
+import { ChannelConnectionError } from "../routes/channel-connections.js";
 
 export function registerProblemDetailsHandler(app: FastifyInstance): void {
   app.setErrorHandler((error, request, reply) => {
@@ -36,7 +37,7 @@ export function registerProblemDetailsHandler(app: FastifyInstance): void {
       || error instanceof InboxRoutingRequiredError || error instanceof InboxConversationRequestError
       || error instanceof AvailabilityError || error instanceof SlaAlertError || error instanceof SlaPolicyError
       || error instanceof UnitOperationalTimezoneError || error instanceof StaffScheduleError || error instanceof AssignmentPolicyError
-      || error instanceof CapacityAlertError) {
+      || error instanceof CapacityAlertError || error instanceof ChannelConnectionError) {
       void reply.status(error.statusCode).type("application/problem+json").send({
         type: `urn:zap-pronto:error:${error.code.toLowerCase().replaceAll("_", "-")}`,
         title: error.statusCode === 401 ? "Unauthorized"
