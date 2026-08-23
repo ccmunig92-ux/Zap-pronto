@@ -150,11 +150,10 @@ services:
       INBOUND_WORKER_SHUTDOWN_TIMEOUT_MS: "10000"
       OUTBOUND_WORKER_ENABLED: "${OUTBOUND_WORKER_ENABLED:-false}"
       META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:?META_GRAPH_API_VERSION is required}
-      META_WHATSAPP_ACCESS_TOKEN_FILE: /run/secrets/meta_whatsapp_access_token
+      META_WHATSAPP_SECRET_ROOT: ${META_WHATSAPP_SECRET_ROOT:-/run/zap-pronto-secrets/meta}
       META_WHATSAPP_TIMEOUT_MS: ${META_WHATSAPP_TIMEOUT_MS:-10000}
     secrets:
       - database_worker_url
-      - meta_whatsapp_access_token
     networks:
       - data
     depends_on:
@@ -233,5 +232,3 @@ secrets:
     file: ${DATABASE_RUNTIME_URL_FILE:?DATABASE_RUNTIME_URL_FILE must be outside the repository}
   database_worker_url:
     file: ${DATABASE_WORKER_URL_FILE:?DATABASE_WORKER_URL_FILE must be outside the repository}
-  meta_whatsapp_access_token:
-    file: ${META_WHATSAPP_ACCESS_TOKEN_FILE:?META_WHATSAPP_ACCESS_TOKEN_FILE must be outside the repository}
