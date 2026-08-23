@@ -5,12 +5,12 @@ import { AcceptUserInvitationResponseSchema, AdministrativeInvitationsPageSchema
   CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema, ReissueInvitationResponseSchema,ChangeUnitMembershipResponseSchema,UnitMembershipsPageSchema,
   RevokeInvitationResponseSchema,
   InboxAvailabilitySchema,SetInboxAvailabilityResponseSchema,ListInboxTeamAvailabilityResponseSchema,ListInboxSlaAlertsResponseSchema,AcknowledgeInboxSlaAlertResponseSchema,UnitCapacityAlertPolicySchema,SetUnitCapacityAlertPolicyResponseSchema,InboxCapacityAlertSnapshotSchema,UnitSlaPolicySchema,SetUnitSlaPolicyResponseSchema,UnitAssignmentPolicySchema,SetUnitAssignmentPolicyResponseSchema,UnitOperationalTimezoneSchema,SetUnitOperationalTimezoneResponseSchema,StaffScheduleSchema,SetStaffScheduleResponseSchema,ListShiftMembersResponseSchema,EffectiveStaffShiftSchema,
-  ListRoutingRequiredResponseSchema,ResolveRoutingRequiredResponseSchema,InboxConversationSchema,ListInboxMessagesResponseSchema,ListHandoffsResponseSchema,ListResolvedHandoffsResponseSchema,ClaimHandoffResponseSchema,ResolveHandoffResponseSchema,RequeueHandoffResponseSchema,ReopenHandoffResponseSchema,ListInboxTransferCandidatesResponseSchema,TransferHandoffResponseSchema,TakeoverHandoffResponseSchema,SendHumanTextMessageResponseSchema,CancelHumanTextMessageResponseSchema,
+  ListRoutingRequiredResponseSchema,ResolveRoutingRequiredResponseSchema,InboxConversationSchema,ListInboxMessagesResponseSchema,ListHandoffsResponseSchema,ListResolvedHandoffsResponseSchema,ClaimHandoffResponseSchema,ResolveHandoffResponseSchema,RequeueHandoffResponseSchema,ReopenHandoffResponseSchema,ListInboxTransferCandidatesResponseSchema,TransferHandoffResponseSchema,TakeoverHandoffResponseSchema,SendHumanTextMessageResponseSchema,CancelHumanTextMessageResponseSchema,ChannelConnectionsPageSchema,
   UserInvitationOptionsSchema, type CreateUserInvitationRequest, type CreateUserInvitationResponse,
   type AcceptUserInvitationResponse, type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
   type ChangeUserStatusResponse,type ChangeUnitMembershipRequest,type ChangeUnitMembershipResponse,type UnitMembershipsPage, type CurrentUser, type ProblemDetails, type ReissueInvitationRequest,
   type ReissueInvitationResponse, type RevokeInvitationRequest, type RevokeInvitationResponse,
-  type ListInboxTeamAvailabilityResponse,type ListInboxSlaAlertsResponse,type AcknowledgeInboxSlaAlertResponse,type UnitCapacityAlertPolicy,type SetUnitCapacityAlertPolicyRequest,type SetUnitCapacityAlertPolicyResponse,type InboxCapacityAlertSnapshot,type UnitSlaPolicy,type SetUnitSlaPolicyRequest,type SetUnitSlaPolicyResponse,type UnitAssignmentPolicy,type SetUnitAssignmentPolicyRequest,type SetUnitAssignmentPolicyResponse,type UnitOperationalTimezone,type SetUnitOperationalTimezoneRequest,type SetUnitOperationalTimezoneResponse,type StaffSchedule,type SetStaffScheduleRequest,type SetStaffScheduleResponse,type ListShiftMembersResponse,type EffectiveStaffShift,type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse,type InboxAvailability,type SetInboxAvailabilityRequest,type SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
+  type ListInboxTeamAvailabilityResponse,type ListInboxSlaAlertsResponse,type AcknowledgeInboxSlaAlertResponse,type UnitCapacityAlertPolicy,type SetUnitCapacityAlertPolicyRequest,type SetUnitCapacityAlertPolicyResponse,type InboxCapacityAlertSnapshot,type UnitSlaPolicy,type SetUnitSlaPolicyRequest,type SetUnitSlaPolicyResponse,type UnitAssignmentPolicy,type SetUnitAssignmentPolicyRequest,type SetUnitAssignmentPolicyResponse,type UnitOperationalTimezone,type SetUnitOperationalTimezoneRequest,type SetUnitOperationalTimezoneResponse,type StaffSchedule,type SetStaffScheduleRequest,type SetStaffScheduleResponse,type ListShiftMembersResponse,type EffectiveStaffShift,type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse,type InboxAvailability,type SetInboxAvailabilityRequest,type SetInboxAvailabilityResponse,type ChannelConnectionsPage } from "@zap-pronto/contracts";
 import type { paths } from "./generated.js";
 
 if (!FormatRegistry.Has("uuid")) FormatRegistry.Set("uuid", (value) =>
@@ -57,6 +57,15 @@ export function createApiClient(options: ApiClientOptions) {
       mapFailure(error, response);
     }
     if (!Value.Check(CurrentUserSchema, data)) throw new InvalidApiResponse();
+    return data;
+  }, async listChannelConnections(): Promise<ChannelConnectionsPage> {
+    const token = await options.getAccessToken();
+    if (!token) throw new AuthenticationRequired();
+    const { data, error, response } = await client.GET("/v1/channel-connections", {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+    });
+    if (!response.ok) mapFailure(error, response);
+    if (!Value.Check(ChannelConnectionsPageSchema, data)) throw new InvalidApiResponse();
     return data;
   }, async getUserInvitationOptions(): Promise<UserInvitationOptions> {
     const token = await options.getAccessToken();
