@@ -121,6 +121,8 @@ try {
       "0065_timezone_and_membership_state_hardening.sql",
       "0066_causal_shift_timezone_snapshot.sql",
       "0067_sustained_demand_capacity_alert.sql",
+      "0068_channel_connection_metadata.sql",
+      "0069_channel_connection_status_canonical.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
