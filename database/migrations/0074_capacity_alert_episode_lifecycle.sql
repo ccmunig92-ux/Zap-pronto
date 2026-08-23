@@ -188,8 +188,8 @@ BEGIN
   UPDATE public.unit_capacity_alert_episodes AS episode SET status='ACKNOWLEDGED',acknowledged_at=now_at,
     acknowledged_by_user_id=public.current_app_actor_id(),acknowledgement_reason=normalized_reason,version=episode.version+1
     WHERE episode.tenant_id=tenant_id_value AND episode.id=episode_record.id RETURNING episode.* INTO episode_record;
-  UPDATE public.unit_capacity_alert_episode_recipients SET acknowledged_at=now_at
-    WHERE tenant_id=tenant_id_value AND episode_id=episode_record.id AND recipient_user_id=public.current_app_actor_id();
+  UPDATE public.unit_capacity_alert_episode_recipients AS recipient SET acknowledged_at=now_at
+    WHERE recipient.tenant_id=tenant_id_value AND recipient.episode_id=episode_record.id AND recipient.recipient_user_id=public.current_app_actor_id();
   INSERT INTO public.unit_capacity_alert_episode_commands(tenant_id,idempotency_key,episode_id,expected_version,request_fingerprint,actor_id,result_status,result_version,result_at)
     VALUES(tenant_id_value,normalized_key,episode_record.id,requested_expected_version,computed,public.current_app_actor_id(),'ACKNOWLEDGED',episode_record.version,now_at);
   INSERT INTO public.audit_events(tenant_id,actor_type,actor_id,action,entity_type,entity_id,metadata)
