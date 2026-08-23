@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createMetaWhatsAppTransport, createFileSecretResolver, loadMetaWhatsAppTransportConfig } from "./meta-whatsapp-transport.js";
 
 const input={tenantId:"10000000-0000-4000-8000-000000000001",messageId:"30000000-0000-4000-8000-000000000001",
@@ -68,4 +71,25 @@ test("file resolver rejects traversal and invalid tenant/connection scope",async
   const fileResolver=createFileSecretResolver("C:/secrets/zap-pronto");
   await assert.rejects(fileResolver.resolve({tenantId:"bad",channelConnectionId:input.channelConnectionId,secretReference:"meta"}),/REFERENCE_INVALID/);
   await assert.rejects(fileResolver.resolve({tenantId:input.tenantId,channelConnectionId:input.channelConnectionId,secretReference:"../other"}),/REFERENCE_INVALID/);
+});
+
+test("file resolver isolates secrets by tenant and channel connection",async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),"zap-pronto-secrets-"));
+  const tenantA=input.tenantId;
+  const tenantB="10000000-0000-4000-8000-000000000002";
+  const connectionA=input.channelConnectionId;
+  const connectionB="40000000-0000-4000-8000-000000000002";
+  try {
+    await mkdir(path.join(root,tenantA,connectionA),{recursive:true});
+    await mkdir(path.join(root,tenantB,connectionB),{recursive:true});
+    await writeFile(path.join(root,tenantA,connectionA,"meta-access-token"),"synthetic-token-a\n","utf8");
+    await writeFile(path.join(root,tenantB,connectionB,"meta-access-token"),"synthetic-token-b\n","utf8");
+    const resolver=createFileSecretResolver(root);
+    assert.equal(await resolver.resolve({tenantId:tenantA,channelConnectionId:connectionA,secretReference:"meta-access-token"}),"synthetic-token-a");
+    assert.equal(await resolver.resolve({tenantId:tenantB,channelConnectionId:connectionB,secretReference:"meta-access-token"}),"synthetic-token-b");
+    await assert.rejects(
+      resolver.resolve({tenantId:tenantA,channelConnectionId:connectionB,secretReference:"meta-access-token"}),
+      error=>error instanceof Error && error.message==="META_WHATSAPP_SECRET_UNAVAILABLE",
+    );
+  } finally { await rm(root,{recursive:true,force:true}); }
 });
