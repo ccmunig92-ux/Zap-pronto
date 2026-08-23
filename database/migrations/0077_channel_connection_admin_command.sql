@@ -41,8 +41,9 @@ BEGIN
     OR requested_status NOT IN ('ACTIVE','DEGRADED','DISCONNECTED') OR requested_connection_id IS NULL AND requested_scope IS NULL
     OR normalized_key IS NULL OR normalized_key<>requested_idempotency_key OR length(normalized_key) NOT BETWEEN 8 AND 200
     OR requested_fingerprint IS NULL OR requested_fingerprint !~ '^[0-9a-f]{64}$'
-    OR requested_waba_id !~ '^[0-9]{6,32}$' OR requested_phone_number_id !~ '^[0-9]{6,32}$'
-    OR requested_secret_reference !~ '^[A-Za-z0-9._-]{1,128}$'
+    OR requested_waba_id IS NULL OR requested_waba_id !~ '^[0-9]{6,32}$'
+    OR requested_phone_number_id IS NULL OR requested_phone_number_id !~ '^[0-9]{6,32}$'
+    OR requested_secret_reference IS NULL OR requested_secret_reference !~ '^[A-Za-z0-9._-]{1,128}$'
     OR (requested_display_name IS NOT NULL AND (requested_display_name<>btrim(requested_display_name)
       OR length(normalized_name) NOT BETWEEN 1 AND 160))
     OR jsonb_typeof(requested_unit_ids) IS DISTINCT FROM 'array'
