@@ -4,13 +4,13 @@ import { Value } from "@sinclair/typebox/value";
 import { AcceptUserInvitationResponseSchema, AdministrativeInvitationsPageSchema, AdministrativeUsersPageSchema, ChangeUserStatusResponseSchema,
   CreateUserInvitationResponseSchema, CurrentUserSchema, ProblemDetailsSchema, ReissueInvitationResponseSchema,ChangeUnitMembershipResponseSchema,UnitMembershipsPageSchema,
   RevokeInvitationResponseSchema,
-  InboxAvailabilitySchema,SetInboxAvailabilityResponseSchema,ListInboxTeamAvailabilityResponseSchema,ListInboxSlaAlertsResponseSchema,AcknowledgeInboxSlaAlertResponseSchema,UnitCapacityAlertPolicySchema,SetUnitCapacityAlertPolicyResponseSchema,InboxCapacityAlertSnapshotSchema,UnitSlaPolicySchema,SetUnitSlaPolicyResponseSchema,UnitAssignmentPolicySchema,SetUnitAssignmentPolicyResponseSchema,UnitOperationalTimezoneSchema,SetUnitOperationalTimezoneResponseSchema,StaffScheduleSchema,SetStaffScheduleResponseSchema,ListShiftMembersResponseSchema,EffectiveStaffShiftSchema,
+  InboxAvailabilitySchema,SetInboxAvailabilityResponseSchema,ListInboxTeamAvailabilityResponseSchema,ListInboxSlaAlertsResponseSchema,AcknowledgeInboxSlaAlertResponseSchema,UnitCapacityAlertPolicySchema,SetUnitCapacityAlertPolicyResponseSchema,InboxCapacityAlertSnapshotSchema,ListCapacityAlertEpisodesResponseSchema,AcknowledgeCapacityAlertEpisodeResponseSchema,UnitSlaPolicySchema,SetUnitSlaPolicyResponseSchema,UnitAssignmentPolicySchema,SetUnitAssignmentPolicyResponseSchema,UnitOperationalTimezoneSchema,SetUnitOperationalTimezoneResponseSchema,StaffScheduleSchema,SetStaffScheduleResponseSchema,ListShiftMembersResponseSchema,EffectiveStaffShiftSchema,
   ListRoutingRequiredResponseSchema,ResolveRoutingRequiredResponseSchema,InboxConversationSchema,ListInboxMessagesResponseSchema,ListHandoffsResponseSchema,ListResolvedHandoffsResponseSchema,ClaimHandoffResponseSchema,ResolveHandoffResponseSchema,RequeueHandoffResponseSchema,ReopenHandoffResponseSchema,ListInboxTransferCandidatesResponseSchema,TransferHandoffResponseSchema,TakeoverHandoffResponseSchema,SendHumanTextMessageResponseSchema,CancelHumanTextMessageResponseSchema,ChannelConnectionsPageSchema,
   UserInvitationOptionsSchema, type CreateUserInvitationRequest, type CreateUserInvitationResponse,
   type AcceptUserInvitationResponse, type AdministrativeInvitationsPage, type AdministrativeUsersPage, type ChangeUserStatusRequest,
   type ChangeUserStatusResponse,type ChangeUnitMembershipRequest,type ChangeUnitMembershipResponse,type UnitMembershipsPage, type CurrentUser, type ProblemDetails, type ReissueInvitationRequest,
   type ReissueInvitationResponse, type RevokeInvitationRequest, type RevokeInvitationResponse,
-  type ListInboxTeamAvailabilityResponse,type ListInboxSlaAlertsResponse,type AcknowledgeInboxSlaAlertResponse,type UnitCapacityAlertPolicy,type SetUnitCapacityAlertPolicyRequest,type SetUnitCapacityAlertPolicyResponse,type InboxCapacityAlertSnapshot,type UnitSlaPolicy,type SetUnitSlaPolicyRequest,type SetUnitSlaPolicyResponse,type UnitAssignmentPolicy,type SetUnitAssignmentPolicyRequest,type SetUnitAssignmentPolicyResponse,type UnitOperationalTimezone,type SetUnitOperationalTimezoneRequest,type SetUnitOperationalTimezoneResponse,type StaffSchedule,type SetStaffScheduleRequest,type SetStaffScheduleResponse,type ListShiftMembersResponse,type EffectiveStaffShift,type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse,type InboxAvailability,type SetInboxAvailabilityRequest,type SetInboxAvailabilityResponse,type ChannelConnectionsPage } from "@zap-pronto/contracts";
+  type ListInboxTeamAvailabilityResponse,type ListInboxSlaAlertsResponse,type AcknowledgeInboxSlaAlertResponse,type UnitCapacityAlertPolicy,type SetUnitCapacityAlertPolicyRequest,type SetUnitCapacityAlertPolicyResponse,type InboxCapacityAlertSnapshot,type ListCapacityAlertEpisodesResponse,type AcknowledgeCapacityAlertEpisodeResponse,type UnitSlaPolicy,type SetUnitSlaPolicyRequest,type SetUnitSlaPolicyResponse,type UnitAssignmentPolicy,type SetUnitAssignmentPolicyRequest,type SetUnitAssignmentPolicyResponse,type UnitOperationalTimezone,type SetUnitOperationalTimezoneRequest,type SetUnitOperationalTimezoneResponse,type StaffSchedule,type SetStaffScheduleRequest,type SetStaffScheduleResponse,type ListShiftMembersResponse,type EffectiveStaffShift,type UserInvitationOptions,type ListRoutingRequiredResponse,type ResolveRoutingRequiredResponse,type InboxConversation,type ListInboxMessagesResponse,type ListHandoffsResponse,type ListResolvedHandoffsResponse,type ClaimHandoffResponse,type ResolveHandoffResponse,type RequeueHandoffResponse,type ReopenHandoffResponse,type ListInboxTransferCandidatesResponse,type TransferHandoffResponse,type TakeoverHandoffResponse,type SendHumanTextMessageResponse,type CancelHumanTextMessageResponse,type InboxAvailability,type SetInboxAvailabilityRequest,type SetInboxAvailabilityResponse,type ChannelConnectionsPage } from "@zap-pronto/contracts";
 import type { paths } from "./generated.js";
 
 if (!FormatRegistry.Has("uuid")) FormatRegistry.Set("uuid", (value) =>
@@ -36,6 +36,53 @@ export interface ApiClientOptions {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly fetch?: (request: Request) => Promise<Response>;
 }
+
+export interface InboxChangeEvent {
+  readonly kind?: string;
+  readonly entityId?: string;
+}
+
+async function consumeInboxEvents(options: ApiClientOptions, unitId: string, signal: AbortSignal,
+  onChange: (event: InboxChangeEvent) => void): Promise<void> {
+  const token = await options.getAccessToken();
+  if (!token) throw new AuthenticationRequired();
+  const url = new URL("/v1/inbox/events", options.baseUrl);
+  url.searchParams.set("unitId", unitId);
+  const response = await (options.fetch ?? fetch)(new Request(url, { method: "GET", signal,
+    headers: { authorization: `Bearer ${token}`, accept: "text/event-stream", "cache-control": "no-cache" } }));
+  if (!response.ok) {
+    let error: unknown;
+    try { error = await response.json(); } catch { error = undefined; }
+    mapFailure(error, response);
+  }
+  if (!response.body) throw new InvalidApiResponse();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const cancelReader = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener("abort", cancelReader, { once: true });
+  let buffer = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2); boundary = buffer.indexOf("\n\n");
+        let eventName = "message", data = "";
+        for (const line of frame.split(/\r?\n/u)) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (eventName !== "inbox-change" || data.length === 0 || data.length > 2048) continue;
+        try { const event: unknown = JSON.parse(data); if (event && typeof event === "object") onChange(event as InboxChangeEvent); } catch { /* polling remains the safety net */ }
+      }
+    }
+  } finally {
+    signal.removeEventListener("abort", cancelReader);
+    await reader.cancel().catch(() => undefined);
+  }
+}
 function mapFailure(error: unknown, response: Response): never {
   if (Value.Check(ProblemDetailsSchema, error)) {
     if (error.status === 401) throw new AuthenticationRequired();
@@ -58,6 +105,8 @@ export function createApiClient(options: ApiClientOptions) {
     }
     if (!Value.Check(CurrentUserSchema, data)) throw new InvalidApiResponse();
     return data;
+  }, async subscribeInboxEvents(unitId: string, signal: AbortSignal, onChange: (event: InboxChangeEvent) => void): Promise<void> {
+    return consumeInboxEvents(options, unitId, signal, onChange);
   }, async listChannelConnections(): Promise<ChannelConnectionsPage> {
     const token = await options.getAccessToken();
     if (!token) throw new AuthenticationRequired();
@@ -152,6 +201,8 @@ export function createApiClient(options: ApiClientOptions) {
   },async getUnitCapacityAlertPolicy(unitId:string):Promise<UnitCapacityAlertPolicy>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.GET("/v1/units/{unitId}/capacity-alert-policy",{params:{path:{unitId}},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(UnitCapacityAlertPolicySchema,data))throw new InvalidApiResponse();return data;
   },async setUnitCapacityAlertPolicy(unitId:string,input:SetUnitCapacityAlertPolicyRequest,idempotencyKey:string):Promise<SetUnitCapacityAlertPolicyResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.POST("/v1/units/{unitId}/capacity-alert-policy",{params:{path:{unitId},header:{"idempotency-key":idempotencyKey}},body:input,headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(SetUnitCapacityAlertPolicyResponseSchema,data))throw new InvalidApiResponse();return data;
   },async getInboxCapacityAlert(unitId:string):Promise<InboxCapacityAlertSnapshot>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.GET("/v1/inbox/capacity-alert",{params:{query:{unitId}},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(InboxCapacityAlertSnapshotSchema,data))throw new InvalidApiResponse();return data;
+  },async listCapacityAlertEpisodes(input:{unitId:string;status?:"OPEN"|"ACKNOWLEDGED"|"ESCALATED"|"RESOLVED";limit?:number}):Promise<ListCapacityAlertEpisodesResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.GET("/v1/inbox/capacity-alert-episodes",{params:{query:input},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(ListCapacityAlertEpisodesResponseSchema,data))throw new InvalidApiResponse();return data;
+  },async acknowledgeCapacityAlertEpisode(episodeId:string,input:{expectedVersion:number;reason:string},idempotencyKey:string):Promise<AcknowledgeCapacityAlertEpisodeResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.POST("/v1/inbox/capacity-alert-episodes/{episodeId}/acknowledge",{params:{path:{episodeId},header:{"idempotency-key":idempotencyKey}},body:input,headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(AcknowledgeCapacityAlertEpisodeResponseSchema,data))throw new InvalidApiResponse();return data;
   },async getUnitSlaPolicy(unitId:string):Promise<UnitSlaPolicy>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.GET("/v1/units/{unitId}/sla-policy",{params:{path:{unitId}},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(UnitSlaPolicySchema,data))throw new InvalidApiResponse();return data;
   },async setUnitSlaPolicy(unitId:string,input:SetUnitSlaPolicyRequest,idempotencyKey:string):Promise<SetUnitSlaPolicyResponse>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.POST("/v1/units/{unitId}/sla-policy",{params:{path:{unitId},header:{"idempotency-key":idempotencyKey}},body:input,headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(SetUnitSlaPolicyResponseSchema,data))throw new InvalidApiResponse();return data;
   },async getUnitAssignmentPolicy(unitId:string):Promise<UnitAssignmentPolicy>{const token=await options.getAccessToken();if(!token)throw new AuthenticationRequired();const{data,error,response}=await client.GET("/v1/units/{unitId}/assignment-policy",{params:{path:{unitId}},headers:{authorization:`Bearer ${token}`,accept:"application/json"}});if(!response.ok)mapFailure(error,response);if(!Value.Check(UnitAssignmentPolicySchema,data))throw new InvalidApiResponse();return data;

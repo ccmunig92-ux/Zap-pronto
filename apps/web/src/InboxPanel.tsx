@@ -40,6 +40,7 @@ type SlaAlertSeverity=ListInboxSlaAlertsResponse["items"][number]["severity"];
 function alertLabel(severity:SlaAlertSeverity):string{switch(severity){case"MISSING_SLA":return"Sem prazo de SLA";case"DUE_SOON":return"Vence em breve";case"OVERDUE":return"SLA vencido"}}
 
 export interface InboxClient {
+  subscribeInboxEvents?(unitId:string,signal:AbortSignal,onChange:(event:{readonly kind?:string;readonly entityId?:string})=>void):Promise<void>;
   getInboxAvailability(unitId:string):Promise<InboxAvailability>;
   setInboxAvailability(input:SetInboxAvailabilityRequest,idempotencyKey:string):Promise<SetInboxAvailabilityResponse>;
   listHandoffs(input:{unitId:string;limit?:number;cursor?:string;priority?:"LOW"|"NORMAL"|"HIGH"|"URGENT";slaStatus?:"ON_TRACK"|"DUE_SOON"|"OVERDUE"}):Promise<ListHandoffsResponse>;
@@ -165,6 +166,8 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const automaticRefreshTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const automaticRefreshFailures=useRef(0);
   const automaticRefreshRunner=useRef<()=>Promise<RefreshResult>>(async()=>"skipped");
+  const realtimeAbort=useRef<AbortController|undefined>(undefined);
+  const realtimeConnected=useRef(false);
   const mounted=useRef(true);
   const authorizationFailed=useRef(false);
   const navigationCallback=useRef(onNavigationStateChange);
@@ -580,17 +583,57 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   useEffect(()=>{
     mounted.current=true;
     const cancel=()=>{if(automaticRefreshTimer.current!==undefined){clearTimeout(automaticRefreshTimer.current);automaticRefreshTimer.current=undefined}};
-    const eligible=()=>mounted.current&&!authorizationFailed.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
+    const eligible=()=>mounted.current&&!authorizationFailed.current&&!realtimeConnected.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
     const jitter=(delay:number)=>Math.max(1,Math.round(delay*(.8+Math.random()*.4)));
     const schedule=(delay:number)=>{cancel();if(eligible())automaticRefreshTimer.current=setTimeout(run,jitter(delay))};
     const run=async()=>{cancel();if(!eligible())return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
       if(result==="retryable-failure")automaticRefreshFailures.current+=1;else if(result==="success")automaticRefreshFailures.current=0;
       const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;schedule(delay)};
     const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else{cancel();setConvergence({kind:"paused"})}};
-    const online=()=>schedule(automaticRefreshRecoveryMs),offline=()=>{cancel();setConvergence({kind:"paused"})};
-    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
-    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("offline",offline)};
+    const online=()=>schedule(automaticRefreshRecoveryMs),fallback=()=>schedule(automaticRefreshRecoveryMs),offline=()=>{cancel();setConvergence({kind:"paused"})};
+    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("zap-pronto-realtime-fallback",fallback);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
+    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("zap-pronto-realtime-fallback",fallback);window.removeEventListener("offline",offline)};
   },[]);
+
+  useEffect(()=>{
+    const subscribe=client.subscribeInboxEvents;
+    if(!subscribe||!unitId||authorizationFailed.current)return;
+    let disposed=false;
+    let reconnectTimer:ReturnType<typeof setTimeout>|undefined;
+    let controller:AbortController|undefined;
+    const eligible=()=>mounted.current&&!authorizationFailed.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
+    const stop=()=>{if(reconnectTimer!==undefined){clearTimeout(reconnectTimer);reconnectTimer=undefined}controller?.abort();controller=undefined;realtimeAbort.current=undefined;realtimeConnected.current=false};
+    const restart=()=>{stop();if(eligible())void connect()};
+    const visibility=()=>{if(document.visibilityState==="visible")restart();else stop()};
+    const online=()=>restart(),offline=()=>stop();
+    const connect=async()=>{
+      if(disposed||!eligible())return;
+      controller=new AbortController();const currentController=controller;realtimeAbort.current=currentController;
+      try{
+        realtimeConnected.current=true;
+        await subscribe(unitId,currentController.signal,()=>{if(eligible())void automaticRefreshRunner.current()});
+      }catch(cause){
+        realtimeConnected.current=false;
+        if(currentController.signal.aborted||!mounted.current)return;
+        if(cause instanceof AuthenticationRequired||cause instanceof ApiProblem&&[401,403].includes(cause.problem.status)){
+          authorizationFailed.current=true;generation.current+=1;purgeSensitive();
+          if(cause instanceof AuthenticationRequired)onAuthenticationRequired();else onAuthorizationChanged();
+          return;
+        }
+        setConvergence({kind:"unstable"});
+      }finally{
+        realtimeConnected.current=false;
+        const intentionallyStopped=currentController.signal.aborted;
+        if(controller===currentController)controller=undefined;
+        if(realtimeAbort.current===currentController)realtimeAbort.current=undefined;
+        if(!intentionallyStopped&&mounted.current&&eligible())window.dispatchEvent(new Event("zap-pronto-realtime-fallback"));
+        if(!intentionallyStopped&&!disposed&&mounted.current&&eligible()&&!controller)reconnectTimer=setTimeout(()=>{reconnectTimer=undefined;void connect()},automaticRefreshRecoveryMs);
+      }
+    };
+    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("offline",offline);
+    void connect();
+    return()=>{disposed=true;document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("offline",offline);stop()};
+  },[client,unitId]);
 
   async function older() {
     if (!selected || !messages?.nextCursor || refreshing || mutationBusy) return;
