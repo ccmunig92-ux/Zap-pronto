@@ -4,7 +4,7 @@ import {claimOutboundTextEvents,processOutboundClaim,runOutboundWorker,type Outb
 
 const job={tenant_id:"10000000-0000-4000-8000-000000000001",outbox_id:"20000000-0000-4000-8000-000000000001",
   message_id:"30000000-0000-4000-8000-000000000001",channel_connection_id:"40000000-0000-4000-8000-000000000001",
-  channel_account_id:"phone-account",secret_reference:"meta-access-token",recipient_external_id:"5511999999999",body:"Mensagem segura",
+  channel_account_id:"phone-account",secret_reference:"meta-access-token",recipient_external_id:"5511999999999",body:"Mensagem segura",session_open:true,
   event_type:"channel.outbound.requested",payload_version:1,lease_token:"50000000-0000-4000-8000-000000000001"};
 const options={batchSize:10,leaseSeconds:60,pollIntervalMs:5,backoffSeconds:30};
 function poolFor(handler:(text:string,values?:unknown[])=>Promise<{rows:unknown[]}>|{rows:unknown[]}){

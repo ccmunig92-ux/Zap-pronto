@@ -135,6 +135,10 @@ export function validateComposeInvariants(compose) {
     if (JSON.stringify(networks) !== JSON.stringify([...EXPECTED_NETWORKS[serviceName]].sort())) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_NETWORKS_INVALID`);
     const depends = Object.fromEntries(Object.entries(service.depends_on ?? {}).map(([name,value]) => [name,value.condition]));
     if (JSON.stringify(depends) !== JSON.stringify(EXPECTED_DEPENDS[serviceName])) fail(`${serviceName.toUpperCase().replaceAll("-","_")}_DEPENDENCY_INVALID`);
+    if (serviceName === "worker") {
+      const metaMounts = (service.volumes ?? []).filter((entry) => entry?.target === "/run/zap-pronto-secrets/meta");
+      if (metaMounts.length !== 1 || metaMounts[0].type !== "bind" || metaMounts[0].read_only !== true) fail("WORKER_META_SECRET_MOUNT_INVALID");
+    }
   }
 }
 
