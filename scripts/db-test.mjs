@@ -463,6 +463,7 @@ try {
     globalHiddenTables.push("unit_shift_schedule_commands","unit_shift_schedule_versions");
     globalHiddenTables.push("unit_assignment_policies","unit_assignment_policy_commands");
     globalHiddenTables.push("unit_capacity_alert_policy_versions","unit_capacity_alert_policy_commands");
+    globalHiddenTables.push("unit_capacity_alert_episodes","unit_capacity_alert_episode_recipients","unit_capacity_alert_episode_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -556,6 +557,7 @@ try {
       "unit_shift_schedule_versions", "unit_shift_schedule_commands",
       "unit_assignment_policies", "unit_assignment_policy_commands",
       "unit_capacity_alert_policy_versions", "unit_capacity_alert_policy_commands",
+      "unit_capacity_alert_episodes", "unit_capacity_alert_episode_recipients", "unit_capacity_alert_episode_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",
