@@ -129,6 +129,8 @@ try {
       "0073_outbound_meta_template.sql",
       "0074_capacity_alert_episode_lifecycle.sql",
       "0075_capacity_alert_episode_api.sql",
+      "0076_inbox_realtime_notifications.sql",
+      "0077_channel_connection_admin_command.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -465,6 +467,7 @@ try {
     globalHiddenTables.push("unit_assignment_policies","unit_assignment_policy_commands");
     globalHiddenTables.push("unit_capacity_alert_policy_versions","unit_capacity_alert_policy_commands");
     globalHiddenTables.push("unit_capacity_alert_episodes","unit_capacity_alert_episode_recipients","unit_capacity_alert_episode_commands");
+    globalHiddenTables.push("channel_connection_metadata_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -559,6 +562,7 @@ try {
       "unit_assignment_policies", "unit_assignment_policy_commands",
       "unit_capacity_alert_policy_versions", "unit_capacity_alert_policy_commands",
       "unit_capacity_alert_episodes", "unit_capacity_alert_episode_recipients", "unit_capacity_alert_episode_commands",
+      "channel_connection_metadata_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",

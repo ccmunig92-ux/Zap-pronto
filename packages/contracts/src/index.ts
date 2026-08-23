@@ -45,6 +45,22 @@ export const ChannelConnectionsPageSchema = Type.Object({ items: Type.Array(Chan
   { $id: "ChannelConnectionsPage", additionalProperties: false });
 export type ChannelConnectionsPage = Static<typeof ChannelConnectionsPageSchema>;
 
+export const ChannelConnectionMetadataRequestSchema = Type.Object({
+  id: Type.Optional(Type.String({ format: "uuid" })),
+  scope: Type.Union([Type.Literal("CORPORATE"), Type.Literal("SINGLE_UNIT"), Type.Literal("SELECTED_UNITS")]),
+  displayName: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+  wabaId: Type.String({ minLength: 6, maxLength: 32, pattern: "^[0-9]+$" }),
+  phoneNumberId: Type.String({ minLength: 6, maxLength: 32, pattern: "^[0-9]+$" }),
+  status: Type.Union([Type.Literal("ACTIVE"), Type.Literal("DEGRADED"), Type.Literal("DISCONNECTED")]),
+  secretReference: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]+$" }),
+  unitIds: Type.Array(Type.String({ format: "uuid" }), { maxItems: 100, uniqueItems: true }),
+}, { $id: "ChannelConnectionMetadataRequest", additionalProperties: false });
+export type ChannelConnectionMetadataRequest = Static<typeof ChannelConnectionMetadataRequestSchema>;
+export const ChannelConnectionMetadataResponseSchema = Type.Object({
+  connection: ChannelConnectionSchema, replayed: Type.Boolean(),
+}, { $id: "ChannelConnectionMetadataResponse", additionalProperties: false });
+export type ChannelConnectionMetadataResponse = Static<typeof ChannelConnectionMetadataResponseSchema>;
+
 export const UserMembershipSchema = Type.Object({
   unitId: Type.String({ format: "uuid" }),
   unitCode: Type.String(),
