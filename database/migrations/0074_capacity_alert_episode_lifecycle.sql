@@ -107,8 +107,8 @@ BEGIN
       AND episode.policy_version=policy_record.version AND episode.status<>'RESOLVED' FOR UPDATE;
   IF NOT policy_record.enabled OR sustained_count<policy_record.minimum_queued OR capacity<=0 THEN
     IF active_episode.id IS NOT NULL THEN
-      UPDATE public.unit_capacity_alert_episodes SET status='RESOLVED',closed_at=requested_as_of,
-        last_evaluated_at=requested_as_of,version=version+1 WHERE tenant_id=tenant_id_value AND id=active_episode.id;
+      UPDATE public.unit_capacity_alert_episodes AS episode SET status='RESOLVED',closed_at=requested_as_of,
+        last_evaluated_at=requested_as_of,version=episode.version+1 WHERE episode.tenant_id=tenant_id_value AND episode.id=active_episode.id;
     END IF;
     RETURN QUERY SELECT active_episode.id,'RESOLVED'::text,false,COALESCE(active_episode.escalation_level,0),
       active_episode.cooldown_until,COALESCE(active_episode.version,1),0; RETURN;
@@ -129,8 +129,8 @@ BEGIN
     notify:=true; level:=0; next_status:='OPEN'; next_cooldown:=active_episode.cooldown_until;
   ELSIF requested_as_of>=active_episode.cooldown_until THEN
     level:=active_episode.escalation_level+1; next_status:='ESCALATED'; notify:=true; next_cooldown:=requested_as_of+requested_cooldown;
-    UPDATE public.unit_capacity_alert_episodes SET status=next_status,escalation_level=level,escalated_at=requested_as_of,
-      last_evaluated_at=requested_as_of,cooldown_until=next_cooldown,version=version+1 WHERE tenant_id=tenant_id_value AND id=active_episode.id
+    UPDATE public.unit_capacity_alert_episodes AS episode SET status=next_status,escalation_level=level,escalated_at=requested_as_of,
+      last_evaluated_at=requested_as_of,cooldown_until=next_cooldown,version=episode.version+1 WHERE episode.tenant_id=tenant_id_value AND episode.id=active_episode.id
       RETURNING * INTO active_episode;
     INSERT INTO public.unit_capacity_alert_episode_recipients(tenant_id,episode_id,recipient_user_id,recipient_role,notified_at)
       SELECT tenant_id_value,active_episode.id,membership.user_id,membership.role::text,requested_as_of
@@ -142,8 +142,8 @@ BEGIN
     SELECT count(*)::integer INTO recipient_count FROM public.unit_capacity_alert_episode_recipients recipient
       WHERE recipient.tenant_id=tenant_id_value AND recipient.episode_id=active_episode.id;
   ELSE
-    UPDATE public.unit_capacity_alert_episodes SET last_evaluated_at=requested_as_of,version=version+1
-      WHERE tenant_id=tenant_id_value AND id=active_episode.id RETURNING * INTO active_episode;
+    UPDATE public.unit_capacity_alert_episodes AS episode SET last_evaluated_at=requested_as_of,version=episode.version+1
+      WHERE episode.tenant_id=tenant_id_value AND episode.id=active_episode.id RETURNING episode.* INTO active_episode;
     SELECT count(*)::integer INTO recipient_count FROM public.unit_capacity_alert_episode_recipients recipient
       WHERE recipient.tenant_id=tenant_id_value AND recipient.episode_id=active_episode.id;
     level:=active_episode.escalation_level;next_status:=active_episode.status;next_cooldown:=active_episode.cooldown_until;
@@ -185,9 +185,9 @@ BEGIN
   IF NOT FOUND OR NOT public.current_actor_has_permission('sla_alert.acknowledge',episode_record.unit_id)
     OR episode_record.status='RESOLVED' THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_NOT_FOUND' USING ERRCODE='P0001'; END IF;
   IF episode_record.version<>requested_expected_version THEN RAISE EXCEPTION 'CAPACITY_ALERT_EPISODE_CONFLICT' USING ERRCODE='P0001'; END IF;
-  UPDATE public.unit_capacity_alert_episodes SET status='ACKNOWLEDGED',acknowledged_at=now_at,
-    acknowledged_by_user_id=public.current_app_actor_id(),acknowledgement_reason=normalized_reason,version=version+1
-    WHERE tenant_id=tenant_id_value AND id=episode_record.id RETURNING * INTO episode_record;
+  UPDATE public.unit_capacity_alert_episodes AS episode SET status='ACKNOWLEDGED',acknowledged_at=now_at,
+    acknowledged_by_user_id=public.current_app_actor_id(),acknowledgement_reason=normalized_reason,version=episode.version+1
+    WHERE episode.tenant_id=tenant_id_value AND episode.id=episode_record.id RETURNING episode.* INTO episode_record;
   UPDATE public.unit_capacity_alert_episode_recipients SET acknowledged_at=now_at
     WHERE tenant_id=tenant_id_value AND episode_id=episode_record.id AND recipient_user_id=public.current_app_actor_id();
   INSERT INTO public.unit_capacity_alert_episode_commands(tenant_id,idempotency_key,episode_id,expected_version,request_fingerprint,actor_id,result_status,result_version,result_at)
