@@ -29,6 +29,18 @@ test("successful transport result is the only path that finalizes",async()=>{
   assert.equal(mock.calls.some(call=>call.text.includes("fail_outbound_delivery_event")),false);
 });
 
+test("claim forwards only a validated tenant-scoped Meta template",async()=>{
+  const templateJob={...job,template_name:"appointment_reminder",template_language_code:"pt_BR",
+    template_components:[{type:"body",parameters:[{type:"text",text:"08:00"}]}]};
+  const mock=poolFor(text=>({rows:text.includes("claim_outbound_delivery_events")?[templateJob]:[]}));
+  const claimed=await claimOutboundTextEvents(mock.pool,options);
+  assert.deepEqual((claimed[0] as typeof claimed[number]&{template?:unknown}).template,
+    {name:"appointment_reminder",languageCode:"pt_BR",components:templateJob.template_components});
+  const invalid=poolFor(text=>({rows:text.includes("claim_outbound_delivery_events")
+    ?[{...templateJob,template_language_code:"pt_BR",template_components:{type:"body"}}]:[]}));
+  await assert.rejects(claimOutboundTextEvents(invalid.pool,options),/OUTBOUND_CLAIM_INVALID/);
+});
+
 test("invalid or failed transport never finalizes and fails with a sanitized code",async()=>{
   for(const transport of [
     {async sendText(){return{externalMessageId:"  "}}},

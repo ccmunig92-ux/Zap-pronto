@@ -32,6 +32,24 @@ test("Meta transport never sends free-form text after the customer-service windo
   assert.equal(called,false);
 });
 
+test("Meta transport sends an approved template when the customer-service window is closed",async()=>{
+  let request:Request|undefined;
+  const transport=createMetaWhatsAppTransport(config,{fetch:async(input,init)=>{
+    request=new Request(String(input),init);return Response.json({messages:[{id:"wamid.template.1"}]});
+  },secretResolver:resolver});
+  const template={name:"appointment_reminder",languageCode:"pt_BR",components:[{type:"body",parameters:[{type:"text",text:"08:00"}]}]};
+  assert.deepEqual(await transport.sendText({...input,sessionOpen:false,template},new AbortController().signal),{externalMessageId:"wamid.template.1"});
+  assert.deepEqual(await request?.json(),{messaging_product:"whatsapp",to:"5511999999999",type:"template",
+    template:{name:"appointment_reminder",language:{code:"pt_BR"},components:template.components}});
+});
+
+test("Meta transport rejects malformed template data before calling Graph",async()=>{
+  let called=false;
+  const transport=createMetaWhatsAppTransport(config,{fetch:async()=>{called=true;return Response.json({messages:[{id:"wamid.must-not-send"}]})},secretResolver:resolver});
+  await assert.rejects(transport.sendText({...input,sessionOpen:false,template:{name:"Bad Name",languageCode:"pt_BR",components:[]}},new AbortController().signal),/META_WHATSAPP_TEMPLATE_INVALID/);
+  assert.equal(called,false);
+});
+
 test("Meta config requires only version; token is resolved per connection",async()=>{
   await assert.rejects(loadMetaWhatsAppTransportConfig({}),/META_GRAPH_API_VERSION_INVALID/);
   assert.equal((await loadMetaWhatsAppTransportConfig({META_GRAPH_API_VERSION:"v23.0"})).graphApiVersion,"v23.0");

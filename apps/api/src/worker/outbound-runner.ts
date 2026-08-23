@@ -4,8 +4,9 @@ const EXTERNAL_ID=/^[^\u0000-\u001f\u007f]{1,512}$/;
 export interface OutboundWorkerClient { query(text:string,values?:unknown[]):Promise<{rows:unknown[]}>; release(error?:Error|boolean):void; }
 export interface OutboundWorkerPool { connect():Promise<OutboundWorkerClient>; }
 export interface OutboundWorkerOptions { batchSize:number;leaseSeconds:number;pollIntervalMs:number;backoffSeconds:number; }
+export interface OutboundTemplate { name:string;languageCode:string;components:readonly unknown[]; }
 export interface OutboundTransportInput { tenantId:string;messageId:string;channelConnectionId:string;
-  channelAccountId:string;secretReference:string;recipientExternalId:string;body:string;sessionOpen:boolean; }
+  channelAccountId:string;secretReference:string;recipientExternalId:string;body:string;sessionOpen:boolean;template?:OutboundTemplate; }
 export interface OutboundTransportResult { externalMessageId:string; }
 export interface OutboundTransport { sendText(input:OutboundTransportInput,signal:AbortSignal):Promise<OutboundTransportResult>; }
 
@@ -15,15 +16,31 @@ interface ClaimedOutbound { tenant_id:string;outbox_id:string;message_id:string;
 function nonEmpty(value:unknown,maximum:number):value is string{
   return typeof value==="string"&&value.length>=1&&value.length<=maximum&&value===value.trim()&&!/[\u0000-\u001f\u007f]/.test(value);
 }
+const TEMPLATE_NAME=/^[a-z0-9_]{1,128}$/;
+const TEMPLATE_LANGUAGE=/^[a-z]{2,3}(?:_[A-Z]{2})?$/;
+function optionalTemplate(value:Record<string,unknown>):OutboundTemplate|undefined{
+  const name=value.template_name,language=value.template_language_code,components=value.template_components;
+  if(name===null&&language===null&&components===null)return undefined;
+  if(!nonEmpty(name,128)||!TEMPLATE_NAME.test(name)||!nonEmpty(language,16)||!TEMPLATE_LANGUAGE.test(language)||
+    !Array.isArray(components)||components.length>20)return undefined;
+  try{
+    const encoded=JSON.stringify(components);
+    if(encoded.length>8192||/[\u0000-\u001f\u007f]/.test(encoded))return undefined;
+  }catch{return undefined;}
+  return {name,languageCode:language,components};
+}
 function claimed(row:unknown):ClaimedOutbound{
   if(!row||typeof row!=="object")throw new Error("OUTBOUND_CLAIM_INVALID");
   const value=row as Record<string,unknown>;
   if(!UUID.test(String(value.tenant_id))||!UUID.test(String(value.outbox_id))||!UUID.test(String(value.message_id))||
     !UUID.test(String(value.channel_connection_id))||!UUID.test(String(value.lease_token))||
     !nonEmpty(value.channel_account_id,512)||!nonEmpty(value.secret_reference,512)||!nonEmpty(value.recipient_external_id,512)||
-    !nonEmpty(value.body,4096)||typeof value.session_open!=="boolean"||value.event_type!=="channel.outbound.requested"||value.payload_version!==1)
+    !nonEmpty(value.body,4096)||typeof value.session_open!=="boolean"||value.event_type!=="channel.outbound.requested"||value.payload_version!==1||
+    ((value.template_name!==null&&value.template_name!==undefined)||(value.template_language_code!==null&&value.template_language_code!==undefined)||(value.template_components!==null&&value.template_components!==undefined))&&
+      !optionalTemplate(value))
     throw new Error("OUTBOUND_CLAIM_INVALID");
-  return value as unknown as ClaimedOutbound;
+  const template=optionalTemplate(value);
+  return {...value,template} as unknown as ClaimedOutbound;
 }
 function externalMessageId(result:unknown):string{
   if(!result||typeof result!=="object")throw new Error("OUTBOUND_TRANSPORT_RESULT_INVALID");
@@ -67,7 +84,9 @@ export async function processOutboundClaim(pool:OutboundWorkerPool,job:ClaimedOu
     const result=await transport.sendText({tenantId:job.tenant_id,messageId:job.message_id,
       channelConnectionId:job.channel_connection_id,channelAccountId:job.channel_account_id,
       secretReference:job.secret_reference,
-      recipientExternalId:job.recipient_external_id,body:job.body,sessionOpen:job.session_open},signal);
+      recipientExternalId:job.recipient_external_id,body:job.body,sessionOpen:job.session_open,
+      ...((job as ClaimedOutbound&{template?:OutboundTemplate}).template
+        ? {template:(job as ClaimedOutbound&{template?:OutboundTemplate}).template} : {})},signal);
     if(signal.aborted)throw new Error("OUTBOUND_ABORTED");
     await finalizeClaim(pool,job,externalMessageId(result));
   }catch(error){

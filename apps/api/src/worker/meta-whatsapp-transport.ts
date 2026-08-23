@@ -1,11 +1,13 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import type { OutboundTransport, OutboundTransportInput, OutboundTransportResult } from "./outbound-runner.js";
+import type { OutboundTransport, OutboundTransportInput, OutboundTransportResult, OutboundTemplate } from "./outbound-runner.js";
 
 const GRAPH_ORIGIN = "https://graph.facebook.com";
 const PHONE_NUMBER_ID = /^\d{6,32}$/;
 const RECIPIENT = /^\d{8,15}$/;
 const API_VERSION = /^v\d+\.\d+$/;
+const TEMPLATE_NAME=/^[a-z0-9_]{1,128}$/;
+const TEMPLATE_LANGUAGE=/^[a-z]{2,3}(?:_[A-Z]{2})?$/;
 
 export interface MetaWhatsAppTransportConfig {
   readonly graphApiVersion: string;
@@ -65,6 +67,17 @@ function integer(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum
   return value;
 }
 
+function validateTemplate(template: OutboundTemplate): OutboundTemplate {
+  if (!TEMPLATE_NAME.test(template.name) || !TEMPLATE_LANGUAGE.test(template.languageCode) ||
+      !Array.isArray(template.components) || template.components.length > 20) {
+    throw new Error("META_WHATSAPP_TEMPLATE_INVALID");
+  }
+  let encoded: string;
+  try { encoded = JSON.stringify(template.components); } catch { throw new Error("META_WHATSAPP_TEMPLATE_INVALID"); }
+  if (encoded.length > 8192 || /[\u0000-\u001f\u007f]/.test(encoded)) throw new Error("META_WHATSAPP_TEMPLATE_INVALID");
+  return template;
+}
+
 export async function loadMetaWhatsAppTransportConfig(env: NodeJS.ProcessEnv = process.env): Promise<MetaWhatsAppTransportConfig> {
   const graphApiVersion = nonEmpty("META_GRAPH_API_VERSION", env.META_GRAPH_API_VERSION, 32);
   if (!API_VERSION.test(graphApiVersion)) throw new Error("META_GRAPH_API_VERSION_INVALID");
@@ -94,8 +107,9 @@ export function createMetaWhatsAppTransport(
         tenantId: input.tenantId, channelConnectionId: input.channelConnectionId, secretReference: input.secretReference,
       }));
       if (!RECIPIENT.test(input.recipientExternalId)) throw new Error("META_WHATSAPP_RECIPIENT_INVALID");
-      if (!input.sessionOpen) throw new Error("META_WHATSAPP_TEMPLATE_REQUIRED");
-      if (!input.body || input.body.length > 4096 || /[\u0000-\u001f\u007f]/.test(input.body)) {
+      const template=input.template ? validateTemplate(input.template) : undefined;
+      if (!input.sessionOpen && !template) throw new Error("META_WHATSAPP_TEMPLATE_REQUIRED");
+      if (!template && (!input.body || input.body.length > 4096 || /[\u0000-\u001f\u007f]/.test(input.body))) {
         throw new Error("META_WHATSAPP_BODY_INVALID");
       }
       if (parentSignal.aborted) throw new Error("META_WHATSAPP_ABORTED");
@@ -105,7 +119,10 @@ export function createMetaWhatsAppTransport(
           method: "POST",
           signal: controlled.signal,
           headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
-          body: JSON.stringify({ messaging_product: "whatsapp", to: input.recipientExternalId, type: "text", text: { body: input.body, preview_url: false } }),
+          body: JSON.stringify(template
+            ? { messaging_product: "whatsapp", to: input.recipientExternalId, type: "template",
+                template: { name: template.name, language: { code: template.languageCode }, components: template.components } }
+            : { messaging_product: "whatsapp", to: input.recipientExternalId, type: "text", text: { body: input.body, preview_url: false } }),
         });
         if (!response.ok) throw new Error(`META_WHATSAPP_HTTP_${response.status}`);
         let payload: unknown;
