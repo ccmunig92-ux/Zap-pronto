@@ -23,6 +23,7 @@ import { registerStaffScheduleRoutes } from "./routes/staff-schedules.js";
 import { registerUnitAssignmentPolicyRoutes } from "./routes/unit-assignment-policy.js";
 import { registerMetaWebhookRoutes, type MetaWebhookOptions } from "./routes/meta-webhook.js";
 import { registerChannelConnectionRoutes } from "./routes/channel-connections.js";
+import { registerInboxEventsRoute, type InboxNotificationPool } from "./realtime/inbox-events.js";
 
 const safeCorrelationId = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
@@ -30,6 +31,7 @@ export interface BuildAppOptions {
   readonly identityVerifier?: IdentityVerifier;
   readonly pool?: TenantTransactionPool;
   readonly metaWebhook?: MetaWebhookOptions;
+  readonly notificationPool?: InboxNotificationPool;
 }
 
 const unavailablePool: TenantTransactionPool = {
@@ -105,6 +107,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerStaffScheduleRoutes(app, options.pool ?? unavailablePool);
   registerUnitAssignmentPolicyRoutes(app, options.pool ?? unavailablePool);
   registerChannelConnectionRoutes(app, options.pool ?? unavailablePool);
+  registerInboxEventsRoute(app, options.pool ?? unavailablePool, options.notificationPool);
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }
