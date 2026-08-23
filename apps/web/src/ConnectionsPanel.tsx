@@ -42,6 +42,8 @@ export function ConnectionsPanel({ canManage, client, onAuthenticationRequired, 
   }, [client, onAuthenticationRequired, onAuthorizationChanged]);
 
   const connections = page?.items ?? [];
+  const headerStatus = loading ? "Carregando…" : connections.length ? "Conexão cadastrada" : "Configuração pendente";
+  const headerStatusClass = loading ? "connection-status-pending" : connections.length ? "connection-status-active" : "connection-status-pending";
 
   return <section className="connections-panel" aria-labelledby="connections-heading">
     <div className="panel-heading">
@@ -49,7 +51,7 @@ export function ConnectionsPanel({ canManage, client, onAuthenticationRequired, 
         <p className="eyebrow">Integrações corporativas</p>
         <h2 id="connections-heading" tabIndex={-1}>Canais e integrações</h2>
       </div>
-      <span className="connection-status connection-status-pending" role="status">{loading ? "Carregando…" : connections.length ? "Conexão cadastrada" : "Configuração pendente"}</span>
+      <span className={`connection-status ${headerStatusClass}`} role="status">{headerStatus}</span>
     </div>
     <p>Conecte o WhatsApp Cloud API da organização para receber mensagens e enviar respostas pela Inbox.</p>
     {!canManage && <p role="status">Somente administradores do tenant podem configurar canais.</p>}
