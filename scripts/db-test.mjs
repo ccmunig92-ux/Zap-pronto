@@ -4676,7 +4676,7 @@ try {
 
       const outboundFixtureMessage="7f000000-0000-4000-8000-000000000001";
       const outboundFixtureEvent="7f000000-0000-4000-8000-000000000002";
-      await target.query(`UPDATE channel_connections connection SET status='CONNECTED'
+      await target.query(`UPDATE channel_connections connection SET status='ACTIVE'
         FROM conversations conversation WHERE conversation.id=$1
           AND connection.tenant_id=conversation.tenant_id AND connection.id=conversation.channel_connection_id`,
       [firstMaterialized.conversationId]);
