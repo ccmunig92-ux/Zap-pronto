@@ -1,12 +1,14 @@
 import pg from "pg";
 import { runInboundWorker } from "./worker/inbound-runner.js";
 import { runOutboundWorker,type OutboundTransport } from "./worker/outbound-runner.js";
-import { createMetaWhatsAppTransport, loadMetaWhatsAppTransportConfig } from "./worker/meta-whatsapp-transport.js";
+import { createFileSecretResolver, createMetaWhatsAppTransport, loadMetaWhatsAppTransportConfig } from "./worker/meta-whatsapp-transport.js";
 import { loadInboundWorkerRuntimeConfig } from "./worker/runtime-config.js";
 
 const config=await loadInboundWorkerRuntimeConfig();
+const secretRoot=config.outboundEnabled?process.env.META_WHATSAPP_SECRET_ROOT?.trim():undefined;
+if(config.outboundEnabled&&!secretRoot)throw new Error("META_WHATSAPP_SECRET_ROOT_REQUIRED");
 const outboundTransport:OutboundTransport|undefined=config.outboundEnabled
-  ?createMetaWhatsAppTransport(await loadMetaWhatsAppTransportConfig()):undefined;
+  ?createMetaWhatsAppTransport(await loadMetaWhatsAppTransportConfig(),{secretResolver:createFileSecretResolver(secretRoot!)}):undefined;
 const pool=new pg.Pool({connectionString:config.databaseUrl,max:Math.min(config.batchSize,10),connectionTimeoutMillis:5000});
 const controller=new AbortController();let stopped=false;
 function stop(){if(!stopped){stopped=true;controller.abort();}}

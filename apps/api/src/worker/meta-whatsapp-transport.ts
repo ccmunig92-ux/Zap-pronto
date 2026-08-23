@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import path from "node:path";
 import type { OutboundTransport, OutboundTransportInput, OutboundTransportResult } from "./outbound-runner.js";
 
 const GRAPH_ORIGIN = "https://graph.facebook.com";
@@ -7,13 +8,44 @@ const RECIPIENT = /^\d{8,15}$/;
 const API_VERSION = /^v\d+\.\d+$/;
 
 export interface MetaWhatsAppTransportConfig {
-  readonly accessToken: string;
   readonly graphApiVersion: string;
   readonly timeoutMs: number;
 }
 
+export interface SecretResolverContext {
+  readonly tenantId: string;
+  readonly channelConnectionId: string;
+  readonly secretReference: string;
+}
+
+/** Resolves a provider secret inside the worker process; never returns it to a caller. */
+export interface SecretResolver { resolve(context: SecretResolverContext): Promise<string>; }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SECRET_REFERENCE = /^[A-Za-z0-9._-]{1,128}$/;
+
+/** Staging adapter; Vault/KMS can implement the same contract without changing the worker. */
+export function createFileSecretResolver(rootDirectory: string): SecretResolver {
+  const root = path.resolve(nonEmpty("META_WHATSAPP_SECRET_ROOT", rootDirectory, 4096));
+  return { async resolve(context) {
+    if (!UUID.test(context.tenantId) || !UUID.test(context.channelConnectionId) || !SECRET_REFERENCE.test(context.secretReference)) {
+      throw new Error("META_WHATSAPP_SECRET_REFERENCE_INVALID");
+    }
+    try {
+      const file = path.join(root, context.tenantId, context.channelConnectionId, context.secretReference);
+      const metadata = await lstat(file);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error("not-regular");
+      const resolvedRoot = await realpath(root);
+      const resolvedFile = await realpath(file);
+      if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(`${resolvedRoot}${path.sep}`)) throw new Error("outside-root");
+      return (await readFile(resolvedFile, "utf8")).trim();
+    } catch { throw new Error("META_WHATSAPP_SECRET_UNAVAILABLE"); }
+  }};
+}
+
 export interface MetaWhatsAppTransportDependencies {
   readonly fetch?: typeof fetch;
+  readonly secretResolver: SecretResolver;
 }
 
 function nonEmpty(name: string, value: string | undefined, maximum = 4096): string {
@@ -22,18 +54,6 @@ function nonEmpty(name: string, value: string | undefined, maximum = 4096): stri
     throw new Error(`${name}_INVALID`);
   }
   return normalized;
-}
-
-async function readSecret(env: NodeJS.ProcessEnv, directName: string, fileName: string): Promise<string> {
-  const direct = env[directName];
-  const file = env[fileName]?.trim();
-  if (direct !== undefined && file) throw new Error(`${directName}_SOURCE_CONFLICT`);
-  let value = direct;
-  if (file) {
-    try { value = await readFile(file, "utf8"); }
-    catch { throw new Error(`${directName}_FILE_UNREADABLE`); }
-  }
-  return nonEmpty(directName, value);
 }
 
 function integer(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number, maximum: number): number {
@@ -49,7 +69,6 @@ export async function loadMetaWhatsAppTransportConfig(env: NodeJS.ProcessEnv = p
   const graphApiVersion = nonEmpty("META_GRAPH_API_VERSION", env.META_GRAPH_API_VERSION, 32);
   if (!API_VERSION.test(graphApiVersion)) throw new Error("META_GRAPH_API_VERSION_INVALID");
   return {
-    accessToken: await readSecret(env, "META_WHATSAPP_ACCESS_TOKEN", "META_WHATSAPP_ACCESS_TOKEN_FILE"),
     graphApiVersion,
     timeoutMs: integer(env, "META_WHATSAPP_TIMEOUT_MS", 10_000, 500, 60_000),
   };
@@ -65,12 +84,15 @@ function abortableSignal(parent: AbortSignal, timeoutMs: number): { signal: Abor
 
 export function createMetaWhatsAppTransport(
   config: MetaWhatsAppTransportConfig,
-  dependencies: MetaWhatsAppTransportDependencies = {},
+  dependencies: MetaWhatsAppTransportDependencies,
 ): OutboundTransport {
   const request = dependencies.fetch ?? fetch;
   return {
     async sendText(input: OutboundTransportInput, parentSignal: AbortSignal): Promise<OutboundTransportResult> {
       if (!PHONE_NUMBER_ID.test(input.channelAccountId)) throw new Error("META_WHATSAPP_PHONE_NUMBER_ID_INVALID");
+      const accessToken = nonEmpty("META_WHATSAPP_ACCESS_TOKEN", await dependencies.secretResolver.resolve({
+        tenantId: input.tenantId, channelConnectionId: input.channelConnectionId, secretReference: input.secretReference,
+      }));
       if (!RECIPIENT.test(input.recipientExternalId)) throw new Error("META_WHATSAPP_RECIPIENT_INVALID");
       if (!input.body || input.body.length > 4096 || /[\u0000-\u001f\u007f]/.test(input.body)) {
         throw new Error("META_WHATSAPP_BODY_INVALID");
@@ -81,7 +103,7 @@ export function createMetaWhatsAppTransport(
         const response = await request(`${GRAPH_ORIGIN}/${config.graphApiVersion}/${encodeURIComponent(input.channelAccountId)}/messages`, {
           method: "POST",
           signal: controlled.signal,
-          headers: { authorization: `Bearer ${config.accessToken}`, "content-type": "application/json" },
+          headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
           body: JSON.stringify({ messaging_product: "whatsapp", to: input.recipientExternalId, type: "text", text: { body: input.body, preview_url: false } }),
         });
         if (!response.ok) throw new Error(`META_WHATSAPP_HTTP_${response.status}`);
