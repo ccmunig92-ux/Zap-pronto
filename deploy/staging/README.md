@@ -25,7 +25,8 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
 - O password do owner contido na migration URL corresponde a `postgres_password`.
 - `META_WHATSAPP_SECRET_ROOT` é um diretório absoluto fora do checkout. O Compose o monta somente como
-  bind read-only no worker em `/run/zap-pronto-secrets/meta`; cada arquivo deve seguir
+  bind read-only no worker em `/run/zap-pronto-secrets/meta`; o diretório deve ser regular, sem symlink,
+  pertencer a UID/GID `1000:1000` e usar modo `0750`. Cada arquivo deve seguir
   `<tenantId>/<channelConnectionId>/<secret_reference>`. O worker permanece desabilitado até esse diretório
   conter referências reais provisionadas pelo operador; nenhum token é lido do `.env`.
 - `META_WEBHOOK_ENABLED` permanece `false` por padrão. Para habilitá-lo, o operador deve criar os arquivos
@@ -50,7 +51,8 @@ essa variável só deve ser criada depois de configurar reviewer obrigatório e 
 Antes de iniciar o stack, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.
 O comando não imprime nem lê o conteúdo dos secrets; exige imagens por digest, arquivos fora do repositório
 com a matriz `70:70/0400` para PostgreSQL e `1000:1000/0400` para API, endpoints OIDC HTTPS coerentes e os
-limites mínimos do manifesto. A validação operacional de owner/mode exige um host POSIX.
+limites mínimos do manifesto. A árvore Meta também é validada fora do checkout (`1000:1000/0750`, sem symlinks).
+A validação operacional de owner/mode exige um host POSIX.
 
 1. `docker compose --env-file deploy/staging/.env -f deploy/staging/compose.yaml config --quiet` passa.
 2. Apenas `web` possui `ports`, com `host_ip` igual a `127.0.0.1`; `postgres` e `api` não possuem portas.

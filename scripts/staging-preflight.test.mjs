@@ -3,7 +3,7 @@ import test from "node:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { validateComposeInvariants, validateEnvironment, validateResources, validateSecrets, validateSecretMetadata, parseEnv } from "./staging-preflight.mjs";
+import { validateComposeInvariants, validateEnvironment, validateResources, validateSecrets, validateSecretMetadata, validateMetaSecretRoot, parseEnv } from "./staging-preflight.mjs";
 
 const digest = "a".repeat(64);
 const validEnv = { ZAP_API_IMAGE:`ghcr.io/acme/api@sha256:${digest}`, ZAP_WEB_IMAGE:`ghcr.io/acme/web@sha256:${digest}`,
@@ -95,4 +95,16 @@ test("rejects a secret reached through a symlinked parent", {skip: typeof proces
     await assert.rejects(validateSecrets({POSTGRES_PASSWORD_FILE:throughLink,
       DATABASE_MIGRATION_URL_FILE:throughLink,DATABASE_RUNTIME_URL_FILE:throughLink},process.cwd()), /SYMLINK_REJECTED/);
   } finally { rmSync(directory,{recursive:true,force:true}); }
+});
+
+test("requires the Meta secret root to be an external absolute directory", async () => {
+  await assert.rejects(validateMetaSecretRoot("relative/meta", process.cwd()), /META_WHATSAPP_SECRET_ROOT_NOT_ABSOLUTE/);
+});
+
+test("rejects a symlinked Meta secret root", {skip: typeof process.getuid !== "function"}, async () => {
+  const directory = mkdtempSync(join(tmpdir(), "zap-meta-root-link-"));
+  try {
+    const real = join(directory, "real"); mkdirSync(real); const link = join(directory, "linked"); symlinkSync(real, link, "dir");
+    await assert.rejects(validateMetaSecretRoot(link, process.cwd()), /META_WHATSAPP_SECRET_ROOT_SYMLINK_REJECTED/);
+  } finally { rmSync(directory, {recursive:true, force:true}); }
 });
