@@ -128,9 +128,11 @@ test("every versioned route has an explicit policy, scope and coherent error con
     ["GET", "/v1/inbox/active", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/availability", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/capacity-alert", "permission", "sla_alert.read", "unit"],
+    ["GET", "/v1/inbox/capacity-alert-episodes", "permission", "sla_alert.read", "unit"],
     ["GET", "/v1/inbox/sla-alerts", "permission", "sla_alert.read", "unit"],
     ["GET", "/v1/inbox/conversations/:conversationId", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/conversations/:conversationId/messages", "permission", "conversation.read", "unit"],
+    ["GET", "/v1/inbox/events", "permission", "conversation.read", "unit"],
     ["GET", "/v1/inbox/handoffs", "permission", "handoff.read", "unit"],
     ["GET", "/v1/inbox/resolved", "permission", "handoff.history.read", "unit"],
     ["GET", "/v1/inbox/handoffs/:handoffId/transfer-candidates", "permission", "handoff.transfer", "unit"],
@@ -158,6 +160,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
     ["POST", "/v1/inbox/handoffs/:handoffId/claim", "permission", "handoff.claim", "unit"],
     ["POST", "/v1/inbox/availability", "permission", "conversation.read", "unit"],
     ["POST", "/v1/inbox/sla-alerts/:handoffId/acknowledge", "permission", "sla_alert.acknowledge", "unit"],
+    ["POST", "/v1/inbox/capacity-alert-episodes/:episodeId/acknowledge", "permission", "sla_alert.acknowledge", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/requeue", "permission", "handoff.requeue", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/reopen", "permission", "handoff.reopen", "unit"],
     ["POST", "/v1/inbox/handoffs/:handoffId/resolve", "permission", "handoff.resolve", "unit"],
@@ -176,6 +179,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
   const expectedErrors: Record<string, readonly number[]> = {
     "GET /v1/channel-connections": [400, 401, 403, 409, 500, 503],
     "GET /v1/inbox/active": [400,401,403,404,409],
+    "GET /v1/inbox/capacity-alert-episodes": [400,401,403,404,409,500,503],
     "GET /v1/inbox/conversations/:conversationId": [400,401,403,404],
     "GET /v1/inbox/conversations/:conversationId/messages": [400,401,403,404],
     "GET /v1/inbox/handoffs": [400, 401, 403, 404, 409],
@@ -183,6 +187,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
     "GET /v1/inbox/supervised": [400,401,403,404,409],
     "GET /v1/inbox/routing-required": [400,401,403,404,409,422],
     "POST /v1/inbox/handoffs/:handoffId/claim": [400, 401, 403, 404, 409],
+    "POST /v1/inbox/capacity-alert-episodes/:episodeId/acknowledge": [400,401,403,404,409,500,503],
     "POST /v1/inbox/handoffs/:handoffId/reopen": [400, 401, 403, 404, 409],
     "POST /v1/inbox/handoffs/:handoffId/requeue": [400, 401, 403, 404, 409],
     "POST /v1/inbox/handoffs/:handoffId/resolve": [400, 401, 403, 404, 409],
@@ -204,7 +209,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
   for (const [key, statuses] of Object.entries(expectedErrors)) {
     const [method, routeUrl] = key.split(" ") as [string, string];
     const openApiUrl = routeUrl.replaceAll(":userId", "{userId}").replaceAll(":invitationId", "{invitationId}")
-      .replaceAll(":handoffId", "{handoffId}");
+      .replaceAll(":handoffId", "{handoffId}").replaceAll(":episodeId", "{episodeId}");
     const normalizedOpenApiUrl=openApiUrl.replaceAll(":receiptId","{receiptId}").replaceAll(":conversationId","{conversationId}").replaceAll(":messageId","{messageId}").replaceAll(":unitId","{unitId}");
     const responses = document.paths[normalizedOpenApiUrl]?.[method.toLowerCase()]?.responses ?? {};
     for (const status of statuses) assert.ok(String(status) in responses, `${key}:MISSING_${status}`);
@@ -726,3 +731,5 @@ test("unit SLA policy routes canonicalize four targets and sanitize conflicts",a
 test("unit SLA policy rejects duplicate priorities before SQL command",async()=>{let command=false;const unitId="33333333-3333-4333-8333-333333333333",pool:TenantTransactionPool={async connect(){return{async query(sql){if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("set_unit_sla_policy"))command=true;return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}});const response=await app.inject({method:"POST",url:`/v1/units/${unitId}/sla-policy`,headers:{authorization:"Bearer token","idempotency-key":"sla-policy-command-1"},payload:{expectedVersion:0,targets:[{priority:"LOW",targetMinutes:1},{priority:"LOW",targetMinutes:2},{priority:"HIGH",targetMinutes:3},{priority:"URGENT",targetMinutes:4}]}});assert.equal(response.statusCode,400);assert.equal(response.json().detail,"INVALID_REQUEST");assert.equal(command,false);await app.close();});
 
 test("capacity alert policy and aggregate snapshot are unit-scoped, no-store and canonical",async()=>{const unitId="33333333-3333-4333-8333-333333333333",calls:Array<{sql:string;values?:readonly unknown[]}>=[],at=new Date("2026-08-19T12:00:00Z");const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push(values?{sql,values}:{sql});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("get_unit_capacity_alert_policy"))return{rows:[{unitId,enabled:true,minimumQueued:3,sustainedMinutes:10,version:1,updatedAt:at}]};if(sql.includes("set_unit_capacity_alert_policy"))return{rows:[{unitId,enabled:true,minimumQueued:4,sustainedMinutes:15,version:2,updatedAt:at,replayed:false}]};if(sql.includes("get_unit_capacity_alert_snapshot"))return{rows:[{unitId,policyVersion:2,enabled:true,minimumQueued:4,sustainedMinutes:15,queuedCount:5,sustainedQueuedCount:4,oldestQueuedAt:new Date("2026-08-19T11:40:00Z"),availableCapacity:2,state:"ACTIVE",evaluatedAt:at}]};return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}}),headers={authorization:"Bearer token"};const read=await app.inject({method:"GET",url:`/v1/units/${unitId}/capacity-alert-policy`,headers});assert.equal(read.statusCode,200);assert.equal(read.headers["cache-control"],"no-store");const saved=await app.inject({method:"POST",url:`/v1/units/${unitId}/capacity-alert-policy`,headers:{...headers,"idempotency-key":"capacity-alert-command-1"},payload:{expectedVersion:1,mode:"ENABLED",minimumQueued:4,sustainedMinutes:15}});assert.equal(saved.statusCode,200);const snapshot=await app.inject({method:"GET",url:`/v1/inbox/capacity-alert?unitId=${unitId}`,headers});assert.equal(snapshot.statusCode,200);assert.equal(snapshot.headers["cache-control"],"no-store");assert.deepEqual(snapshot.json(),{unitId,policyVersion:2,enabled:true,minimumQueued:4,sustainedMinutes:15,queuedCount:5,sustainedQueuedCount:4,oldestQueuedAt:"2026-08-19T11:40:00.000Z",availableCapacity:2,state:"ACTIVE",evaluatedAt:"2026-08-19T12:00:00.000Z"});const command=calls.find(call=>call.sql.includes("set_unit_capacity_alert_policy"));assert.deepEqual(command?.values?.slice(0,5),[unitId,true,4,15,1]);assert.ok(calls.some(call=>call.sql.includes("get_unit_capacity_alert_snapshot")));await app.close();});
+
+test("capacity alert episodes use tenant-unit scoped list and idempotent acknowledgement",async()=>{const unitId="33333333-3333-4333-8333-333333333333",episodeId="44444444-4444-4444-8444-444444444444",at=new Date("2026-08-23T12:00:00Z"),calls:Array<{sql:string;values?:readonly unknown[]}>=[];const pool:TenantTransactionPool={async connect(){return{async query(sql,values){calls.push(values?{sql,values}:{sql});if(sql.includes("resolve_oidc_principal"))return{rows:[{tenant_id:"11111111-1111-4111-8111-111111111111",user_id:"22222222-2222-4222-8222-222222222222"}]};if(sql.includes("current_actor_has_permission"))return{rows:[{allowed:true}]};if(sql.includes("list_unit_capacity_alert_episodes"))return{rows:[{episodeId,unitId,policyVersion:1,status:"OPEN",openedAt:at,lastEvaluatedAt:at,cooldownUntil:new Date("2026-08-23T12:15:00Z"),escalationLevel:0,acknowledgedAt:null,acknowledgedByUserId:null,acknowledgementReason:null,escalatedAt:null,closedAt:null,version:1,recipientCount:2}]};if(sql.includes("resolve_unit_capacity_alert_episode"))return{rows:[{unitId}]};if(sql.includes("acknowledge_capacity_alert_episode"))return{rows:[{episodeId,status:"ACKNOWLEDGED",acknowledgedAt:at,acknowledgedByUserId:"22222222-2222-4222-8222-222222222222",version:2,replayed:false}]};return{rows:[]}},release(){}}}};const app=await buildApp({pool,identityVerifier:{async verifyBearer(){return{issuer:"https://issuer.example",audience:"zap-pronto",subject:"subject-1"}}}}),headers={authorization:"Bearer token"};const listed=await app.inject({method:"GET",url:`/v1/inbox/capacity-alert-episodes?unitId=${unitId}&status=OPEN`,headers});assert.equal(listed.statusCode,200);assert.equal(listed.headers["cache-control"],"no-store");assert.equal(listed.json().items[0].episodeId,episodeId);const ack=await app.inject({method:"POST",url:`/v1/inbox/capacity-alert-episodes/${episodeId}/acknowledge`,headers:{...headers,"idempotency-key":"episode-ack-1"},payload:{expectedVersion:1,reason:"Supervisor reviewed queue"}});assert.equal(ack.statusCode,200);assert.equal(ack.json().status,"ACKNOWLEDGED");assert.ok(calls.some(call=>call.sql.includes("resolve_unit_capacity_alert_episode")));assert.ok(calls.some(call=>call.sql.includes("acknowledge_capacity_alert_episode")));await app.close();});

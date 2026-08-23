@@ -470,6 +470,23 @@ export const InboxCapacityAlertSnapshotSchema=Type.Object({unitId:Type.String({f
   queuedCount:Type.Integer({minimum:0}),sustainedQueuedCount:Type.Integer({minimum:0}),oldestQueuedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
   availableCapacity:Type.Integer({minimum:0}),state:Type.Union([Type.Literal("ACTIVE"),Type.Literal("CLEAR")]),evaluatedAt:Type.String({format:"date-time"})},{additionalProperties:false});
 export type InboxCapacityAlertSnapshot=Static<typeof InboxCapacityAlertSnapshotSchema>;
+export const CapacityAlertEpisodeStatusSchema=Type.Union([Type.Literal("OPEN"),Type.Literal("ACKNOWLEDGED"),Type.Literal("ESCALATED"),Type.Literal("RESOLVED")],{$id:"CapacityAlertEpisodeStatus"});
+export type CapacityAlertEpisodeStatus=Static<typeof CapacityAlertEpisodeStatusSchema>;
+export const ListCapacityAlertEpisodesQuerySchema=Type.Object({unitId:Type.String({format:"uuid"}),status:Type.Optional(CapacityAlertEpisodeStatusSchema),limit:Type.Optional(Type.Integer({minimum:1,maximum:100,default:25}))},{additionalProperties:false});
+export type ListCapacityAlertEpisodesQuery=Static<typeof ListCapacityAlertEpisodesQuerySchema>;
+export const CapacityAlertEpisodeSchema=Type.Object({episodeId:Type.String({format:"uuid"}),unitId:Type.String({format:"uuid"}),policyVersion:Type.Integer({minimum:1}),status:CapacityAlertEpisodeStatusSchema,
+  openedAt:Type.String({format:"date-time"}),lastEvaluatedAt:Type.String({format:"date-time"}),cooldownUntil:Type.String({format:"date-time"}),escalationLevel:Type.Integer({minimum:0}),
+  acknowledgedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),acknowledgedByUserId:Type.Union([Type.String({format:"uuid"}),Type.Null()]),
+  acknowledgementReason:Type.Union([Type.String({minLength:3,maxLength:500}),Type.Null()]),escalatedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),
+  closedAt:Type.Union([Type.String({format:"date-time"}),Type.Null()]),version:Type.Integer({minimum:1}),recipientCount:Type.Integer({minimum:0})},{$id:"CapacityAlertEpisode",additionalProperties:false});
+export type CapacityAlertEpisode=Static<typeof CapacityAlertEpisodeSchema>;
+export const ListCapacityAlertEpisodesResponseSchema=Type.Object({items:Type.Array(CapacityAlertEpisodeSchema)},{additionalProperties:false});
+export type ListCapacityAlertEpisodesResponse=Static<typeof ListCapacityAlertEpisodesResponseSchema>;
+export const CapacityAlertEpisodeParamsSchema=Type.Object({episodeId:Type.String({format:"uuid"})},{additionalProperties:false});
+export const AcknowledgeCapacityAlertEpisodeRequestSchema=Type.Object({expectedVersion:Type.Integer({minimum:1}),reason:Type.String({minLength:3,maxLength:500})},{additionalProperties:false});
+export type AcknowledgeCapacityAlertEpisodeRequest=Static<typeof AcknowledgeCapacityAlertEpisodeRequestSchema>;
+export const AcknowledgeCapacityAlertEpisodeResponseSchema=Type.Object({episodeId:Type.String({format:"uuid"}),status:CapacityAlertEpisodeStatusSchema,acknowledgedAt:Type.String({format:"date-time"}),acknowledgedByUserId:Type.String({format:"uuid"}),version:Type.Integer({minimum:1}),replayed:Type.Boolean()},{additionalProperties:false});
+export type AcknowledgeCapacityAlertEpisodeResponse=Static<typeof AcknowledgeCapacityAlertEpisodeResponseSchema>;
 export const UnitSlaPolicyParamsSchema=Type.Object({unitId:Type.String({format:"uuid"})},{additionalProperties:false});
 export const UnitSlaTargetSchema=Type.Object({priority:HandoffPrioritySchema,targetMinutes:Type.Integer({minimum:1,maximum:10080})},{additionalProperties:false});
 export type UnitSlaTarget=Static<typeof UnitSlaTargetSchema>;
