@@ -13,14 +13,24 @@ SET search_path=pg_catalog,public AS $$
 DECLARE
   changed_tenant uuid;
   changed_unit uuid;
+  previous_unit uuid;
+  current_unit uuid;
   changed_entity uuid;
 BEGIN
   changed_tenant := COALESCE(NEW.tenant_id, OLD.tenant_id);
   changed_entity := COALESCE(NEW.id, OLD.id);
   IF TG_TABLE_NAME = 'conversations' THEN
-    changed_unit := COALESCE(NEW.unit_id, OLD.unit_id);
+    previous_unit := OLD.unit_id;
+    current_unit := NEW.unit_id;
+    changed_unit := COALESCE(current_unit, previous_unit);
   ELSIF TG_TABLE_NAME = 'human_handoffs' THEN
-    changed_unit := COALESCE(NEW.unit_id, OLD.unit_id);
+    previous_unit := OLD.unit_id;
+    current_unit := NEW.unit_id;
+    changed_unit := COALESCE(current_unit, previous_unit);
+  ELSIF TG_TABLE_NAME = 'unit_capacity_alert_episodes' THEN
+    previous_unit := OLD.unit_id;
+    current_unit := NEW.unit_id;
+    changed_unit := COALESCE(current_unit, previous_unit);
   ELSIF TG_TABLE_NAME = 'messages' THEN
     SELECT c.unit_id INTO changed_unit
       FROM public.conversations c
@@ -32,6 +42,12 @@ BEGIN
       'tenantId', changed_tenant, 'unitId', changed_unit,
       'kind', TG_TABLE_NAME, 'entityId', changed_entity
     )::text);
+    IF previous_unit IS NOT NULL AND current_unit IS NOT NULL AND previous_unit <> current_unit THEN
+      PERFORM pg_notify('zap_pronto_inbox', json_build_object(
+        'tenantId', changed_tenant, 'unitId', previous_unit,
+        'kind', TG_TABLE_NAME, 'entityId', changed_entity
+      )::text);
+    END IF;
   END IF;
   RETURN COALESCE(NEW, OLD);
 END $$;
@@ -49,6 +65,11 @@ FOR EACH ROW EXECUTE FUNCTION notify_inbox_change();
 DROP TRIGGER IF EXISTS human_handoffs_inbox_realtime_notify ON human_handoffs;
 CREATE TRIGGER human_handoffs_inbox_realtime_notify
 AFTER INSERT OR UPDATE ON human_handoffs
+FOR EACH ROW EXECUTE FUNCTION notify_inbox_change();
+
+DROP TRIGGER IF EXISTS capacity_alert_episodes_inbox_realtime_notify ON unit_capacity_alert_episodes;
+CREATE TRIGGER capacity_alert_episodes_inbox_realtime_notify
+AFTER INSERT OR UPDATE ON unit_capacity_alert_episodes
 FOR EACH ROW EXECUTE FUNCTION notify_inbox_change();
 
 REVOKE ALL ON FUNCTION notify_inbox_change() FROM PUBLIC;
