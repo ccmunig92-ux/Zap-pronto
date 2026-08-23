@@ -123,6 +123,8 @@ try {
       "0067_sustained_demand_capacity_alert.sql",
       "0068_channel_connection_metadata.sql",
       "0069_channel_connection_status_canonical.sql",
+      "0070_outbound_claim_candidate_integrity.sql",
+      "0071_outbound_claim_secret_reference.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
