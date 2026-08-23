@@ -34,6 +34,7 @@ export const apiClient = {
     }
     return pendingCurrentUser;
   },
+  subscribeInboxEvents(...parameters:Parameters<typeof transportClient.subscribeInboxEvents>){return transportClient.subscribeInboxEvents(...parameters)},
   getUserInvitationOptions() {
     return transportClient.getUserInvitationOptions();
   },
