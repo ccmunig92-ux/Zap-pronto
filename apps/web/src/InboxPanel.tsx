@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AcknowledgeInboxSlaAlertResponse, InboxAvailability, InboxCapacityAlertSnapshot, InboxConversation, InboxHandoff, InboxMessage, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxSlaAlertsResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
+import type { AcknowledgeCapacityAlertEpisodeResponse, AcknowledgeInboxSlaAlertResponse, CapacityAlertEpisode, InboxAvailability, InboxCapacityAlertSnapshot, InboxConversation, InboxHandoff, InboxMessage, ListCapacityAlertEpisodesResponse, ListHandoffsResponse, ListInboxMessagesResponse, ListInboxSlaAlertsResponse, ListInboxTransferCandidatesResponse, ListResolvedHandoffsResponse, ReopenReason, ResolvedInboxHandoff, SetInboxAvailabilityRequest, SetInboxAvailabilityResponse } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 
 function DeliveryLabel({ message }: { readonly message: InboxMessage }) {
@@ -38,6 +38,7 @@ function dispositionLabel(disposition: ResolvedInboxHandoff["disposition"]): str
 }
 type SlaAlertSeverity=ListInboxSlaAlertsResponse["items"][number]["severity"];
 function alertLabel(severity:SlaAlertSeverity):string{switch(severity){case"MISSING_SLA":return"Sem prazo de SLA";case"DUE_SOON":return"Vence em breve";case"OVERDUE":return"SLA vencido"}}
+function capacityEpisodeStatusLabel(status:CapacityAlertEpisode["status"]):string{switch(status){case"OPEN":return"Aberto";case"ACKNOWLEDGED":return"Reconhecido";case"ESCALATED":return"Escalonado";case"RESOLVED":return"Resolvido"}}
 
 export interface InboxClient {
   subscribeInboxEvents?(unitId:string,signal:AbortSignal,onChange:(event:{readonly kind?:string;readonly entityId?:string})=>void):Promise<void>;
@@ -58,6 +59,8 @@ export interface InboxClient {
   listInboxSlaAlerts(input:{unitId:string;limit?:number;cursor?:string;severity?:SlaAlertSeverity;priority?:InboxHandoff["priority"]}):Promise<ListInboxSlaAlertsResponse>;
   acknowledgeInboxSlaAlert(handoffId:string,expectedVersion:number,idempotencyKey:string):Promise<AcknowledgeInboxSlaAlertResponse>;
   getInboxCapacityAlert?(unitId:string):Promise<InboxCapacityAlertSnapshot>;
+  listCapacityAlertEpisodes?(input:{unitId:string;status?:CapacityAlertEpisode["status"];limit?:number}):Promise<ListCapacityAlertEpisodesResponse>;
+  acknowledgeCapacityAlertEpisode?(episodeId:string,input:{expectedVersion:number;reason:string},idempotencyKey:string):Promise<AcknowledgeCapacityAlertEpisodeResponse>;
   getInboxConversation(id: string): Promise<InboxConversation>;
   listInboxConversationMessages(id: string, input?: { limit?: number; cursor?: string; before?:string }): Promise<ListInboxMessagesResponse>;
   sendHumanTextMessage(id: string, input: { body: string; expectedConversationVersion: number }, idempotencyKey: string): Promise<unknown>;
@@ -67,7 +70,7 @@ export interface InboxClient {
 type TransferReason = "SHIFT_CHANGE" | "LOAD_BALANCING" | "SPECIALIZED_SUPPORT" | "OPERATIONAL_CONTINUITY";
 type ResolveDisposition = "RESOLVED" | "DUPLICATE" | "CUSTOMER_WITHDREW" | "EXTERNAL_REFERRAL";
 
-type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "slaAlerts" | "capacityAlert" | "detail" | "messages" | "availability"; readonly cause: unknown };
+type ScopedReadError = { readonly scope: "queue" | "active" | "supervised" | "resolved" | "slaAlerts" | "capacityAlert" | "capacityEpisodes" | "detail" | "messages" | "availability"; readonly cause: unknown };
 type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
@@ -101,11 +104,14 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [resolved,setResolved]=useState<ListResolvedHandoffsResponse>();
   const [slaAlerts,setSlaAlerts]=useState<ListInboxSlaAlertsResponse>();
   const [capacityAlert,setCapacityAlert]=useState<InboxCapacityAlertSnapshot>();
+  const [capacityEpisodes,setCapacityEpisodes]=useState<ListCapacityAlertEpisodesResponse>();
+  const [capacityEpisodeReason,setCapacityEpisodeReason]=useState("Reconhecido pela operação");
   const [capacityAlertUnavailable,setCapacityAlertUnavailable]=useState(false);
   const [slaAlertSeverity,setSlaAlertSeverity]=useState<""|SlaAlertSeverity>("");
   const [slaAlertPriority,setSlaAlertPriority]=useState<""|InboxHandoff["priority"]>("");
   const [loadingSlaAlertPage,setLoadingSlaAlertPage]=useState(false);
   const [acknowledgingAlertId,setAcknowledgingAlertId]=useState<string>();
+  const [acknowledgingEpisodeId,setAcknowledgingEpisodeId]=useState<string>();
   const [resolvedFilters,setResolvedFilters]=useState<ResolvedFilters>(emptyResolvedFilters);
   const [appliedResolvedFilters,setAppliedResolvedFilters]=useState<ResolvedFilters>(emptyResolvedFilters);
   const [selected, setSelected] = useState<InboxSelection>();
@@ -163,6 +169,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const resolvedPageFlight=useRef(false);
   const slaAlertPageFlight=useRef(false);
   const slaAlertIntent=useRef<{id:string;version:number;key:string}|undefined>(undefined);
+  const capacityEpisodeIntent=useRef<{id:string;version:number;key:string}|undefined>(undefined);
   const automaticRefreshTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const automaticRefreshFailures=useRef(0);
   const automaticRefreshRunner=useRef<()=>Promise<RefreshResult>>(async()=>"skipped");
@@ -175,9 +182,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [loadingActivePage, setLoadingActivePage] = useState(false);
   const [loadingSupervisedPage,setLoadingSupervisedPage]=useState(false);
   const [loadingResolvedPage,setLoadingResolvedPage]=useState(false);
-  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || savingAvailability || cancellingId !== undefined||acknowledgingAlertId!==undefined;
+  const mutationBusy = claiming || resolving || requeueing || reopening || transferring || takingOver || sending || savingAvailability || cancellingId !== undefined||acknowledgingAlertId!==undefined||acknowledgingEpisodeId!==undefined;
   const navigationBlocked=mutationBusy||Boolean(operationLock.current)||resolveOpen||reopenOpen||transferOpen||takeoverConfirmOpen||availabilityOpen;
   const navigationDirty=draft!==""||resolveDisposition!==""||reopenReason!==""||transferTargetUserId!==""||transferReason!==""
+    ||capacityEpisodeReason!=="Reconhecido pela operação"
     ||claimIntent.current!==undefined||sendIntent.current!==undefined||resolveIntent.current!==undefined
     ||requeueIntent.current!==undefined||reopenIntent.current!==undefined||transferIntent.current!==undefined||takeoverIntent.current!==undefined
     ||cancelIntent.current!==undefined||availabilityIntent.current!==undefined||availabilityOpen;
@@ -220,6 +228,9 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       return{unavailable:true};
     }
   };
+  const capacityEpisodesFirst=(capturedUnit:string)=>slaAlertReadUnitIds.includes(capturedUnit)&&client.listCapacityAlertEpisodes
+    ?client.listCapacityAlertEpisodes({unitId:capturedUnit,limit:25})
+    :Promise.resolve({items:[]} satisfies ListCapacityAlertEpisodesResponse);
 
   function queueInput(capturedUnit: string, cursor?: string,
     priority: typeof priorityFilter = priorityFilter, slaStatus: typeof slaFilter = slaFilter) {
@@ -269,16 +280,17 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     cancelIntent.current = undefined;
     availabilityIntent.current=undefined;
     slaAlertIntent.current=undefined;
+    capacityEpisodeIntent.current=undefined;
   }
 
   function purgeSensitive() {
-    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setSlaAlerts(undefined);setCapacityAlert(undefined);setCapacityAlertUnavailable(false);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
-    setDraft(""); setClosedNotice(undefined); setError(undefined); clearIntents();
+    setQueue(undefined); setActive(undefined);setSupervised(undefined);setResolved(undefined);setSlaAlerts(undefined);setCapacityAlert(undefined);setCapacityEpisodes(undefined);setCapacityAlertUnavailable(false);setAvailability(undefined); setSelected(undefined); setDetail(undefined); setMessages(undefined);
+    setDraft(""); setCapacityEpisodeReason("Reconhecido pela operação"); setClosedNotice(undefined); setError(undefined); clearIntents();
     operationLock.current = undefined;
     refreshFlight.current = false;
     queuePageFlight.current = false; activePageFlight.current = false;supervisedPageFlight.current=false;resolvedPageFlight.current=false;slaAlertPageFlight.current=false;
     setClaiming(false); setResolving(false);setResolveOpen(false);setResolveDisposition(""); setRequeueing(false);setReopening(false);setReopenOpen(false);setReopenReason(""); setTransferring(false);setTakingOver(false);setTakeoverConfirmOpen(false);setLoadingTransferCandidates(false);setTransferCandidates(undefined);setTransferTargetUserId("");setTransferReason("");setTransferOpen(false); setSending(false); setCancellingId(undefined); setRefreshing(false);
-    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setLoadingSlaAlertPage(false);setAcknowledgingAlertId(undefined);setAvailabilityOpen(false);setSavingAvailability(false);
+    setLoadingQueuePage(false); setLoadingActivePage(false);setLoadingSupervisedPage(false);setLoadingResolvedPage(false);setLoadingSlaAlertPage(false);setAcknowledgingAlertId(undefined);setAcknowledgingEpisodeId(undefined);capacityEpisodeIntent.current=undefined;setAvailabilityOpen(false);setSavingAvailability(false);
     setConvergence({kind:"paused"});
   }
 
@@ -331,9 +343,10 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("resolved",resolvedFirst(unitId)),
       scoped("slaAlerts",slaAlertsFirst(unitId)),
       scoped("capacityAlert",capacityAlertFirst(unitId)),
+      scoped("capacityEpisodes",capacityEpisodesFirst(unitId)),
       scoped("availability",client.getInboxAvailability(unitId)),
-    ]).then(([queued, mine,others,closed,alerts,nextCapacityAlert,nextAvailability]) => {
-      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
+    ]).then(([queued, mine,others,closed,alerts,nextCapacityAlert,nextCapacityEpisodes,nextAvailability]) => {
+      if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityEpisodes(nextCapacityEpisodes);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
     }).catch((caught: unknown) => fail(caught, g)).finally(()=>{if(g===generation.current)initialLoadFlight.current=false});
     return () => { generation.current += 1;initialLoadFlight.current=false };
   }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
@@ -519,6 +532,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       scoped("resolved",historyUnitIds.includes(capturedUnit)?collectWindow(resolvedTarget,limit=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit),limit}),(cursor,limit)=>client.listResolvedInboxHandoffs({...resolvedInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListResolvedHandoffsResponse)),
       scoped("slaAlerts",slaAlertReadUnitIds.includes(capturedUnit)?collectWindow(alertsTarget,limit=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit),limit}),(cursor,limit)=>client.listInboxSlaAlerts({...slaAlertInput(capturedUnit,cursor),limit})):Promise.resolve({items:[]} satisfies ListInboxSlaAlertsResponse)),
       scoped("capacityAlert",capacityAlertFirst(capturedUnit)),
+      scoped("capacityEpisodes",capacityEpisodesFirst(capturedUnit)),
       scoped("availability",client.getInboxAvailability(capturedUnit)),
     ]);
     const selectionPromise: Promise<readonly [InboxConversation | undefined, ListInboxMessagesResponse | undefined]> = capturedSelected
@@ -529,7 +543,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       ])
       : Promise.resolve([undefined, undefined] as const);
     try {
-      const [[queued, mine,others,closed,alerts,nextCapacityAlert,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
+      const [[queued, mine,others,closed,alerts,nextCapacityAlert,nextCapacityEpisodes,nextAvailability], [nextDetail, nextMessages]] = await Promise.all([listsPromise, selectionPromise]);
       if (g !== generation.current || capturedUnit !== unitId) return "skipped";
       let nextSelected: InboxSelection | undefined;
       if (capturedSelected) nextSelected = queued.items.find(item => item.id === capturedSelected.id)
@@ -538,7 +552,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         ?? closed.items.find(item=>item.id===capturedSelected.id)
         ?? (nextDetail?.conversationId === capturedSelected.conversationId && nextDetail.unitId === capturedUnit
           ? capturedSelected : undefined);
-      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);
+      setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityEpisodes(nextCapacityEpisodes);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);
       if (capturedSelected && (!nextSelected || !nextDetail || !nextMessages)) {
         purgeSelection("Atendimento não está mais disponível.");
       } else if (nextSelected && nextDetail && nextMessages) {
@@ -742,6 +756,20 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       setSlaAlerts(page=>page?{...page,items:page.items.map(item=>item.handoffId===result.handoffId?{...item,acknowledgedAt:result.acknowledgedAt,version:result.version}:item)}:page);slaAlertIntent.current=undefined;setClosedNotice("Alerta de SLA reconhecido.")}
     catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){slaAlertIntent.current=undefined;try{const page=await client.listInboxSlaAlerts(slaAlertInput(capturedUnit));if(g===generation.current&&capturedUnit===unitId){setSlaAlerts(page);setClosedNotice("O alerta mudou e a lista foi atualizada.")}}catch(reconcile){fail(reconcile,g)}}else fail(caught,g)}
     finally{releaseMutation(token);if(g===generation.current)setAcknowledgingAlertId(undefined)}
+  }
+  async function acknowledgeCapacityEpisode(episode:CapacityAlertEpisode){
+    if(!canAcknowledgeSlaAlerts||!client.acknowledgeCapacityAlertEpisode||episode.status==="ACKNOWLEDGED"||episode.status==="RESOLVED"||refreshFlight.current||refreshing)return;
+    const reason=capacityEpisodeReason.trim();
+    if(reason.length<3||reason.length>500){setError("Informe um motivo de reconhecimento entre 3 e 500 caracteres.");return}
+    const token=acquireMutation();if(!token)return;
+    const current=capacityEpisodeIntent.current;const intent=current?.id===episode.episodeId&&current.version===episode.version?current:{id:episode.episodeId,version:episode.version,key:crypto.randomUUID()};capacityEpisodeIntent.current=intent;
+    const capturedUnit=unitId,g=generation.current;setAcknowledgingEpisodeId(episode.episodeId);setError(undefined);
+    try{const result=await client.acknowledgeCapacityAlertEpisode(intent.id,{expectedVersion:intent.version,reason},intent.key);if(g!==generation.current||capturedUnit!==unitId)return;
+      setCapacityEpisodes(page=>page?{...page,items:page.items.map(item=>item.episodeId===result.episodeId?{...item,status:result.status,acknowledgedAt:result.acknowledgedAt,acknowledgedByUserId:result.acknowledgedByUserId,acknowledgementReason:reason,version:result.version}:item)}:page);
+      capacityEpisodeIntent.current=undefined;setClosedNotice("Episódio de capacidade reconhecido.");
+    }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;
+      if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){capacityEpisodeIntent.current=undefined;try{const page=await capacityEpisodesFirst(capturedUnit);if(g===generation.current&&capturedUnit===unitId){setCapacityEpisodes(page);setClosedNotice("O episódio mudou e a lista foi atualizada.")}}catch(reconcile){fail(reconcile,g)}}else fail(caught,g);
+    }finally{releaseMutation(token);if(g===generation.current)setAcknowledgingEpisodeId(undefined)}
   }
 
   async function claim() {
@@ -958,6 +986,11 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
     {canReadSlaAlerts&&capacityAlert?.state==="ACTIVE"&&<aside role="alert" aria-labelledby="capacity-alert-title"><h3 id="capacity-alert-title">Demanda sustentada com capacidade disponível</h3><p>{capacityAlert.sustainedQueuedCount} atendimentos permanecem na fila há pelo menos {capacityAlert.sustainedMinutes} minutos, com capacidade agregada de {capacityAlert.availableCapacity}.</p><p>Distribua a fila conforme prioridade, SLA e regras de atribuição. Este alerta não classifica integrantes.</p></aside>}
     {canReadSlaAlerts&&capacityAlertUnavailable&&<p role="status">Alerta agregado temporariamente indisponível.</p>}
+    {canReadSlaAlerts&&client.listCapacityAlertEpisodes&&<section className="inbox-queue-section" aria-labelledby="capacity-episodes-title"><div className="inbox-section-heading"><h3 id="capacity-episodes-title">Episódios de capacidade</h3><span aria-label={`${capacityEpisodes?.items.length??0} episódios de capacidade`}>{capacityEpisodes?.items.length??0}</span></div>
+      <label>Motivo do reconhecimento <input aria-label="Motivo do reconhecimento do episódio" maxLength={500} value={capacityEpisodeReason} disabled={mutationBusy||refreshing} onChange={event=>setCapacityEpisodeReason(event.target.value)}/></label>
+      {capacityEpisodes?.items.length===0&&<p>Nenhum episódio de capacidade.</p>}
+      <ul className="handoff-list">{capacityEpisodes?.items.map(episode=><li key={episode.episodeId}><strong>{capacityEpisodeStatusLabel(episode.status)}</strong><span>Nível de escalonamento: {episode.escalationLevel}</span><span>{episode.recipientCount} destinatários notificados</span><time dateTime={episode.openedAt}>Aberto em {new Date(episode.openedAt).toLocaleString("pt-BR")}</time>{episode.acknowledgedAt&&<span>Reconhecido em {new Date(episode.acknowledgedAt).toLocaleString("pt-BR")}</span>}{episode.acknowledgementReason&&<span>Motivo: {episode.acknowledgementReason}</span>}{canAcknowledgeSlaAlerts&&episode.status!=="ACKNOWLEDGED"&&episode.status!=="RESOLVED"&&<button type="button" disabled={mutationBusy||refreshing} onClick={()=>void acknowledgeCapacityEpisode(episode)}>{acknowledgingEpisodeId===episode.episodeId?"Reconhecendo…":"Reconhecer episódio"}</button>}</li>)}</ul>
+    </section>}
     <section aria-labelledby="availability-title"><h3 id="availability-title">Minha disponibilidade</h3>
       {!availability?<p>Carregando disponibilidade…</p>:<><p>Status: <strong>{availability.status==="AVAILABLE"?"Disponível":availability.status==="PAUSED"?"Pausado":"Offline"}</strong> · {availability.activeCount} de {availability.maxActive} ativos</p>
       {!availabilityOpen&&<button type="button" disabled={mutationBusy||refreshing} onClick={openAvailability}>Alterar disponibilidade</button>}</>}
