@@ -4678,7 +4678,7 @@ try {
 
       const outboundFixtureMessage="7f000000-0000-4000-8000-000000000001";
       const outboundFixtureEvent="7f000000-0000-4000-8000-000000000002";
-      await target.query(`UPDATE channel_connections connection SET status='ACTIVE'
+      await target.query(`UPDATE channel_connections connection SET status='ACTIVE',secret_reference='test://tenant/50000000-0000-4000-8000-000000000002/connection/'||connection.id::text
         FROM conversations conversation WHERE conversation.id=$1
           AND connection.tenant_id=conversation.tenant_id AND connection.id=conversation.channel_connection_id`,
       [firstMaterialized.conversationId]);
@@ -4694,6 +4694,9 @@ try {
       const outboundClaims=(await claimOutbound(workerPool)).filter(row=>row.outbox_id===outboundFixtureEvent);
       assert.equal(outboundClaims.length,1);assert.equal(outboundClaims[0].tenant_id,"50000000-0000-4000-8000-000000000002");
       assert.equal(outboundClaims[0].body,"Fundacao outbound");
+      assert.equal(outboundClaims[0].secret_reference,
+        "test://tenant/50000000-0000-4000-8000-000000000002/connection/"+outboundClaims[0].channel_connection_id);
+      assert.equal(Object.prototype.hasOwnProperty.call(outboundClaims[0],"access_token"),false);
       const staleToken="7f000000-0000-4000-8000-000000000003";
       const workerCommand=async(sql,values)=>{const client=await workerPool.connect();try{await client.query("BEGIN");await client.query("SET LOCAL ROLE zap_pronto_worker");
         const result=await client.query(sql,values);await client.query("COMMIT");return result.rows[0];}finally{client.release();}};
