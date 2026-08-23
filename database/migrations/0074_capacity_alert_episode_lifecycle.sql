@@ -138,7 +138,7 @@ BEGIN
         AND account.id=membership.user_id AND account.status='ACTIVE'
       WHERE membership.tenant_id=tenant_id_value AND membership.unit_id=requested_unit_id
         AND membership.status='ACTIVE' AND membership.role IN('TENANT_ADMIN','UNIT_MANAGER','SUPERVISOR')
-      ON CONFLICT (tenant_id,episode_id,recipient_user_id) DO NOTHING;
+      ON CONFLICT ON CONSTRAINT unit_capacity_alert_episode_recipients_pkey DO NOTHING;
     SELECT count(*)::integer INTO recipient_count FROM public.unit_capacity_alert_episode_recipients recipient
       WHERE recipient.tenant_id=tenant_id_value AND recipient.episode_id=active_episode.id;
   ELSE
