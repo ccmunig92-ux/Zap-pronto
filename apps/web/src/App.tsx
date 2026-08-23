@@ -14,7 +14,7 @@ import{TeamAvailabilityPanel,type TeamAvailabilityClient}from"./TeamAvailability
 import{UnitOperationalTimezonePanel,type UnitOperationalTimezoneClient}from"./UnitOperationalTimezonePanel.js";
 import{StaffSchedulePanel,type StaffScheduleClient}from"./StaffSchedulePanel.js";
 import{UnitAssignmentPolicyPanel,type UnitAssignmentPolicyClient}from"./UnitAssignmentPolicyPanel.js";
-import { ConnectionsPanel } from "./ConnectionsPanel.js";
+import { ConnectionsPanel, type ConnectionsPanelProps } from "./ConnectionsPanel.js";
 
 type SessionState =
   | { status: "loading" }
@@ -29,7 +29,7 @@ const emptyNavigationState: NavigationState = { blocked: false, dirty: false };
 
 export interface SessionClient { getCurrentUser(): Promise<CurrentUser> }
 export function App({ client = apiClient, invitationClient = apiClient, administrationClient = apiClient,
-  unitMembershipClient=apiClient,slaPolicyClient=apiClient,assignmentPolicyClient=apiClient,teamAvailabilityClient=apiClient,operationalTimezoneClient=apiClient,staffScheduleClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient, initialAuthInitializationFailed = false,
+  unitMembershipClient=apiClient,slaPolicyClient=apiClient,assignmentPolicyClient=apiClient,teamAvailabilityClient=apiClient,operationalTimezoneClient=apiClient,staffScheduleClient,acceptanceClient = apiClient,routingClient=apiClient,inboxClient=apiClient,connectionsClient=apiClient, initialAuthInitializationFailed = false,
   retryAuthInitialization }: {
   readonly client?: SessionClient; readonly invitationClient?: InvitationClient;
   readonly administrationClient?: AdministrationClient;
@@ -42,6 +42,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   readonly acceptanceClient?: AcceptanceClient;
   readonly routingClient?:RoutingRequiredClient;
   readonly inboxClient?:InboxClient;
+  readonly connectionsClient?:ConnectionsPanelProps["client"];
   readonly initialAuthInitializationFailed?: boolean;
   readonly retryAuthInitialization?: () => Promise<
     { status: "ready" | "error" | "redirecting" | "blocked" }
@@ -208,7 +209,8 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
         canResolve={currentUser.grants.some(grant=>grant.permission==="inbound.routing.resolve"&&grant.scope==="TENANT")}
         onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
         onNavigationStateChange={navigationReporters.routing}/>}
-    {activeModule==="CONNECTIONS"&&canReadChannelConnections&&<ConnectionsPanel canManage={canManageChannelConnections}
+    {activeModule==="CONNECTIONS"&&canReadChannelConnections&&<ConnectionsPanel client={connectionsClient??apiClient} canManage={canManageChannelConnections}
+      onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.connections}/>}
     {activeModule==="INBOX"&&inboxUnits.length>0&&<InboxPanel client={inboxClient}
       units={inboxUnits}

@@ -37,6 +37,9 @@ export const apiClient = {
   getUserInvitationOptions() {
     return transportClient.getUserInvitationOptions();
   },
+  listChannelConnections() {
+    return transportClient.listChannelConnections();
+  },
   createUserInvitation(...parameters: Parameters<typeof transportClient.createUserInvitation>) {
     return transportClient.createUserInvitation(...parameters);
   },
