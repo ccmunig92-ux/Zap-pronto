@@ -191,7 +191,7 @@ function Setup {
       "LOCAL_OIDC_HOST=$hostname",'LOCAL_HTTPS_PORT=18443',"LOCAL_OIDC_ORIGIN=$origin",'LOCAL_KEYCLOAK_ADMIN_USERNAME=local-admin',
       "LOCAL_KEYCLOAK_ADMIN_PASSWORD=$(New-RandomSecret)","LOCAL_OIDC_ADMIN_PASSWORD=$admin", "LOCAL_OIDC_ATTENDANT_PASSWORD=$attendant","LOCAL_OIDC_ATTENDANT_TWO_PASSWORD=$attendantTwo","LOCAL_OIDC_SUPERVISOR_PASSWORD=$supervisor",
       "LOCAL_TLS_CA_FILE=$($ca.Replace('\','/'))","LOCAL_TLS_CERT_FILE=$($cert.Replace('\','/'))","LOCAL_TLS_KEY_FILE=$($key.Replace('\','/'))",
-      "OIDC_ISSUER=$origin/realms/zap-pronto-local","OIDC_AUTHORITY_ORIGIN=$origin",'OIDC_AUDIENCE=zap-pronto-local',
+      "OIDC_ISSUER=$origin/realms/zap-pronto-local","OIDC_AUTHORITY_ORIGIN=$origin",'OIDC_AUDIENCE=zap-pronto-local','META_GRAPH_API_VERSION=v23.0',
       "OIDC_JWKS_URL=$origin/realms/zap-pronto-local/protocol/openid-connect/certs",
       "OIDC_DISCOVERY_URL=$origin/realms/zap-pronto-local/.well-known/openid-configuration",'OIDC_ORGANIZATION_CLAIM=org_id')|Set-Content -LiteralPath $envFile -Encoding utf8
   }
@@ -208,6 +208,19 @@ function Setup {
     $worker=New-RandomSecret;$workerFile=Join-Path $runtimeRoot 'database-worker-url'
     Set-Content -LiteralPath $workerFile -NoNewline -Value "postgresql://zap_pronto_worker_runtime:$worker@postgres:5432/zap_pronto"
     Add-Content -LiteralPath $envFile -Value "DATABASE_WORKER_URL_FILE=$($workerFile.Replace('\','/'))"
+  }
+  $metaRoot=Join-Path $runtimeRoot 'meta'
+  New-Item -ItemType Directory -Path $metaRoot -Force | Out-Null
+  $metaAppSecret=Join-Path $runtimeRoot 'meta-app-secret'
+  $metaVerifyToken=Join-Path $runtimeRoot 'meta-verify-token'
+  if(-not (Test-Path -LiteralPath $metaAppSecret -PathType Leaf)){Set-Content -LiteralPath $metaAppSecret -NoNewline -Value (New-RandomSecret)}
+  if(-not (Test-Path -LiteralPath $metaVerifyToken -PathType Leaf)){Set-Content -LiteralPath $metaVerifyToken -NoNewline -Value (New-RandomSecret)}
+  $existing=Read-LocalEnvironment
+  if(-not $existing.ContainsKey('META_APP_SECRET_FILE')){Add-Content -LiteralPath $envFile -Value "META_APP_SECRET_FILE=$($metaAppSecret.Replace('\','/'))"}
+  if(-not $existing.ContainsKey('META_VERIFY_TOKEN_FILE')){Add-Content -LiteralPath $envFile -Value "META_VERIFY_TOKEN_FILE=$($metaVerifyToken.Replace('\','/'))"}
+  if(-not $existing.ContainsKey('META_WHATSAPP_SECRET_ROOT')){Add-Content -LiteralPath $envFile -Value "META_WHATSAPP_SECRET_ROOT=$($metaRoot.Replace('\','/'))"}
+  if(-not $existing.ContainsKey('META_GRAPH_API_VERSION')){
+    Add-Content -LiteralPath $envFile -Value 'META_GRAPH_API_VERSION=v23.0'
   }
   $existing=Read-LocalEnvironment;if(-not $existing.ContainsKey('LOCAL_HARNESS_NONCE')){Add-Content -LiteralPath $envFile -Value "LOCAL_HARNESS_NONCE=$([Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).Replace('/','_').Replace('+','-').TrimEnd('='))";$existing=Read-LocalEnvironment}
   @{repoPath=$repoRoot;projectName=$projectName;nonce=$existing.LOCAL_HARNESS_NONCE;
