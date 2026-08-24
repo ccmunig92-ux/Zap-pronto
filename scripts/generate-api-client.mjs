@@ -56,7 +56,8 @@ if(document.paths?.["/v1/units/{unitId}/staff-schedules/members"]?.get?.operatio
 const source = `// Generated from the canonical OpenAPI document. Do not edit manually.\n${astToString(await openapiTS(document))}`;
 if (process.argv.includes("--check")) {
   const current = await readFile(output, "utf8").catch(() => "");
-  if (current !== source) {
+  const normalizedCurrent = current.replace(/\r\n/g, "\n");
+  if (normalizedCurrent !== source) {
     const expectedLines=source.split("\n"),currentLines=current.split("\n");
     const mismatch=expectedLines.findIndex((line,index)=>line!==currentLines[index]);
     console.error(JSON.stringify({mismatchLine:mismatch+1,expected:expectedLines.slice(mismatch,mismatch+20),current:currentLines.slice(mismatch,mismatch+20)},null,2));
