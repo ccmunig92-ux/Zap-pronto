@@ -85,6 +85,10 @@ fieldset { display: grid; gap: .75rem; border: 1px solid #dfe4ec; }
 .muted, .connection-note { color: #657089; font-size: .875rem; }
 .connection-card { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid #dfe4ec; border-radius: .65rem; background: #fbfdff; }
 .connection-grid .connection-card { margin-top: 0; }
+.connection-form { display: grid; gap: 1rem; margin-top: 1.25rem; padding: 1.25rem; border: 1px solid #bfdbfe; border-radius: .65rem; background: #f8fbff; }
+.connection-form h3 { margin: 0; }
+.connection-form fieldset { display: grid; gap: .5rem; }
+.connection-form fieldset label { display: flex; align-items: center; gap: .5rem; }
 .connection-card-placeholder { border-style: dashed; }
 .connection-card h3 { margin-bottom: .35rem; }
 .connection-card p { margin: .25rem 0; }
