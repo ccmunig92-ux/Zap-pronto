@@ -24,6 +24,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
   const [error, setError] = useState<string>();
   const [editing, setEditing] = useState<ChannelConnection>();
   const [formOpen, setFormOpen] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ displayName: "", wabaId: "", phoneNumberId: "", status: "DISCONNECTED" as ChannelConnectionMetadataRequest["status"], scope: "CORPORATE" as ChannelConnectionMetadataRequest["scope"], secretReference: "", unitIds: [] as string[] });
   useEffect(() => { onNavigationStateChange?.({ blocked: false, dirty: false }); }, [onNavigationStateChange]);
@@ -56,6 +57,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
     if (connection && !window.confirm("Confirmar edição desta conexão?")) return;
     setEditing(connection);
     setFormOpen(true);
+    setIdempotencyKey(crypto.randomUUID());
     setForm({ displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: "", unitIds: [...(connection?.unitIds ?? [])] });
   }
   function updateScope(scope: ChannelConnectionMetadataRequest["scope"]): void { setForm(current => ({ ...current, scope, unitIds: scope === "CORPORATE" ? [] : scope === "SINGLE_UNIT" ? current.unitIds.slice(0, 1) : current.unitIds })); }
@@ -69,9 +71,9 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       const payload: ChannelConnectionMetadataRequest = { scope: form.scope, wabaId: form.wabaId, phoneNumberId: form.phoneNumberId, status: form.status, secretReference: form.secretReference, unitIds: validUnits };
       if (form.displayName) payload.displayName = form.displayName;
       if (editing) payload.id = editing.id;
-      const response = await client.setChannelConnectionMetadata(payload, crypto.randomUUID());
+      const response = await client.setChannelConnectionMetadata(payload, idempotencyKey ?? crypto.randomUUID());
       setPage(current => ({ items: editing ? current?.items.map(item => item.id === response.connection.id ? response.connection : item) ?? [response.connection] : [...(current?.items ?? []), response.connection] }));
-      setEditing(undefined); setFormOpen(false); setForm(current => ({ ...current, secretReference: "" }));
+      setEditing(undefined); setFormOpen(false); setIdempotencyKey(undefined); setForm(current => ({ ...current, secretReference: "" }));
     } catch (cause: unknown) {
       if (cause instanceof AuthenticationRequired || cause instanceof ApiProblem && cause.problem.status === 401) { onAuthenticationRequired?.(); return; }
       if (cause instanceof ApiProblem && cause.problem.status === 403) { onAuthorizationChanged?.(); setError("Você não tem permissão para alterar os canais deste tenant."); return; }
@@ -140,8 +142,8 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       <label>Referência protegida do segredo<input required pattern="[A-Za-z0-9._-]+" value={form.secretReference} onChange={event => setForm(current => ({ ...current, secretReference: event.target.value }))} /><small>O segredo real permanece no servidor.</small></label>
       <label>Escopo<select value={form.scope} onChange={event => updateScope(event.target.value as ChannelConnectionMetadataRequest["scope"])}><option value="CORPORATE">Corporativo</option><option value="SINGLE_UNIT">Uma unidade</option><option value="SELECTED_UNITS">Unidades selecionadas</option></select></label>
       {form.scope !== "CORPORATE" && <fieldset><legend>Unidades</legend>{units.map(unit => <label key={unit.id}><input type="checkbox" checked={form.unitIds.includes(unit.id)} onChange={event => setForm(current => ({ ...current, unitIds: event.target.checked ? [...current.unitIds, unit.id] : current.unitIds.filter(id => id !== unit.id) }))} />{unit.name}</label>)}</fieldset>}
-      <label>Status<select value={form.status} onChange={event => setForm(current => ({ ...current, status: event.target.value as ChannelConnectionMetadataRequest["status"] }))}><option value="ACTIVE">Ativa</option><option value="DEGRADED">Degradada</option><option value="DISCONNECTED">Desconectada</option></select></label>
-      <div className="connection-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar conexão"}</button><button type="button" onClick={() => { setEditing(undefined); setFormOpen(false); }} disabled={saving}>Cancelar</button></div>
+      <p className="muted">O status operacional é determinado pelo backend e pela reconciliação da conexão.</p>
+      <div className="connection-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar conexão"}</button><button type="button" onClick={() => { setEditing(undefined); setFormOpen(false); setIdempotencyKey(undefined); }} disabled={saving}>Cancelar</button></div>
     </form>}
     <aside className="connection-prerequisites" aria-label="Pré-requisitos da conexão">
       <strong>Pré-requisitos do ambiente</strong>
