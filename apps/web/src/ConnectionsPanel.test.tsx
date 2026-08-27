@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPanel } from "./ConnectionsPanel.js";
 
@@ -48,5 +48,27 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.getAllByText("2 unidades selecionadas").length).toBeGreaterThan(0));
     expect(screen.getByText("Degradada")).toBeTruthy();
     expect(screen.getByText("Não configurado")).toBeTruthy();
+  });
+
+  it("mantém a mesma chave de idempotência ao repetir uma intenção", async () => {
+    const setChannelConnectionMetadata = vi.fn()
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValueOnce({ connection: {
+        id: "a4000000-0000-4000-8000-000000000003", type: "WHATSAPP", scope: "CORPORATE",
+        wabaId: "123456", phoneNumberId: "654321", status: "DISCONNECTED", secretConfigured: true, unitIds: [],
+      }, replayed: false });
+    const configurableClient = { listChannelConnections: vi.fn().mockResolvedValue({ items: [] }), setChannelConnectionMetadata };
+    render(<ConnectionsPanel client={configurableClient} canManage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Configurar conexão" }));
+    fireEvent.change(screen.getByLabelText("WABA ID"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("Phone Number ID"), { target: { value: "654321" } });
+    fireEvent.change(screen.getByLabelText(/Referência protegida/), { target: { value: "meta-token" } });
+    const save = screen.getByRole("button", { name: "Salvar conexão" });
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.getByText("Não foi possível salvar a conexão de canal.")).toBeTruthy());
+    fireEvent.click(save);
+    await waitFor(() => expect(setChannelConnectionMetadata).toHaveBeenCalledTimes(2));
+    expect(setChannelConnectionMetadata.mock.calls[0]?.[1]).toBe(setChannelConnectionMetadata.mock.calls[1]?.[1]);
   });
 });
