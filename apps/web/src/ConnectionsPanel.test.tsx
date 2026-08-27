@@ -12,15 +12,15 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.getByText("Nenhuma conexão WhatsApp foi cadastrada neste tenant.")).toBeTruthy());
     expect(screen.getByText("Configuração pendente")).toBeTruthy();
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Conectar com Meta" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Abrir conversa de teste" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("informa que a configuração exige permissão de tenant", async () => {
     render(<ConnectionsPanel client={client} canManage={false} />);
     expect(screen.getByText("Somente administradores do tenant podem configurar canais.")).toBeTruthy();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Conectar com Meta" })).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Conectar com Meta" }).hasAttribute("disabled")).toBe(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configurar conexão" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("exibe somente metadados não secretos da conexão retornada pela API", async () => {
