@@ -56,7 +56,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
     if (connection && !window.confirm("Confirmar edição desta conexão?")) return;
     setEditing(connection);
     setFormOpen(true);
-    setForm({ displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: connection ? "preservar-atual" : "", unitIds: [...(connection?.unitIds ?? [])] });
+    setForm({ displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: "", unitIds: [...(connection?.unitIds ?? [])] });
   }
   function updateScope(scope: ChannelConnectionMetadataRequest["scope"]): void { setForm(current => ({ ...current, scope, unitIds: scope === "CORPORATE" ? [] : scope === "SINGLE_UNIT" ? current.unitIds.slice(0, 1) : current.unitIds })); }
   async function save(): Promise<void> {
