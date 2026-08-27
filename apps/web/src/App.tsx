@@ -80,6 +80,12 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   }
   useEffect(() => {
     if (authInitializationFailed) return;
+    // The default client is the production transport. Custom clients are used
+    // by the shell's contract tests and must still exercise the session path.
+    if (client === apiClient && !isAuthConfigured()) {
+      setSession({ status: "authentication-required" });
+      return;
+    }
     let active = true;
     client.getCurrentUser().then((currentUser) => {
       if (active) setSession({ status: "ready", currentUser });
