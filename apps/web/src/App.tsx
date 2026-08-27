@@ -53,7 +53,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const [authRetrying, setAuthRetrying] = useState(false);
   const [loginError, setLoginError] = useState<string>();
   const [logoutError, setLogoutError] = useState<string>();
-  const [selectedModule, setSelectedModule] = useState<ModuleId>();
+  const [selectedModule, setSelectedModule] = useState<ModuleId | undefined>(() => typeof window !== "undefined" && window.location.pathname === "/configuracoes/canais" ? "CONNECTIONS" : undefined);
   const [navigationStates, setNavigationStates] = useState<Record<string, NavigationState>>({});
   const moduleContentRef = useRef<HTMLDivElement>(null);
   const scheduleClient=useMemo<StaffScheduleClient>(()=>staffScheduleClient??{
@@ -80,6 +80,12 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   }
   useEffect(() => {
     if (authInitializationFailed) return;
+    // The default client is the production transport. Custom clients are used
+    // by the shell's contract tests and must still exercise the session path.
+    if (client === apiClient && !isAuthConfigured()) {
+      setSession({ status: "authentication-required" });
+      return;
+    }
     let active = true;
     client.getCurrentUser().then((currentUser) => {
       if (active) setSession({ status: "ready", currentUser });
@@ -167,22 +173,33 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     if(moduleId===activeModule||activeNavigationState.blocked)return;
     if(activeNavigationState.dirty&&!window.confirm("Descartar as alterações não salvas deste módulo?"))return;
     setNavigationStates({});setSelectedModule(moduleId);
+    if(moduleId === "CONNECTIONS") window.history.replaceState({}, "", "/configuracoes/canais");
+    else if(window.location.pathname === "/configuracoes/canais") window.history.replaceState({}, "", "/");
     queueMicrotask(()=>{const heading=moduleContentRef.current?.querySelector<HTMLElement>("h2");
       if(heading){heading.tabIndex=-1;heading.focus();}});
   }
-  return <main>
-    <header><div><span>Zap Pronto</span><h1>{currentUser.tenant.name}</h1></div>
-      <div><p>{currentUser.user.displayName}<br/><small>{currentUser.user.email}</small></p>
+  const activeModuleLabel=modules.find(module=>module.id===activeModule)?.label??"Zap Pronto";
+  return <div className="app-shell">
+    <aside className="app-sidebar">
+      <div className="app-brand"><span className="app-brand-mark" aria-hidden="true">Z</span><span><strong>Zap Pronto</strong><small>Operação omnichannel</small></span></div>
+      <nav className="module-navigation" aria-label="Módulos">{modules.map(module=><button type="button" key={module.id}
+        aria-current={module.id===activeModule?"page":undefined} disabled={activeNavigationState.blocked&&module.id!==activeModule}
+        onClick={()=>navigate(module.id)}><span aria-hidden="true" className="module-navigation-mark">{module.label.slice(0,1)}</span>{module.label}</button>)}</nav>
+      <p className="app-sidebar-note">Acesso e ações limitados pelas permissões da sessão.</p>
+    </aside>
+    <div className="app-frame">
+    <header className="app-topbar"><div><span>Tenant</span><strong>{currentUser.tenant.name}</strong></div>
+      <div className="app-user"><p>{currentUser.user.displayName}<br/><small>{currentUser.user.email}</small></p>
         <button type="button" onClick={() => { setLogoutError(undefined);setNavigationStates({});
           setSession({ status: "authentication-required" });void signOut()
           .catch(() => setLogoutError("Sessão local encerrada; não foi possível concluir o logout no provedor."));
         }}>Sair</button></div></header>
-    <nav className="module-navigation" aria-label="Módulos">{modules.map(module=><button type="button" key={module.id}
-      aria-current={module.id===activeModule?"page":undefined} disabled={activeNavigationState.blocked&&module.id!==activeModule}
-      onClick={()=>navigate(module.id)}>{module.label}</button>)}</nav>
+    <main className="app-main"><div className="module-heading" aria-hidden="true"><p className="eyebrow">Painel operacional</p><p className="module-title">{activeModuleLabel}</p></div>
     <div className="module-content" ref={moduleContentRef}>
-    {activeModule==="OVERVIEW"&&<section><h2 tabIndex={-1}>Unidades vinculadas</h2><ul>{currentUser.memberships.map((membership) =>
-      <li key={membership.unitId}><strong>{membership.unitName}</strong> <span>{membership.role}</span></li>)}</ul></section>}
+    {activeModule==="OVERVIEW"&&<section className="overview-panel"><div className="overview-heading"><div><p className="eyebrow">Escopo autorizado</p><h2 tabIndex={-1}>Unidades vinculadas</h2></div><span className="overview-count">{currentUser.memberships.length}</span></div>
+      <p className="muted">As unidades e funções abaixo vêm da sessão autenticada. Indicadores operacionais serão exibidos somente quando houver contrato canônico para esses dados.</p>
+      <ul className="overview-units">{currentUser.memberships.map((membership) =>
+      <li key={membership.unitId}><span className="overview-unit-mark" aria-hidden="true">{membership.unitName.slice(0,1).toUpperCase()}</span><span><strong>{membership.unitName}</strong><small>{membership.unitCode}</small></span><span className="overview-role">{membership.role}</span></li>)}</ul></section>}
     {activeModule==="TEAM_AVAILABILITY"&&teamAvailabilityUnits.length>0&&<TeamAvailabilityPanel client={teamAvailabilityClient} authorizedUnits={teamAvailabilityUnits} onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}/>}
     {activeModule==="TENANT_ACCESS"&&canManageTenantUsers
       && <><InvitationPanel client={invitationClient} onAuthenticationRequired={invalidateAuthentication}
@@ -210,6 +227,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
         onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
         onNavigationStateChange={navigationReporters.routing}/>}
     {activeModule==="CONNECTIONS"&&canReadChannelConnections&&<ConnectionsPanel client={connectionsClient??apiClient} canManage={canManageChannelConnections}
+      units={currentUser.memberships.map(membership=>({id:membership.unitId,name:membership.unitName}))}
       onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.connections}/>}
     {activeModule==="INBOX"&&inboxUnits.length>0&&<InboxPanel client={inboxClient}
@@ -220,6 +238,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       slaAlertAcknowledgeUnitIds={currentUser.memberships.filter(m=>currentUser.grants.some(g=>g.permission==="sla_alert.acknowledge"&&(g.scope==="TENANT"||(g.scope==="UNIT"&&g.unitId===m.unitId)))).map(m=>m.unitId)}
       onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.inbox}/>}
+    </div></main>
     </div>
-  </main>;
+  </div>;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPanel } from "./ConnectionsPanel.js";
 
@@ -12,15 +12,15 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.getByText("Nenhuma conexão WhatsApp foi cadastrada neste tenant.")).toBeTruthy());
     expect(screen.getByText("Configuração pendente")).toBeTruthy();
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Conectar com Meta" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Abrir conversa de teste" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("informa que a configuração exige permissão de tenant", async () => {
     render(<ConnectionsPanel client={client} canManage={false} />);
     expect(screen.getByText("Somente administradores do tenant podem configurar canais.")).toBeTruthy();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Conectar com Meta" })).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Conectar com Meta" }).hasAttribute("disabled")).toBe(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configurar conexão" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("exibe somente metadados não secretos da conexão retornada pela API", async () => {
@@ -33,6 +33,42 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.getByText("waba-1")).toBeTruthy());
     expect(screen.getByText("Conexão cadastrada").classList.contains("connection-status-active")).toBe(true);
     expect(screen.getByText("Configurado no servidor")).toBeTruthy();
+    expect(screen.getAllByText("Corporativa · todas as unidades").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ativa")).toBeTruthy();
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
+  });
+
+  it("representa escopo multiunidade sem associar a conexão a uma única unidade", async () => {
+    const selectedUnitsClient = { listChannelConnections: vi.fn().mockResolvedValue({ items: [{
+      id: "a4000000-0000-4000-8000-000000000002", type: "WHATSAPP", scope: "SELECTED_UNITS",
+      displayName: "Regional", wabaId: "waba-2", phoneNumberId: "phone-2", status: "DEGRADED",
+      secretConfigured: false, unitIds: ["unit-a", "unit-b"],
+    }] }) };
+    render(<ConnectionsPanel client={selectedUnitsClient} canManage />);
+    await waitFor(() => expect(screen.getAllByText("2 unidades selecionadas").length).toBeGreaterThan(0));
+    expect(screen.getByText("Degradada")).toBeTruthy();
+    expect(screen.getByText("Não configurado")).toBeTruthy();
+  });
+
+  it("mantém a mesma chave de idempotência ao repetir uma intenção", async () => {
+    const setChannelConnectionMetadata = vi.fn()
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValueOnce({ connection: {
+        id: "a4000000-0000-4000-8000-000000000003", type: "WHATSAPP", scope: "CORPORATE",
+        wabaId: "123456", phoneNumberId: "654321", status: "DISCONNECTED", secretConfigured: true, unitIds: [],
+      }, replayed: false });
+    const configurableClient = { listChannelConnections: vi.fn().mockResolvedValue({ items: [] }), setChannelConnectionMetadata };
+    render(<ConnectionsPanel client={configurableClient} canManage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configurar conexão" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Configurar conexão" }));
+    fireEvent.change(screen.getByLabelText("WABA ID"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("Phone Number ID"), { target: { value: "654321" } });
+    fireEvent.change(screen.getByLabelText(/Referência protegida/), { target: { value: "meta-token" } });
+    const save = screen.getByRole("button", { name: "Salvar conexão" });
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.getByText("Não foi possível salvar a conexão de canal.")).toBeTruthy());
+    fireEvent.click(save);
+    await waitFor(() => expect(setChannelConnectionMetadata).toHaveBeenCalledTimes(2));
+    expect(setChannelConnectionMetadata.mock.calls[0]?.[1]).toBe(setChannelConnectionMetadata.mock.calls[1]?.[1]);
   });
 });
