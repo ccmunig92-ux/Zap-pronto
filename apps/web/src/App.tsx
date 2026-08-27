@@ -219,6 +219,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
         onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
         onNavigationStateChange={navigationReporters.routing}/>}
     {activeModule==="CONNECTIONS"&&canReadChannelConnections&&<ConnectionsPanel client={connectionsClient??apiClient} canManage={canManageChannelConnections}
+      units={currentUser.memberships.map(membership=>({id:membership.unitId,name:membership.unitName}))}
       onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.connections}/>}
     {activeModule==="INBOX"&&inboxUnits.length>0&&<InboxPanel client={inboxClient}
