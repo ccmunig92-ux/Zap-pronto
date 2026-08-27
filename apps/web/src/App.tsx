@@ -53,7 +53,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const [authRetrying, setAuthRetrying] = useState(false);
   const [loginError, setLoginError] = useState<string>();
   const [logoutError, setLogoutError] = useState<string>();
-  const [selectedModule, setSelectedModule] = useState<ModuleId>(() => typeof window !== "undefined" && window.location.pathname === "/configuracoes/canais" ? "CONNECTIONS" : undefined);
+  const [selectedModule, setSelectedModule] = useState<ModuleId | undefined>(() => typeof window !== "undefined" && window.location.pathname === "/configuracoes/canais" ? "CONNECTIONS" : undefined);
   const [navigationStates, setNavigationStates] = useState<Record<string, NavigationState>>({});
   const moduleContentRef = useRef<HTMLDivElement>(null);
   const scheduleClient=useMemo<StaffScheduleClient>(()=>staffScheduleClient??{
