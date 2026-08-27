@@ -33,6 +33,20 @@ describe("ConnectionsPanel", () => {
     await waitFor(() => expect(screen.getByText("waba-1")).toBeTruthy());
     expect(screen.getByText("Conexão cadastrada").classList.contains("connection-status-active")).toBe(true);
     expect(screen.getByText("Configurado no servidor")).toBeTruthy();
+    expect(screen.getAllByText("Corporativa · todas as unidades").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ativa")).toBeTruthy();
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
+  });
+
+  it("representa escopo multiunidade sem associar a conexão a uma única unidade", async () => {
+    const selectedUnitsClient = { listChannelConnections: vi.fn().mockResolvedValue({ items: [{
+      id: "a4000000-0000-4000-8000-000000000002", type: "WHATSAPP", scope: "SELECTED_UNITS",
+      displayName: "Regional", wabaId: "waba-2", phoneNumberId: "phone-2", status: "DEGRADED",
+      secretConfigured: false, unitIds: ["unit-a", "unit-b"],
+    }] }) };
+    render(<ConnectionsPanel client={selectedUnitsClient} canManage />);
+    await waitFor(() => expect(screen.getAllByText("2 unidades selecionadas").length).toBeGreaterThan(0));
+    expect(screen.getByText("Degradada")).toBeTruthy();
+    expect(screen.getByText("Não configurado")).toBeTruthy();
   });
 });

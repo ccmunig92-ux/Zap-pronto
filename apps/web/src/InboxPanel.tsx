@@ -139,6 +139,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [sending, setSending] = useState(false);
   const [cancellingId, setCancellingId] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
+  const [automaticRefreshing,setAutomaticRefreshing]=useState(false);
   const [convergence,setConvergence]=useState<ConvergenceState>({kind:"paused"});
   const previousConvergence=useRef<ConvergenceState["kind"]>("paused");
   const [convergenceAnnouncement,setConvergenceAnnouncement]=useState("Atualização automática pausada.");
@@ -518,7 +519,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     const capturedSelected = selected;
     const automatic=origin==="automatic";
     const g = ++generation.current;
-    if(!automatic){setRefreshing(true);setError(undefined);setClosedNotice(undefined)}
+    if(automatic)setAutomaticRefreshing(true);else{setRefreshing(true);setError(undefined);setClosedNotice(undefined)}
     const queueTarget=automatic?Math.max(25,queue?.items.length??0):25;
     const activeTarget=automatic?Math.max(25,active?.items.length??0):25;
     const supervisedTarget=automatic?Math.max(25,supervised?.items.length??0):25;
@@ -589,7 +590,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         if(terminal||!automatic)fail(caught,g);if(automatic)setConvergence({kind:terminal?"paused":"unstable"});return terminal?"terminal-auth":"retryable-failure"}
     } finally {
       releaseOperation(operationToken);
-      if (g === generation.current) { refreshFlight.current = false; if(!automatic)setRefreshing(false); }
+      if (g === generation.current) { refreshFlight.current = false; if(automatic)setAutomaticRefreshing(false);else setRefreshing(false); }
     }
   }
 
@@ -597,16 +598,18 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   useEffect(()=>{
     mounted.current=true;
     const cancel=()=>{if(automaticRefreshTimer.current!==undefined){clearTimeout(automaticRefreshTimer.current);automaticRefreshTimer.current=undefined}};
-    const eligible=()=>mounted.current&&!authorizationFailed.current&&!realtimeConnected.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
+    let forceRecovery=false;
+    const eligible=(force=false)=>mounted.current&&!authorizationFailed.current&&(force||!realtimeConnected.current)&&document.visibilityState==="visible"&&navigator.onLine!==false;
     const jitter=(delay:number)=>Math.max(1,Math.round(delay*(.8+Math.random()*.4)));
-    const schedule=(delay:number)=>{cancel();if(eligible())automaticRefreshTimer.current=setTimeout(run,jitter(delay))};
-    const run=async()=>{cancel();if(!eligible())return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
+    const schedule=(delay:number,force=false)=>{cancel();if(eligible(force)){forceRecovery=force;automaticRefreshTimer.current=setTimeout(run,jitter(delay))}};
+    const run=async()=>{cancel();const force=forceRecovery;forceRecovery=false;if(!eligible(force))return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
       if(result==="retryable-failure")automaticRefreshFailures.current+=1;else if(result==="success")automaticRefreshFailures.current=0;
-      const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;schedule(delay)};
-    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else{cancel();setConvergence({kind:"paused"})}};
-    const online=()=>schedule(automaticRefreshRecoveryMs),fallback=()=>schedule(automaticRefreshRecoveryMs),offline=()=>{cancel();setConvergence({kind:"paused"})};
-    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("zap-pronto-realtime-fallback",fallback);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
-    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("zap-pronto-realtime-fallback",fallback);window.removeEventListener("offline",offline)};
+      const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;
+      schedule(delay,Boolean(client.subscribeInboxEvents))};
+    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs,true);else{cancel();setConvergence({kind:"paused"})}};
+    const online=()=>schedule(automaticRefreshRecoveryMs,true),fallback=()=>schedule(automaticRefreshRecoveryMs),realtimeRecovery=()=>schedule(automaticRefreshRecoveryMs,true),offline=()=>{cancel();setConvergence({kind:"paused"})};
+    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("zap-pronto-realtime-fallback",fallback);window.addEventListener("zap-pronto-realtime-recovery",realtimeRecovery);window.addEventListener("offline",offline);schedule(client.subscribeInboxEvents?automaticRefreshRecoveryMs:automaticRefreshBaseMs,Boolean(client.subscribeInboxEvents));
+    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("zap-pronto-realtime-fallback",fallback);window.removeEventListener("zap-pronto-realtime-recovery",realtimeRecovery);window.removeEventListener("offline",offline)};
   },[]);
 
   useEffect(()=>{
@@ -625,7 +628,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       controller=new AbortController();const currentController=controller;realtimeAbort.current=currentController;
       try{
         realtimeConnected.current=true;
-        await subscribe(unitId,currentController.signal,()=>{if(eligible())void automaticRefreshRunner.current()});
+        await subscribe(unitId,currentController.signal,()=>{if(eligible())void automaticRefreshRunner.current().then(result=>{if(result==="skipped"&&eligible())window.dispatchEvent(new Event("zap-pronto-realtime-recovery"))})});
       }catch(cause){
         realtimeConnected.current=false;
         if(currentController.signal.aborted||!mounted.current)return;
@@ -636,10 +639,9 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         }
         setConvergence({kind:"unstable"});
       }finally{
-        realtimeConnected.current=false;
         const intentionallyStopped=currentController.signal.aborted;
         if(controller===currentController)controller=undefined;
-        if(realtimeAbort.current===currentController)realtimeAbort.current=undefined;
+        if(realtimeAbort.current===currentController){realtimeAbort.current=undefined;realtimeConnected.current=false}
         if(!intentionallyStopped&&mounted.current&&eligible())window.dispatchEvent(new Event("zap-pronto-realtime-fallback"));
         if(!intentionallyStopped&&!disposed&&mounted.current&&eligible()&&!controller)reconnectTimer=setTimeout(()=>{reconnectTimer=undefined;void connect()},automaticRefreshRecoveryMs);
       }
@@ -979,11 +981,11 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     } finally { releaseMutation(lockToken); if (g === generation.current) setCancellingId(undefined); }
   }
 
-  const actionsDisabled = refreshing;
+  const actionsDisabled = refreshing||automaticRefreshing;
   const convergenceLabel=convergence.kind==="updated"?"Atualizado":convergence.kind==="deferred"?"Atualização adiada enquanto há uma operação em andamento.":convergence.kind==="unstable"?"Conexão instável; nova tentativa automática agendada.":"Atualização automática pausada.";
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
-      <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
+      <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || actionsDisabled || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
     {canReadSlaAlerts&&capacityAlert?.state==="ACTIVE"&&<aside role="alert" aria-labelledby="capacity-alert-title"><h3 id="capacity-alert-title">Demanda sustentada com capacidade disponível</h3><p>{capacityAlert.sustainedQueuedCount} atendimentos permanecem na fila há pelo menos {capacityAlert.sustainedMinutes} minutos, com capacidade agregada de {capacityAlert.availableCapacity}.</p><p>Distribua a fila conforme prioridade, SLA e regras de atribuição. Este alerta não classifica integrantes.</p></aside>}
     {canReadSlaAlerts&&capacityAlertUnavailable&&<p role="status">Alerta agregado temporariamente indisponível.</p>}
     {canReadSlaAlerts&&client.listCapacityAlertEpisodes&&<section className="inbox-queue-section" aria-labelledby="capacity-episodes-title"><div className="inbox-section-heading"><h3 id="capacity-episodes-title">Episódios de capacidade</h3><span aria-label={`${capacityEpisodes?.items.length??0} episódios de capacidade`}>{capacityEpisodes?.items.length??0}</span></div>
