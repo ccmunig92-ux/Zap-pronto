@@ -44,6 +44,9 @@ export function ConnectionsPanel({ canManage, client, onAuthenticationRequired, 
   const connections = page?.items ?? [];
   const headerStatus = loading ? "Carregando…" : connections.length ? "Conexão cadastrada" : "Configuração pendente";
   const headerStatusClass = loading ? "connection-status-pending" : connections.length ? "connection-status-active" : "connection-status-pending";
+  const statusLabel = (status:string) => status === "ACTIVE" ? "Ativa" : status === "DEGRADED" ? "Degradada" : "Desconectada";
+  const scopeLabel = (scope:string, unitIds:readonly string[]) => scope === "CORPORATE" ? "Corporativa · todas as unidades" :
+    scope === "SINGLE_UNIT" ? "Uma unidade" : `${unitIds.length} unidades selecionadas`;
 
   return <section className="connections-panel" aria-labelledby="connections-heading">
     <div className="panel-heading">
@@ -53,32 +56,35 @@ export function ConnectionsPanel({ canManage, client, onAuthenticationRequired, 
       </div>
       <span className={`connection-status ${headerStatusClass}`} role="status">{headerStatus}</span>
     </div>
-    <p>Conecte o WhatsApp Cloud API da organização para receber mensagens e enviar respostas pela Inbox.</p>
-    {!canManage && <p role="status">Somente administradores do tenant podem configurar canais.</p>}
+    <p className="connections-description">Acompanhe as conexões de canal, o escopo de atendimento e a disponibilidade da referência protegida no servidor.</p>
+    {!canManage && <p className="connection-readonly" role="status"><strong>Modo somente leitura.</strong> Somente administradores do tenant podem configurar canais.</p>}
     {error && <p role="alert">{error}</p>}
+    {loading && <div className="connection-loading" aria-busy="true" aria-live="polite"><span/><span/><span/><p>Carregando conexões…</p></div>}
     {!loading && !error && connections.length === 0 && <>
-      <p role="status">Nenhuma conexão WhatsApp foi cadastrada neste tenant.</p>
-      <article className="connection-card">
-        <div className="connection-card-title"><div><h3>WhatsApp Cloud API</h3><p className="muted">Ainda não conectado.</p></div><span className="connection-badge">Não conectado</span></div>
+      <div className="connection-empty" role="status"><span className="connection-empty-mark" aria-hidden="true">W</span><div><strong>Nenhuma conexão WhatsApp foi cadastrada neste tenant.</strong><p>Cadastre uma conexão administrativa para que as unidades autorizadas recebam mensagens.</p></div></div>
+      <article className="connection-card connection-card-placeholder">
+        <div className="connection-card-title"><div><p className="eyebrow">Canal disponível</p><h3>WhatsApp Cloud API</h3><p className="muted">Aguardando configuração administrativa.</p></div><span className="connection-badge connection-badge-disconnected">Não conectado</span></div>
         <div className="connection-actions">
           <button type="button" disabled title="Disponível quando a API administrativa de conexões for publicada">Conectar com Meta</button>
           <button type="button" disabled title="O QR Code não autentica uma conexão Cloud API">Abrir conversa de teste</button>
         </div>
       </article>
     </>}
-    {!loading && !error && connections.map(connection => <article className="connection-card" key={connection.id}>
+    {!loading && !error && connections.length>0&&<div className="connection-grid">{connections.map(connection => <article className="connection-card" key={connection.id}>
       <div className="connection-card-title">
         <div>
+          <p className="eyebrow">WhatsApp</p>
           <h3>WhatsApp Cloud API</h3>
           <p className="muted">{connection.displayName ?? "Conexão corporativa"} — pode atender mais de uma unidade.</p>
         </div>
-        <span className="connection-badge">{connection.status}</span>
+        <span className={`connection-badge connection-badge-${connection.status.toLowerCase()}`}>{statusLabel(connection.status)}</span>
       </div>
+      <p className="connection-scope">{scopeLabel(connection.scope,connection.unitIds)}</p>
       <dl className="connection-metadata">
         <div><dt>WABA</dt><dd>{connection.wabaId || "Não informado"}</dd></div>
         <div><dt>Phone Number ID</dt><dd>{connection.phoneNumberId}</dd></div>
-        <div><dt>Escopo</dt><dd>{connection.scope}</dd></div>
-        <div><dt>Secret</dt><dd>{connection.secretConfigured ? "Configurado no servidor" : "Não configurado"}</dd></div>
+        <div><dt>Escopo</dt><dd>{scopeLabel(connection.scope,connection.unitIds)}</dd></div>
+        <div className={connection.secretConfigured?"connection-secret-ok":"connection-secret-missing"}><dt>Referência protegida</dt><dd>{connection.secretConfigured ? "Configurado no servidor" : "Não configurado"}</dd></div>
       </dl>
       <div className="connection-actions">
         <button type="button" disabled title="Disponível quando a API administrativa de conexões for publicada">
@@ -93,7 +99,7 @@ export function ConnectionsPanel({ canManage, client, onAuthenticationRequired, 
         nunca são exibidos ou armazenados neste navegador. QR Code é apenas um atalho para conversa de teste,
         não um método de autenticação.
       </p>
-    </article>)}
+    </article>)}</div>}
     <aside className="connection-prerequisites" aria-label="Pré-requisitos da conexão">
       <strong>Pré-requisitos do ambiente</strong>
       <ul>

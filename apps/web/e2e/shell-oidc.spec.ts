@@ -74,7 +74,7 @@ async function login(page: Page, configuration: AccountConfiguration): Promise<v
   await page.locator(submitSelector).click();
   const response = await me;
   expect(response.headers()["cache-control"]).toContain("no-store");
-  await expect(page.getByRole("heading", { name: configuration.tenant })).toBeVisible();
+  await expect(page.getByRole("banner").getByText(configuration.tenant, { exact: true })).toBeVisible();
 }
 
 async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Equipe" | "Escalas" | "Visão geral"): Promise<void> {
@@ -613,7 +613,7 @@ test.describe("shell OIDC real", () => {
     const renewedExpiration = await oidcAccessTokenExpiration(page);
     expect(renewedExpiration, "O provedor deve substituir o token expirado por outro com validade posterior")
       .toBeGreaterThan(originalExpiration);
-    await expect(page.getByRole("heading", { name: configuration.tenant })).toBeVisible();
+    await expect(page.getByRole("banner").getByText(configuration.tenant,{exact:true})).toBeVisible();
   });
 
   test("bloqueio invalida sessão emitida e reativação limpa a homologação", async ({ browser }) => {
