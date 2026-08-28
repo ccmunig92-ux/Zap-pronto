@@ -53,7 +53,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
   const [authRetrying, setAuthRetrying] = useState(false);
   const [loginError, setLoginError] = useState<string>();
   const [logoutError, setLogoutError] = useState<string>();
-  const [selectedModule, setSelectedModule] = useState<ModuleId>();
+  const [selectedModule, setSelectedModule] = useState<ModuleId | undefined>(() => typeof window !== "undefined" && window.location.pathname === "/configuracoes/canais" ? "CONNECTIONS" : undefined);
   const [navigationStates, setNavigationStates] = useState<Record<string, NavigationState>>({});
   const moduleContentRef = useRef<HTMLDivElement>(null);
   const scheduleClient=useMemo<StaffScheduleClient>(()=>staffScheduleClient??{
@@ -167,6 +167,8 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     if(moduleId===activeModule||activeNavigationState.blocked)return;
     if(activeNavigationState.dirty&&!window.confirm("Descartar as alterações não salvas deste módulo?"))return;
     setNavigationStates({});setSelectedModule(moduleId);
+    if(moduleId === "CONNECTIONS") window.history.replaceState({}, "", "/configuracoes/canais");
+    else if(window.location.pathname === "/configuracoes/canais") window.history.replaceState({}, "", "/");
     queueMicrotask(()=>{const heading=moduleContentRef.current?.querySelector<HTMLElement>("h2");
       if(heading){heading.tabIndex=-1;heading.focus();}});
   }
@@ -210,6 +212,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
         onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
         onNavigationStateChange={navigationReporters.routing}/>}
     {activeModule==="CONNECTIONS"&&canReadChannelConnections&&<ConnectionsPanel client={connectionsClient??apiClient} canManage={canManageChannelConnections}
+      units={currentUser.memberships.map(membership=>({id:membership.unitId,name:membership.unitName}))}
       onAuthenticationRequired={invalidateAuthentication} onAuthorizationChanged={refreshAuthorization}
       onNavigationStateChange={navigationReporters.connections}/>}
     {activeModule==="INBOX"&&inboxUnits.length>0&&<InboxPanel client={inboxClient}
