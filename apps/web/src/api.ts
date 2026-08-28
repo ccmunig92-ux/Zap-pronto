@@ -41,6 +41,9 @@ export const apiClient = {
   listChannelConnections() {
     return transportClient.listChannelConnections();
   },
+  setChannelConnectionMetadata(...parameters: Parameters<typeof transportClient.setChannelConnectionMetadata>) {
+    return transportClient.setChannelConnectionMetadata(...parameters);
+  },
   createUserInvitation(...parameters: Parameters<typeof transportClient.createUserInvitation>) {
     return transportClient.createUserInvitation(...parameters);
   },
