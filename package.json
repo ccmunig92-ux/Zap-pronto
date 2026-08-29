@@ -21,6 +21,9 @@
     "api:generate": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs",
     "api:check": "pnpm build && pnpm --filter @zap-pronto/contracts --filter @zap-pronto/api build && node scripts/generate-api-client.mjs --check"
     ,"release:check": "node scripts/release-check.mjs"
+    ,"release:check:strict": "node scripts/release-check.mjs --strict-git --base-ref origin/main"
+    ,"lovable:intake": "node scripts/lovable-intake.mjs"
+    ,"test:lovable-intake": "node scripts/lovable-intake.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",

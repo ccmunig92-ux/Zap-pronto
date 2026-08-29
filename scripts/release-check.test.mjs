@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { migrationHashes, releaseGatePlan, runReleaseCheck, validateAdminDatabaseUrl } from "./release-check.mjs";
+import { migrationHashes, releaseGatePlan, runReleaseCheck, validateAdminDatabaseUrl, validateGitReleaseState } from "./release-check.mjs";
 
 test("preflight aceita apenas PostgreSQL local e não retorna segredo", () => {
   assert.deepEqual(validateAdminDatabaseUrl("postgresql://owner:never-print@127.0.0.1:5432/postgres"),
@@ -25,6 +26,21 @@ test("plano contém uma única sequência canônica e fail-fast", () => {
   /RELEASE_GATE_FAILED:\/d/);
   assert.equal(calls.length,3);
   assert.equal(output.join("\n").includes("top-secret"),false);
+});
+
+test("gate Git estrito rejeita árvore suja e aceita candidato limpo baseado na origem", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zap-pronto-release-git-"));
+  const git = (...args) => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8" });
+  try {
+    git("init", "-b", "codex/release");
+    git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Release Test");
+    writeFileSync(join(directory, "tracked.txt"), "base\n"); git("add", "."); git("commit", "-m", "base");
+    git("branch", "main");
+    writeFileSync(join(directory, "tracked.txt"), "dirty\n");
+    assert.throws(() => validateGitReleaseState({ cwd: directory, baseRef: "main" }), /GIT_WORKTREE_NOT_CLEAN/);
+    git("checkout", "--", "tracked.txt");
+    assert.deepEqual(validateGitReleaseState({ cwd: directory, baseRef: "main" }), { branch: "codex/release", baseRef: "main" });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("hashes cobrem todas as migrations contíguas até a maior presente", () => {
