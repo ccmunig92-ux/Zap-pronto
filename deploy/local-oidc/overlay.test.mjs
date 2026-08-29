@@ -39,6 +39,8 @@ test("edge preserva variaveis nginx e nunca registra query OAuth", async () => {
   assert.match(compose, /GET \/health\/ready HTTP\/1\.1/);
   assert.match(compose, /LOCAL_OIDC_ATTENDANT_TWO_PASSWORD: \$\{LOCAL_OIDC_ATTENDANT_TWO_PASSWORD:\?required\}/);
   assert.match(compose, /LOCAL_OIDC_SUPERVISOR_PASSWORD: \$\{LOCAL_OIDC_SUPERVISOR_PASSWORD:\?required\}/);
+  assert.match(compose, /META_APP_SECRET_FILE: ""/);
+  assert.match(compose, /META_VERIFY_TOKEN_FILE: ""/);
   assert.match(compose, /\/dev\/tcp\/127\.0\.0\.1\/9000/);
   assert.match(edge, /log_format zap_local_safe/);
   assert.match(edge, /\$request_method \$uri \$server_protocol/);
