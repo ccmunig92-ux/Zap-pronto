@@ -32,6 +32,7 @@ export interface BuildAppOptions {
   readonly pool?: TenantTransactionPool;
   readonly metaWebhook?: MetaWebhookOptions;
   readonly notificationPool?: InboxNotificationPool;
+  readonly notificationConnectTimeoutMs?: number;
 }
 
 const unavailablePool: TenantTransactionPool = {
@@ -107,7 +108,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
   registerStaffScheduleRoutes(app, options.pool ?? unavailablePool);
   registerUnitAssignmentPolicyRoutes(app, options.pool ?? unavailablePool);
   registerChannelConnectionRoutes(app, options.pool ?? unavailablePool);
-  registerInboxEventsRoute(app, options.pool ?? unavailablePool, options.notificationPool);
+  registerInboxEventsRoute(app, options.pool ?? unavailablePool, options.notificationPool,
+    options.notificationConnectTimeoutMs === undefined
+      ? undefined
+      : { notificationConnectTimeoutMs: options.notificationConnectTimeoutMs });
   await registerMetaWebhookRoutes(app, options.pool ?? unavailablePool, options.metaWebhook ?? { enabled: false });
   return app;
 }
