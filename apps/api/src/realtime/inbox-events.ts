@@ -6,6 +6,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const channel = "zap_pronto_inbox";
 const heartbeatMs = 15_000;
 const maximumLifetimeMs = 30 * 60_000;
+const notificationConnectTimeoutMs = 5_000;
+const maximumPendingEvents = 256;
 
 export interface NotificationMessage {
   readonly name?: string;
@@ -23,6 +25,10 @@ export interface InboxNotificationConnection {
 
 export interface InboxNotificationPool {
   connect(): Promise<InboxNotificationConnection>;
+}
+
+interface InboxEventsOptions {
+  readonly notificationConnectTimeoutMs?: number;
 }
 
 interface EventPayload {
@@ -48,6 +54,34 @@ function writeEvent(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+async function connectNotification(
+  pool: InboxNotificationPool,
+  timeoutMs: number,
+): Promise<InboxNotificationConnection> {
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const connection = pool.connect();
+  return new Promise<InboxNotificationConnection>((resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error("NOTIFICATION_CONNECT_TIMEOUT"));
+    }, timeoutMs);
+    timer.unref?.();
+    void connection.then((value) => {
+      if (timedOut) {
+        try { value.release(); } catch { /* best effort for a late pool result */ }
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    }, (error: unknown) => {
+      if (timedOut) return;
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 async function tenantId(client: { query(text: string): Promise<unknown> }): Promise<string> {
   const result = await client.query("SELECT current_app_tenant_id() AS \"tenantId\"") as { rows?: Array<{ tenantId?: unknown }> };
   const value = result.rows?.[0]?.tenantId;
@@ -59,6 +93,7 @@ export function registerInboxEventsRoute(
   app: import("fastify").FastifyInstance,
   pool: TenantTransactionPool,
   notificationPool?: InboxNotificationPool,
+  options: InboxEventsOptions = {},
 ): void {
   app.get("/v1/inbox/events", protectedRoute({
     pool,
@@ -84,19 +119,46 @@ export function registerInboxEventsRoute(
       }
       const requestedUnitId = (request.query as { unitId: string }).unitId;
       const scopedTenantId = await tenantId(client);
-      const listener = await notificationPool.connect();
+      let listener: InboxNotificationConnection;
+      try {
+        listener = await connectNotification(notificationPool,
+          options.notificationConnectTimeoutMs ?? notificationConnectTimeoutMs);
+      } catch {
+        return reply.status(503).type("application/problem+json").send({
+          type: "urn:zap-pronto:error:realtime-unavailable", title: "Service Unavailable", status: 503,
+          detail: "Realtime operacional não está disponível", correlationId: request.id,
+        });
+      }
       const raw = reply.raw;
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       let lifetime: ReturnType<typeof setTimeout> | undefined;
       let closed = false;
+      let streamReady = false;
+      let listenerFailed = false;
+      let clientClosedDuringListen = raw.destroyed || raw.writableEnded;
+      const pendingEvents = new Map<string, { readonly kind: unknown; readonly entityId: unknown }>();
       const onNotification = (message: NotificationMessage) => {
         if (message.channel !== channel && message.name !== channel) return;
         const event = parseEvent(message.payload);
         if (!event || event.tenantId !== scopedTenantId || event.unitId !== requestedUnitId) return;
-        writeEvent(reply, "inbox-change", { kind: event.kind, entityId: event.entityId });
+        const change = { kind: event.kind, entityId: event.entityId };
+        if (!streamReady) {
+          const key = `${String(change.kind)}\u0000${String(change.entityId)}`;
+          if (pendingEvents.has(key)) pendingEvents.delete(key);
+          else if (pendingEvents.size >= maximumPendingEvents) {
+            const oldest = pendingEvents.keys().next().value;
+            if (oldest !== undefined) pendingEvents.delete(oldest);
+          }
+          pendingEvents.set(key, change);
+          return;
+        }
+        writeEvent(reply, "inbox-change", change);
       };
       const onError = () => {
-        if (!closed) writeEvent(reply, "error", { retryable: true });
+        if (!streamReady) { listenerFailed = true; return; }
+        if (closed) return;
+        writeEvent(reply, "error", { retryable: true });
+        cleanup();
         raw.end();
       };
       const cleanup = () => {
@@ -108,8 +170,39 @@ export function registerInboxEventsRoute(
         listener.removeListener("error", onError);
         void listener.query("UNLISTEN zap_pronto_inbox").catch(() => undefined).finally(() => listener.release());
       };
+      const markClientClosedDuringListen = () => { clientClosedDuringListen = true; };
+      raw.once("close", markClientClosedDuringListen);
+      raw.once("error", markClientClosedDuringListen);
+      listener.on("notification", onNotification);
+      listener.on("error", onError);
+      try {
+        await listener.query("LISTEN zap_pronto_inbox");
+      } catch {
+        raw.removeListener("close", markClientClosedDuringListen);
+        raw.removeListener("error", markClientClosedDuringListen);
+        listener.removeListener("notification", onNotification);
+        listener.removeListener("error", onError);
+        listener.release();
+        if (clientClosedDuringListen || raw.destroyed || raw.writableEnded) return undefined;
+        return reply.status(503).type("application/problem+json").send({
+          type: "urn:zap-pronto:error:realtime-unavailable", title: "Service Unavailable", status: 503,
+          detail: "Realtime operacional não está disponível", correlationId: request.id,
+        });
+      }
       raw.once("close", cleanup);
       raw.once("error", cleanup);
+      raw.removeListener("close", markClientClosedDuringListen);
+      raw.removeListener("error", markClientClosedDuringListen);
+      if (closed) return undefined;
+      if (clientClosedDuringListen || raw.destroyed || raw.writableEnded) { cleanup(); return undefined; }
+      if (listenerFailed) {
+        cleanup();
+        if (raw.destroyed || raw.writableEnded) return undefined;
+        return reply.status(503).type("application/problem+json").send({
+          type: "urn:zap-pronto:error:realtime-unavailable", title: "Service Unavailable", status: 503,
+          detail: "Realtime operacional não está disponível", correlationId: request.id,
+        });
+      }
       reply.hijack();
       raw.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -118,17 +211,11 @@ export function registerInboxEventsRoute(
         "x-accel-buffering": "no",
       });
       raw.write(": connected\n\n");
-      listener.on("notification", onNotification);
-      listener.on("error", onError);
-      try {
-        await listener.query("LISTEN zap_pronto_inbox");
-      } catch {
-        cleanup();
-        raw.end();
-        return undefined;
-      }
+      streamReady = true;
+      for (const pendingEvent of pendingEvents.values()) writeEvent(reply, "inbox-change", pendingEvent);
+      pendingEvents.clear();
       heartbeat = setInterval(() => { if (!closed) raw.write(": heartbeat\n\n"); }, heartbeatMs);
-      lifetime = setTimeout(() => raw.end(), maximumLifetimeMs);
+      lifetime = setTimeout(() => { cleanup(); raw.end(); }, maximumLifetimeMs);
       return undefined;
     },
   }));
