@@ -64,6 +64,8 @@ services:
       META_WEBHOOK_ENABLED: "true"
       META_APP_SECRET: local-e2e-public-hmac-vector-v1
       META_VERIFY_TOKEN: local-e2e-public-verify-vector-v1
+      META_APP_SECRET_FILE: ""
+      META_VERIFY_TOKEN_FILE: ""
       META_WEBHOOK_MAX_BODY_BYTES: "65536"
     secrets: [local_tls_ca]
     depends_on:

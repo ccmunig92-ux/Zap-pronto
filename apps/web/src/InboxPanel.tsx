@@ -75,7 +75,7 @@ type InboxSelection = InboxHandoff | ResolvedInboxHandoff;
 type ResolvedFilters={priority:""|InboxHandoff["priority"];disposition:""|ResolveDisposition;resolvedFrom:string;resolvedBefore:string};
 const emptyResolvedFilters:ResolvedFilters={priority:"",disposition:"",resolvedFrom:"",resolvedBefore:""};
 const maximumHistorySpanMs=366*24*60*60*1000;
-const automaticRefreshBaseMs=30_000,automaticRefreshMaximumMs=300_000,automaticRefreshRecoveryMs=1_000;
+const automaticRefreshBaseMs=30_000,automaticRealtimeSafetyMs=20_000,automaticRefreshMaximumMs=300_000,automaticRefreshRecoveryMs=1_000;
 const refreshWindowMaximumItems=400,refreshWindowMaximumRequests=4;
 type RefreshResult="success"|"skipped"|"retryable-failure"|"terminal-auth";
 type ConvergenceState={readonly kind:"updated"|"deferred"|"paused"|"unstable";readonly at?:string};
@@ -139,6 +139,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const [sending, setSending] = useState(false);
   const [cancellingId, setCancellingId] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
+  const [automaticRefreshing,setAutomaticRefreshing]=useState(false);
   const [convergence,setConvergence]=useState<ConvergenceState>({kind:"paused"});
   const previousConvergence=useRef<ConvergenceState["kind"]>("paused");
   const [convergenceAnnouncement,setConvergenceAnnouncement]=useState("Atualização automática pausada.");
@@ -310,9 +311,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     if (actual instanceof ApiProblem && actual.problem.status === 403) {
       generation.current += 1; purgeSensitive(); if(!authorizationFailed.current){authorizationFailed.current=true;onAuthorizationChanged()} return;
     }
-    setError(actual instanceof ApiProblem
-      ? `Não foi possível carregar a Inbox. Correlação: ${actual.problem.correlationId}`
-      : "Não foi possível carregar a Inbox.");
+    setError("Não foi possível carregar a Inbox.");
   }
 
   function failCommittedReconciliation(errorValue: unknown, g: number) {
@@ -518,7 +517,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     const capturedSelected = selected;
     const automatic=origin==="automatic";
     const g = ++generation.current;
-    if(!automatic){setRefreshing(true);setError(undefined);setClosedNotice(undefined)}
+    if(automatic)setAutomaticRefreshing(true);else{setRefreshing(true);setError(undefined);setClosedNotice(undefined)}
     const queueTarget=automatic?Math.max(25,queue?.items.length??0):25;
     const activeTarget=automatic?Math.max(25,active?.items.length??0):25;
     const supervisedTarget=automatic?Math.max(25,supervised?.items.length??0):25;
@@ -589,25 +588,28 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         if(terminal||!automatic)fail(caught,g);if(automatic)setConvergence({kind:terminal?"paused":"unstable"});return terminal?"terminal-auth":"retryable-failure"}
     } finally {
       releaseOperation(operationToken);
-      if (g === generation.current) { refreshFlight.current = false; if(!automatic)setRefreshing(false); }
+      if (g === generation.current) { refreshFlight.current = false; if(automatic)setAutomaticRefreshing(false);else setRefreshing(false); }
     }
   }
 
   automaticRefreshRunner.current=()=>refresh("automatic");
+  const hasRealtimeCapability=Boolean(client.subscribeInboxEvents);
   useEffect(()=>{
     mounted.current=true;
     const cancel=()=>{if(automaticRefreshTimer.current!==undefined){clearTimeout(automaticRefreshTimer.current);automaticRefreshTimer.current=undefined}};
-    const eligible=()=>mounted.current&&!authorizationFailed.current&&!realtimeConnected.current&&document.visibilityState==="visible"&&navigator.onLine!==false;
+    let forceRecovery=false;
+    const eligible=(force=false)=>mounted.current&&!authorizationFailed.current&&(force||!realtimeConnected.current)&&document.visibilityState==="visible"&&navigator.onLine!==false;
     const jitter=(delay:number)=>Math.max(1,Math.round(delay*(.8+Math.random()*.4)));
-    const schedule=(delay:number)=>{cancel();if(eligible())automaticRefreshTimer.current=setTimeout(run,jitter(delay))};
-    const run=async()=>{cancel();if(!eligible())return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
+    const schedule=(delay:number,force=false)=>{cancel();if(eligible(force)){forceRecovery=force;automaticRefreshTimer.current=setTimeout(run,jitter(delay))}};
+    const run=async()=>{cancel();const force=forceRecovery;forceRecovery=false;if(!eligible(force))return;const result=await automaticRefreshRunner.current();if(!mounted.current||result==="terminal-auth")return;
       if(result==="retryable-failure")automaticRefreshFailures.current+=1;else if(result==="success")automaticRefreshFailures.current=0;
-      const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):automaticRefreshBaseMs;schedule(delay)};
-    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs);else{cancel();setConvergence({kind:"paused"})}};
-    const online=()=>schedule(automaticRefreshRecoveryMs),fallback=()=>schedule(automaticRefreshRecoveryMs),offline=()=>{cancel();setConvergence({kind:"paused"})};
-    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("zap-pronto-realtime-fallback",fallback);window.addEventListener("offline",offline);schedule(automaticRefreshBaseMs);
-    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("zap-pronto-realtime-fallback",fallback);window.removeEventListener("offline",offline)};
-  },[]);
+      const delay=result==="retryable-failure"?Math.min(automaticRefreshMaximumMs,automaticRefreshBaseMs*2**Math.max(0,automaticRefreshFailures.current-1)):hasRealtimeCapability?automaticRealtimeSafetyMs:automaticRefreshBaseMs;
+      schedule(delay,hasRealtimeCapability)};
+    const visibility=()=>{if(document.visibilityState==="visible")schedule(automaticRefreshRecoveryMs,true);else{cancel();setConvergence({kind:"paused"})}};
+    const online=()=>schedule(automaticRefreshRecoveryMs,true),fallback=()=>schedule(automaticRefreshRecoveryMs),realtimeRecovery=()=>schedule(automaticRefreshRecoveryMs,true),offline=()=>{cancel();setConvergence({kind:"paused"})};
+    document.addEventListener("visibilitychange",visibility);window.addEventListener("online",online);window.addEventListener("zap-pronto-realtime-fallback",fallback);window.addEventListener("zap-pronto-realtime-recovery",realtimeRecovery);window.addEventListener("offline",offline);schedule(hasRealtimeCapability?5_000:automaticRefreshBaseMs,hasRealtimeCapability);
+    return()=>{mounted.current=false;cancel();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("online",online);window.removeEventListener("zap-pronto-realtime-fallback",fallback);window.removeEventListener("zap-pronto-realtime-recovery",realtimeRecovery);window.removeEventListener("offline",offline)};
+  },[hasRealtimeCapability]);
 
   useEffect(()=>{
     const subscribe=client.subscribeInboxEvents;
@@ -625,7 +627,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       controller=new AbortController();const currentController=controller;realtimeAbort.current=currentController;
       try{
         realtimeConnected.current=true;
-        await subscribe(unitId,currentController.signal,()=>{if(eligible())void automaticRefreshRunner.current()});
+        await subscribe(unitId,currentController.signal,()=>{if(eligible())void automaticRefreshRunner.current().then(result=>{if(result==="skipped"&&eligible())window.dispatchEvent(new Event("zap-pronto-realtime-recovery"))})});
       }catch(cause){
         realtimeConnected.current=false;
         if(currentController.signal.aborted||!mounted.current)return;
@@ -636,10 +638,9 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
         }
         setConvergence({kind:"unstable"});
       }finally{
-        realtimeConnected.current=false;
         const intentionallyStopped=currentController.signal.aborted;
         if(controller===currentController)controller=undefined;
-        if(realtimeAbort.current===currentController)realtimeAbort.current=undefined;
+        if(realtimeAbort.current===currentController){realtimeAbort.current=undefined;realtimeConnected.current=false}
         if(!intentionallyStopped&&mounted.current&&eligible())window.dispatchEvent(new Event("zap-pronto-realtime-fallback"));
         if(!intentionallyStopped&&!disposed&&mounted.current&&eligible()&&!controller)reconnectTimer=setTimeout(()=>{reconnectTimer=undefined;void connect()},automaticRefreshRecoveryMs);
       }
@@ -790,7 +791,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if (g !== generation.current) return;
       if (!claimIntent.current) failCommittedReconciliation(caught, g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
-        claimIntent.current = undefined; setError(caught.problem.detail==="ASSIGNMENT_OUTSIDE_SHIFT"?"Você está fora do turno configurado para esta unidade. Procure a supervisão para garantir a continuidade do atendimento.":`Outro atendimento venceu esta disputa. Correlação: ${caught.problem.correlationId}`);
+        claimIntent.current = undefined; setError(caught.problem.detail==="ASSIGNMENT_OUTSIDE_SHIFT"?"Você está fora do turno configurado para esta unidade. Procure a supervisão para garantir a continuidade do atendimento.":"Outro atendimento venceu esta disputa.");
         try {
           const [queued, mine, alerts, nextDetail, nextMessages] = await Promise.all([client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 }), slaAlertsFirst(unitId), client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 })]);
           if (g === generation.current) { setQueue(queued); setActive(mine); setSlaAlerts(alerts); setSelected(queued.items.find(item => item.id === selected.id) ?? mine.items.find(item => item.id === selected.id)); setDetail(nextDetail); setMessages(nextMessages); }
@@ -818,7 +819,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if (g !== generation.current||capturedUnit!==unitId) return;
       if (!resolveIntent.current) failCommittedReconciliation(caught,g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
-        resolveIntent.current = undefined;purgeSelection(); setError(`O atendimento mudou antes do encerramento. Correlação: ${caught.problem.correlationId}`);
+        resolveIntent.current = undefined;purgeSelection(); setError("O atendimento mudou antes do encerramento.");
         try {
           const [queued, mine,others,closed,alerts] = await Promise.all([client.listHandoffs(queueInput(capturedUnit)), client.listActiveInboxHandoffs({ unitId:capturedUnit, limit: 25 }),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
           if (g === generation.current&&capturedUnit===unitId) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts); }
@@ -845,7 +846,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(!requeueIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
       requeueIntent.current=undefined;purgeSelection();
       try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
-        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError(`O atendimento mudou antes da devolução. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError("O atendimento mudou antes da devolução.")}}catch(refreshError){fail(refreshError,g)}
     }else fail(caught,g);}finally{releaseMutation(lockToken);if(g===generation.current)setRequeueing(false);}
   }
 
@@ -875,7 +876,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
         reopenIntent.current=undefined;purgeSelection();
         try{const[queued,mine,others,closed,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),resolvedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
-          if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setError(`O atendimento mudou antes da reabertura. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+          if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setError("O atendimento mudou antes da reabertura.")}}catch(refreshError){fail(refreshError,g)}
       }else fail(caught,g);
     }finally{releaseMutation(lockToken);if(g===generation.current)setReopening(false)}
   }
@@ -885,7 +886,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     try{const candidates=await client.listInboxHandoffTransferCandidates(target.handoffId);if(g!==generation.current)return;
       setTransferCandidates(candidates);setTransferTargetUserId(candidates.items[0]?.id??"");setTransferReason("");setTransferOpen(true)}catch(caught){if(g===generation.current){
         if(caught instanceof AuthenticationRequired||caught instanceof ApiProblem&&[401,403].includes(caught.problem.status))fail(caught,g);
-        else setError(caught instanceof ApiProblem?`Não foi possível carregar os atendentes elegíveis. Correlação: ${caught.problem.correlationId}`:"Não foi possível carregar os atendentes elegíveis.")
+        else setError("Não foi possível carregar os atendentes elegíveis.")
       }}finally{releaseOperation(operationToken);if(g===generation.current)setLoadingTransferCandidates(false)}}
   function closeTransfer(){if(mutationLock.current)return;setTransferOpen(false);setTransferCandidates(undefined);setTransferTargetUserId("");setTransferReason("");transferIntent.current=undefined}
   async function transfer(){const target=detail?.transferTarget;if(!selected||!target||!transferTargetUserId||!transferReason||!detail.allowedActions.includes("TRANSFER_HANDOFF"))return;
@@ -899,7 +900,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     }catch(caught){if(g!==generation.current||capturedUnit!==unitId)return;if(!transferIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
       transferIntent.current=undefined;purgeSelection();
       try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(capturedUnit)),client.listActiveInboxHandoffs({unitId:capturedUnit,limit:25}),supervisedFirst(capturedUnit),slaAlertsFirst(capturedUnit)]);
-        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError(`O atendimento mudou antes da transferência. Correlação: ${caught.problem.correlationId}`)}}catch(refreshError){fail(refreshError,g)}
+        if(g===generation.current&&capturedUnit===unitId){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);setError("O atendimento mudou antes da transferência.")}}catch(refreshError){fail(refreshError,g)}
     }else fail(caught,g)}finally{releaseMutation(lockToken);if(g===generation.current)setTransferring(false)}}
 
   async function takeover(){const target=detail?.takeoverTarget;
@@ -916,7 +917,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       takeoverIntent.current=undefined;setTakeoverConfirmOpen(false);setClosedNotice("Atendimento assumido pela supervisão.");
       if(nextSelected){setSelected(nextSelected);setDetail(nextDetail);setMessages(nextMessages)}else purgeSelection("Atendimento assumido; atualize a lista para abri-lo.");
     }catch(caught){if(g!==generation.current)return;if(!takeoverIntent.current)failCommittedReconciliation(caught,g);else if(caught instanceof ApiProblem&&[404,409].includes(caught.problem.status)){
-      takeoverIntent.current=undefined;setError(`O atendimento mudou antes da assunção. Correlação: ${caught.problem.correlationId}`);
+      takeoverIntent.current=undefined;setError("O atendimento mudou antes da assunção.");
       try{const[queued,mine,others,alerts]=await Promise.all([client.listHandoffs(queueInput(unitId)),client.listActiveInboxHandoffs({unitId,limit:25}),supervisedFirst(unitId),slaAlertsFirst(unitId)]);
         if(g===generation.current){setQueue(queued);setActive(mine);setSupervised(others);setSlaAlerts(alerts);purgeSelection()}}catch(refreshError){fail(refreshError,g)}}else fail(caught,g)
     }finally{releaseMutation(lockToken);if(g===generation.current)setTakingOver(false)}}
@@ -940,7 +941,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if (g !== generation.current) return;
       if (!sendIntent.current) failCommittedReconciliation(caught,g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
-        sendIntent.current = undefined; setError(`A conversa mudou antes do envio. Correlação: ${caught.problem.correlationId}`);
+        sendIntent.current = undefined; setError("A conversa mudou antes do envio.");
         try {
           const [nextDetail, nextMessages, queued, mine] = await Promise.all([client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 }), client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 })]);
           if (g === generation.current) { setDetail(nextDetail); setMessages(nextMessages); setQueue(queued); setActive(mine); }
@@ -969,7 +970,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if (g !== generation.current) return;
       if (!cancelIntent.current) failCommittedReconciliation(caught,g);
       else if (caught instanceof ApiProblem && [404, 409].includes(caught.problem.status)) {
-        cancelIntent.current = undefined; setError(`A intenção já não pode ser cancelada. Correlação: ${caught.problem.correlationId}`);
+        cancelIntent.current = undefined; setError("A intenção já não pode ser cancelada.");
         try {
           const [nextDetail, nextMessages, queued, mine] = await Promise.all([client.getInboxConversation(selected.conversationId), client.listInboxConversationMessages(selected.conversationId, { limit: 25 }), client.listHandoffs(queueInput(unitId)), client.listActiveInboxHandoffs({ unitId, limit: 25 })]);
           if (g === generation.current) { setDetail(nextDetail); setMessages(nextMessages); setQueue(queued); setActive(mine); }
@@ -979,11 +980,11 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     } finally { releaseMutation(lockToken); if (g === generation.current) setCancellingId(undefined); }
   }
 
-  const actionsDisabled = refreshing;
+  const actionsDisabled = refreshing||automaticRefreshing;
   const convergenceLabel=convergence.kind==="updated"?"Atualizado":convergence.kind==="deferred"?"Atualização adiada enquanto há uma operação em andamento.":convergence.kind==="unstable"?"Conexão instável; nova tentativa automática agendada.":"Atualização automática pausada.";
   return <section className="inbox" aria-busy={refreshing}>
     <div className="inbox-title"><div><p className="inbox-eyebrow">Central de atendimento</p><h2>Inbox</h2></div>
-      <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || refreshing || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
+      <div><p>{convergenceLabel}</p>{convergence.at&&<p>Última sincronização local: <time dateTime={convergence.at}>{new Date(convergence.at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</time></p>}<span role="status" aria-live="polite" aria-atomic="true" style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clip:"rect(0, 0, 0, 0)",whiteSpace:"nowrap",border:0}}>{convergenceAnnouncement}</span><button className="inbox-refresh" type="button" onClick={()=>{void refresh()}} disabled={!unitId || actionsDisabled || mutationBusy}>{refreshing ? "Atualizando…" : "Atualizar Inbox"}</button></div></div>
     {canReadSlaAlerts&&capacityAlert?.state==="ACTIVE"&&<aside role="alert" aria-labelledby="capacity-alert-title"><h3 id="capacity-alert-title">Demanda sustentada com capacidade disponível</h3><p>{capacityAlert.sustainedQueuedCount} atendimentos permanecem na fila há pelo menos {capacityAlert.sustainedMinutes} minutos, com capacidade agregada de {capacityAlert.availableCapacity}.</p><p>Distribua a fila conforme prioridade, SLA e regras de atribuição. Este alerta não classifica integrantes.</p></aside>}
     {canReadSlaAlerts&&capacityAlertUnavailable&&<p role="status">Alerta agregado temporariamente indisponível.</p>}
     {canReadSlaAlerts&&client.listCapacityAlertEpisodes&&<section className="inbox-queue-section" aria-labelledby="capacity-episodes-title"><div className="inbox-section-heading"><h3 id="capacity-episodes-title">Episódios de capacidade</h3><span aria-label={`${capacityEpisodes?.items.length??0} episódios de capacidade`}>{capacityEpisodes?.items.length??0}</span></div>
