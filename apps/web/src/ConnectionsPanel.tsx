@@ -18,16 +18,35 @@ export interface ConnectionsPanelProps {
   readonly onNavigationStateChange?: (state: NavigationState) => void;
 }
 
+type ConnectionFormState = {
+  displayName: string;
+  wabaId: string;
+  phoneNumberId: string;
+  status: ChannelConnectionMetadataRequest["status"];
+  scope: ChannelConnectionMetadataRequest["scope"];
+  secretReference: string;
+  unitIds: string[];
+};
+
+function emptyConnectionForm(): ConnectionFormState {
+  return { displayName: "", wabaId: "", phoneNumberId: "", status: "DISCONNECTED", scope: "CORPORATE", secretReference: "", unitIds: [] };
+}
+
 export function ConnectionsPanel({ canManage, units = [], client, onAuthenticationRequired, onAuthorizationChanged, onNavigationStateChange }: ConnectionsPanelProps) {
   const [page, setPage] = useState<ChannelConnectionsPage>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [editing, setEditing] = useState<ChannelConnection>();
   const [formOpen, setFormOpen] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState<string>();
+  const [idempotencyIntent, setIdempotencyIntent] = useState<{ fingerprint: string; key: string }>();
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ displayName: "", wabaId: "", phoneNumberId: "", status: "DISCONNECTED" as ChannelConnectionMetadataRequest["status"], scope: "CORPORATE" as ChannelConnectionMetadataRequest["scope"], secretReference: "", unitIds: [] as string[] });
-  useEffect(() => { onNavigationStateChange?.({ blocked: false, dirty: false }); }, [onNavigationStateChange]);
+  const [form, setForm] = useState<ConnectionFormState>(emptyConnectionForm);
+  const [initialForm, setInitialForm] = useState<ConnectionFormState>(emptyConnectionForm);
+  useEffect(() => {
+    const dirty = formOpen && JSON.stringify(form) !== JSON.stringify(initialForm);
+    onNavigationStateChange?.({ blocked: saving, dirty });
+    return () => { onNavigationStateChange?.({ blocked: false, dirty: false }); };
+  }, [form, formOpen, initialForm, onNavigationStateChange, saving]);
   useEffect(() => {
     if (!client) { setLoading(false); return; }
     let active = true;
@@ -53,12 +72,15 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
   const statusLabel = (status:string) => status === "ACTIVE" ? "Ativa" : status === "DEGRADED" ? "Degradada" : "Desconectada";
   const scopeLabel = (scope:string, unitIds:readonly string[]) => scope === "CORPORATE" ? "Corporativa · todas as unidades" :
     scope === "SINGLE_UNIT" ? "Uma unidade" : `${unitIds.length} unidades selecionadas`;
+  const linkedUnitNames = (unitIds: readonly string[]) => unitIds.map(unitId => units.find(unit => unit.id === unitId)?.name ?? unitId);
   function openForm(connection?: ChannelConnection): void {
     if (connection && !window.confirm("Confirmar edição desta conexão?")) return;
     setEditing(connection);
     setFormOpen(true);
-    setIdempotencyKey(crypto.randomUUID());
-    setForm({ displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: "", unitIds: [...(connection?.unitIds ?? [])] });
+    setIdempotencyIntent(undefined);
+    const nextForm: ConnectionFormState = { displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: "", unitIds: [...(connection?.unitIds ?? [])] };
+    setForm(nextForm);
+    setInitialForm(nextForm);
   }
   function updateScope(scope: ChannelConnectionMetadataRequest["scope"]): void { setForm(current => ({ ...current, scope, unitIds: scope === "CORPORATE" ? [] : scope === "SINGLE_UNIT" ? current.unitIds.slice(0, 1) : current.unitIds })); }
   async function save(): Promise<void> {
@@ -71,12 +93,16 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       const payload: ChannelConnectionMetadataRequest = { scope: form.scope, wabaId: form.wabaId, phoneNumberId: form.phoneNumberId, status: form.status, secretReference: form.secretReference, unitIds: validUnits };
       if (form.displayName) payload.displayName = form.displayName;
       if (editing) payload.id = editing.id;
-      const response = await client.setChannelConnectionMetadata(payload, idempotencyKey ?? crypto.randomUUID());
+      const fingerprint = JSON.stringify(payload);
+      const intent = idempotencyIntent?.fingerprint === fingerprint ? idempotencyIntent : { fingerprint, key: crypto.randomUUID() };
+      if (intent !== idempotencyIntent) setIdempotencyIntent(intent);
+      const response = await client.setChannelConnectionMetadata(payload, intent.key);
       setPage(current => ({ items: editing ? current?.items.map(item => item.id === response.connection.id ? response.connection : item) ?? [response.connection] : [...(current?.items ?? []), response.connection] }));
-      setEditing(undefined); setFormOpen(false); setIdempotencyKey(undefined); setForm(current => ({ ...current, secretReference: "" }));
+      setEditing(undefined); setFormOpen(false); setIdempotencyIntent(undefined); setForm(current => ({ ...current, secretReference: "" }));
     } catch (cause: unknown) {
       if (cause instanceof AuthenticationRequired || cause instanceof ApiProblem && cause.problem.status === 401) { onAuthenticationRequired?.(); return; }
       if (cause instanceof ApiProblem && cause.problem.status === 403) { onAuthorizationChanged?.(); setError("Você não tem permissão para alterar os canais deste tenant."); return; }
+      if (cause instanceof ApiProblem && cause.problem.status === 400) { setError("Revise os dados da conexão e tente novamente."); return; }
       if (cause instanceof ApiProblem && cause.problem.status === 409) { setError("A conexão foi alterada por outra operação. Atualize a lista e tente novamente."); return; }
       setError("Não foi possível salvar a conexão de canal.");
     } finally { setSaving(false); }
@@ -114,6 +140,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
         <span className={`connection-badge connection-badge-${connection.status.toLowerCase()}`}>{statusLabel(connection.status)}</span>
       </div>
       <p className="connection-scope">{scopeLabel(connection.scope,connection.unitIds)}</p>
+      {connection.scope !== "CORPORATE" && <p className="connection-units">Unidades vinculadas: {linkedUnitNames(connection.unitIds).join(", ")}</p>}
       <dl className="connection-metadata">
         <div><dt>WABA</dt><dd>{connection.wabaId || "Não informado"}</dd></div>
         <div><dt>Phone Number ID</dt><dd>{connection.phoneNumberId}</dd></div>
@@ -143,7 +170,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       <label>Escopo<select value={form.scope} onChange={event => updateScope(event.target.value as ChannelConnectionMetadataRequest["scope"])}><option value="CORPORATE">Corporativo</option><option value="SINGLE_UNIT">Uma unidade</option><option value="SELECTED_UNITS">Unidades selecionadas</option></select></label>
       {form.scope !== "CORPORATE" && <fieldset><legend>Unidades</legend>{units.map(unit => <label key={unit.id}><input type="checkbox" checked={form.unitIds.includes(unit.id)} onChange={event => setForm(current => ({ ...current, unitIds: event.target.checked ? [...current.unitIds, unit.id] : current.unitIds.filter(id => id !== unit.id) }))} />{unit.name}</label>)}</fieldset>}
       <p className="muted">O status operacional é determinado pelo backend e pela reconciliação da conexão.</p>
-      <div className="connection-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar conexão"}</button><button type="button" onClick={() => { setEditing(undefined); setFormOpen(false); setIdempotencyKey(undefined); }} disabled={saving}>Cancelar</button></div>
+      <div className="connection-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar conexão"}</button><button type="button" onClick={() => { setEditing(undefined); setFormOpen(false); setIdempotencyIntent(undefined); }} disabled={saving}>Cancelar</button></div>
     </form>}
     <aside className="connection-prerequisites" aria-label="Pré-requisitos da conexão">
       <strong>Pré-requisitos do ambiente</strong>
