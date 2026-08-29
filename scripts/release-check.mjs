@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,6 +39,35 @@ export function releaseGatePlan(platform = process.platform) {
   ];
 }
 
+function gitOutput(cwd, args) {
+  try {
+    return execFileSync(process.platform === "win32" ? "git.exe" : "git", ["-C", cwd, ...args], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: false,
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Opt-in release identity gate. Normal local development may keep using
+ * release:check without this gate; strict release evidence must not.
+ */
+export function validateGitReleaseState({ cwd = process.cwd(), baseRef = "origin/main" } = {}) {
+  const branch = gitOutput(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (!branch) throw new Error("GIT_HEAD_DETACHED");
+  const status = gitOutput(cwd, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  if (status === undefined) throw new Error("GIT_REPOSITORY_REQUIRED");
+  if (status.length > 0) throw new Error("GIT_WORKTREE_NOT_CLEAN");
+  if (!gitOutput(cwd, ["rev-parse", "--verify", `${baseRef}^{commit}`])) {
+    throw new Error("GIT_BASE_REF_REQUIRED");
+  }
+  const ancestor = spawnSync(process.platform === "win32" ? "git.exe" : "git",
+    ["-C", cwd, "merge-base", "--is-ancestor", baseRef, "HEAD"], { stdio: "ignore", shell: false });
+  if (ancestor.status !== 0) throw new Error("GIT_BASE_REF_NOT_ANCESTOR");
+  return { branch, baseRef };
+}
+
 export function migrationHashes(directory = resolve("database/migrations")) {
   const entries = readdirSync(directory).sort();
   const malformed = entries.find((name) => /^\d{4}/.test(name) && !/^\d{4}_[a-z0-9_]+\.sql$/.test(name));
@@ -69,7 +98,8 @@ function defaultRun(command, args, options) {
 }
 
 export function runReleaseCheck({ env = process.env, cwd = process.cwd(), platform = process.platform,
-  run = defaultRun, output = console.log } = {}) {
+  run = defaultRun, output = console.log, strictGit = false, baseRef = "origin/main" } = {}) {
+  if (strictGit || env.RELEASE_REQUIRE_CLEAN_GIT === "1") validateGitReleaseState({ cwd, baseRef });
   validateAdminDatabaseUrl(env.DATABASE_ADMIN_URL);
   for (const [command, args] of releaseGatePlan(platform)) {
     output(`[release:check] ${args.join(" ")}`);
@@ -83,7 +113,10 @@ export function runReleaseCheck({ env = process.env, cwd = process.cwd(), platfo
 
 const invoked = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (invoked) {
-  try { runReleaseCheck(); } catch (error) {
+  const strictGit = process.argv.includes("--strict-git");
+  const baseIndex = process.argv.indexOf("--base-ref");
+  const baseRef = baseIndex >= 0 ? process.argv[baseIndex + 1] : "origin/main";
+  try { runReleaseCheck({ strictGit, baseRef }); } catch (error) {
     console.error(error instanceof Error ? error.message : "RELEASE_CHECK_FAILED");
     process.exitCode = 1;
   }
