@@ -1,7 +1,10 @@
-import { UserManager, WebStorageStateStore } from "oidc-client-ts";
+import { InMemoryWebStorage, UserManager, WebStorageStateStore } from "oidc-client-ts";
 
 let manager: UserManager | undefined;
 let retryInitialization: Promise<AuthInitializationResult> | undefined;
+// The access/ID tokens must remain process-local. Only the PKCE interaction
+// state is persisted in sessionStorage so a redirect can safely round-trip.
+const inMemoryUserStore = new WebStorageStateStore({ store: new InMemoryWebStorage() });
 export type AuthInitializationResult =
   { status: "ready" } | { status: "error" } | { status: "redirecting" } | { status: "blocked" };
 export function isAuthConfigured(): boolean { return manager !== undefined; }
@@ -34,12 +37,15 @@ export async function initializeAuth(): Promise<AuthInitializationResult> {
       const clearing = clearCallbackUrl(callbackUrl);
       if (clearing !== "cleared") return { status: clearing };
     }
+    const audience = import.meta.env.VITE_OIDC_AUDIENCE?.trim();
     candidate = new UserManager({ authority, client_id: clientId,
+      ...(audience ? { extraQueryParams: { audience } } : {}),
       redirect_uri: import.meta.env.VITE_OIDC_REDIRECT_URI ?? window.location.origin,
       response_type: "code", scope: import.meta.env.VITE_OIDC_SCOPE ?? "openid profile email",
       post_logout_redirect_uri: import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI ?? window.location.origin,
       automaticSilentRenew: import.meta.env.VITE_OIDC_AUTOMATIC_SILENT_RENEW === "true",
-      userStore: new WebStorageStateStore({ store: window.sessionStorage }) });
+      stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
+      userStore: inMemoryUserStore });
     if (hasCallback) {
       await candidate.signinRedirectCallback(originalCallbackUrl);
     }

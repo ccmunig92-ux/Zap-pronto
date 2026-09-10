@@ -7,23 +7,44 @@ const mocks = vi.hoisted(() => ({
   removeUser: vi.fn(),
   clearStaleState: vi.fn(),
   getUser: vi.fn(),
+  stores: [] as unknown[],
 }));
 vi.mock("oidc-client-ts", () => ({
-  UserManager: vi.fn(function UserManagerMock() { return mocks.createUserManager(); }),
-  WebStorageStateStore: vi.fn(),
+  UserManager: vi.fn(function UserManagerMock(options: unknown) { return mocks.createUserManager(options); }),
+  InMemoryWebStorage: vi.fn(function InMemoryWebStorageMock() { return {}; }),
+  WebStorageStateStore: vi.fn(function WebStorageStateStoreMock(options: unknown) { mocks.stores.push(options); return {}; }),
 }));
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  mocks.stores.length = 0;
   vi.stubEnv("VITE_OIDC_AUTHORITY", "https://identity.example.test");
   vi.stubEnv("VITE_OIDC_CLIENT_ID", "web-client");
+  vi.stubEnv("VITE_OIDC_AUDIENCE", "");
   mocks.createUserManager.mockReturnValue(mocks);
   window.history.replaceState({}, "", "/callback");
   delete window.__ZAP_PRONTO_AUTH__;
 });
 
 describe("OIDC bootstrap", () => {
+  it("requests the API audience while preserving code flow", async () => {
+    vi.stubEnv("VITE_OIDC_AUDIENCE", " https://api.example.test ");
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(mocks.createUserManager).toHaveBeenCalledWith(expect.objectContaining({
+      extraQueryParams: { audience: "https://api.example.test" },
+      response_type: "code", scope: "openid profile email",
+    }));
+  });
+
+  it.each(["", "   "])("omits optional audience when blank (%j)", async (value) => {
+    vi.stubEnv("VITE_OIDC_AUDIENCE", value);
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(mocks.createUserManager.mock.calls[0]?.[0]).not.toHaveProperty("extraQueryParams");
+  });
+
   it("removes the complete callback query and fragment before returning a sanitized error", async () => {
     window.history.replaceState({}, "", "/callback?error=access_denied&error_description=secret&vendor=value#access_token=token");
     mocks.signinRedirectCallback.mockRejectedValueOnce(new Error("invalid state"));
@@ -55,6 +76,14 @@ describe("OIDC bootstrap", () => {
     );
     expect(isAuthConfigured()).toBe(true);
     expect(window.__ZAP_PRONTO_AUTH__).toBeDefined();
+  });
+
+  it("keeps user tokens in memory and persists only redirect state", async () => {
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(mocks.stores).toHaveLength(2);
+    expect(mocks.stores[0]).toEqual(expect.objectContaining({ store: expect.anything() }));
+    expect(mocks.stores[1]).toEqual({ store: window.sessionStorage });
   });
 
   it("returns a sanitized error when the OIDC client cannot be constructed", async () => {

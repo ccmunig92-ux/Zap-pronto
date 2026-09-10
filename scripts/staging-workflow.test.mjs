@@ -13,6 +13,12 @@ test("publication is manual, default-branch-only and environment-scoped", () => 
   assert.doesNotMatch(source, /^  (?:pull_request|push):/m);
 });
 
+test("public web build validates and forwards the API audience", () => {
+  assert.match(source, /OIDC_AUDIENCE: \$\{\{ vars\.OIDC_AUDIENCE \}\}/);
+  assert.match(source, /test -n "\$OIDC_AUDIENCE"/);
+  assert.equal((source.match(/VITE_OIDC_AUDIENCE=\$\{\{ vars\.OIDC_AUDIENCE \}\}/g) ?? []).length, 2);
+});
+
 test("external OIDC uses the canonical harness in restricted external mode", () => {
   assert.match(oidcSource, /workflow_dispatch:/);
   assert.match(oidcSource, /environment: oidc-homologation/);

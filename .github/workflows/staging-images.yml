@@ -31,11 +31,13 @@ jobs:
       - name: Validate public web build configuration
         env:
           OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
           OIDC_WEB_CLIENT_ID: ${{ vars.OIDC_WEB_CLIENT_ID }}
           OIDC_WEB_REDIRECT_URI: ${{ vars.OIDC_WEB_REDIRECT_URI }}
           OIDC_WEB_POST_LOGOUT_REDIRECT_URI: ${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
         run: |
           test -n "$OIDC_ISSUER"
+          test -n "$OIDC_AUDIENCE"
           test -n "$OIDC_WEB_CLIENT_ID"
           test -n "$OIDC_WEB_REDIRECT_URI"
           test -n "$OIDC_WEB_POST_LOGOUT_REDIRECT_URI"
@@ -85,6 +87,7 @@ jobs:
           build-args: |
             VITE_OIDC_AUTHORITY=${{ vars.OIDC_ISSUER }}
             VITE_OIDC_CLIENT_ID=${{ vars.OIDC_WEB_CLIENT_ID }}
+            VITE_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}
             VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
             VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
           cache-from: type=gha,scope=staging-web
@@ -110,6 +113,7 @@ jobs:
           build-args: |
             VITE_OIDC_AUTHORITY=${{ vars.OIDC_ISSUER }}
             VITE_OIDC_CLIENT_ID=${{ vars.OIDC_WEB_CLIENT_ID }}
+            VITE_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}
             VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
             VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
           cache-from: type=gha,scope=staging-web
