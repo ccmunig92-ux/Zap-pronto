@@ -52,6 +52,47 @@ describe("ConnectionsPanel", () => {
     expect(screen.queryByLabelText(/token|senha|secret/i)).toBeNull();
   });
 
+  it("permite cadastrar outra conexão quando o tenant já possui uma", async () => {
+    const set = vi.fn();
+    render(<ConnectionsPanel client={{ listChannelConnections: vi.fn().mockResolvedValue({ items: [connection] }), setChannelConnectionMetadata: set }} canManage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Nova conexão" }));
+    expect(screen.getByRole("form", { name: "Configurar conexão" })).toBeTruthy();
+    expect((screen.getByLabelText("WABA ID") as HTMLInputElement).value).toBe("");
+  });
+
+  it("mantém a lista visível quando uma edição falha", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const set = vi.fn().mockRejectedValue(new ApiProblem({ type: "urn:test", title: "stale", status: 409, correlationId: "private" }));
+    render(<ConnectionsPanel client={{ listChannelConnections: vi.fn().mockResolvedValue({ items: [connection] }), setChannelConnectionMetadata: set }} canManage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar conexão" }));
+    fireEvent.change(screen.getByLabelText(/Referência protegida do segredo/), { target: { value: "meta.production" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar conexão" }));
+    expect(await screen.findByText("A conexão foi alterada por outra operação. Atualize a lista e tente novamente.")).toBeTruthy();
+    expect(screen.getByText("Principal — pode atender mais de uma unidade.")).toBeTruthy();
+    confirm.mockRestore();
+  });
+
+  it("ignora uma leitura antiga que termina depois de salvar", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    let resolveStale!: (value: { items: typeof connection[] }) => void;
+    const stale = new Promise<{ items: typeof connection[] }>(resolve => { resolveStale = resolve; });
+    const list = vi.fn().mockResolvedValueOnce({ items: [connection] }).mockReturnValueOnce(stale);
+    const set = vi.fn(async (input: { displayName?: string }) => ({ connection: { ...connection, displayName: input.displayName ?? "Principal" }, replayed: false }));
+    const stableClient = { listChannelConnections: list, setChannelConnectionMetadata: set };
+    const view = render(<ConnectionsPanel client={stableClient} canManage onAuthenticationRequired={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar conexão" }));
+    fireEvent.change(screen.getByLabelText("Nome da conexão"), { target: { value: "Principal atualizada" } });
+    fireEvent.change(screen.getByLabelText(/Referência protegida do segredo/), { target: { value: "meta.production" } });
+    view.rerender(<ConnectionsPanel client={stableClient} canManage onAuthenticationRequired={() => undefined} />);
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar conexão" }));
+    expect(await screen.findByText("Principal atualizada — pode atender mais de uma unidade.")).toBeTruthy();
+    resolveStale({ items: [connection] });
+    await Promise.resolve();
+    expect(screen.getByText("Principal atualizada — pode atender mais de uma unidade.")).toBeTruthy();
+    confirm.mockRestore();
+  });
+
   it("representa escopo multiunidade sem associar a conexão a uma única unidade", async () => {
     const selectedUnitsClient = { listChannelConnections: vi.fn().mockResolvedValue({ items: [{
       id: "a4000000-0000-4000-8000-000000000002", type: "WHATSAPP", scope: "SELECTED_UNITS",

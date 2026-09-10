@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChannelConnection, ChannelConnectionMetadataRequest, ChannelConnectionsPage } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import type { NavigationState } from "./App.js";
@@ -35,13 +35,15 @@ function emptyConnectionForm(): ConnectionFormState {
 export function ConnectionsPanel({ canManage, units = [], client, onAuthenticationRequired, onAuthorizationChanged, onNavigationStateChange }: ConnectionsPanelProps) {
   const [page, setPage] = useState<ChannelConnectionsPage>();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
+  const [formError, setFormError] = useState<string>();
   const [editing, setEditing] = useState<ChannelConnection>();
   const [formOpen, setFormOpen] = useState(false);
   const [idempotencyIntent, setIdempotencyIntent] = useState<{ fingerprint: string; key: string }>();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<ConnectionFormState>(emptyConnectionForm);
   const [initialForm, setInitialForm] = useState<ConnectionFormState>(emptyConnectionForm);
+  const fetchGeneration = useRef(0);
   useEffect(() => {
     const dirty = formOpen && JSON.stringify(form) !== JSON.stringify(initialForm);
     onNavigationStateChange?.({ blocked: saving, dirty });
@@ -50,19 +52,20 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
   useEffect(() => {
     if (!client) { setLoading(false); return; }
     let active = true;
-    setLoading(true); setError(undefined);
+    const generation = ++fetchGeneration.current;
+    setLoading(true); setLoadError(undefined);
     client.listChannelConnections().then(next => {
-      if (active) setPage(next);
+      if (active && generation === fetchGeneration.current) setPage(next);
     }).catch((cause: unknown) => {
-      if (!active) return;
+      if (!active || generation !== fetchGeneration.current) return;
       if (cause instanceof AuthenticationRequired || cause instanceof ApiProblem && cause.problem.status === 401) {
         onAuthenticationRequired?.(); return;
       }
       if (cause instanceof ApiProblem && cause.problem.status === 403) {
-        onAuthorizationChanged?.(); setError("Você não tem permissão para consultar os canais deste tenant."); return;
+        onAuthorizationChanged?.(); setLoadError("Você não tem permissão para consultar os canais deste tenant."); return;
       }
-      setError("Não foi possível carregar as conexões de canais.");
-    }).finally(() => { if (active) setLoading(false); });
+      setLoadError("Não foi possível carregar as conexões de canais.");
+    }).finally(() => { if (active && generation === fetchGeneration.current) setLoading(false); });
     return () => { active = false; };
   }, [client, onAuthenticationRequired, onAuthorizationChanged]);
 
@@ -80,6 +83,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
     if (connection && !window.confirm("Confirmar edição desta conexão?")) return;
     setEditing(connection);
     setFormOpen(true);
+    setFormError(undefined);
     setIdempotencyIntent(undefined);
     const nextForm: ConnectionFormState = { displayName: connection?.displayName ?? "", wabaId: connection?.wabaId ?? "", phoneNumberId: connection?.phoneNumberId ?? "", status: (connection?.status === "ACTIVE" || connection?.status === "DEGRADED" ? connection.status : "DISCONNECTED"), scope: connection?.scope ?? "CORPORATE", secretReference: "", unitIds: [...(connection?.unitIds ?? [])] };
     setForm(nextForm);
@@ -89,9 +93,10 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
   async function save(): Promise<void> {
     if (!client?.setChannelConnectionMetadata) return;
     const validUnits = form.scope === "CORPORATE" ? [] : form.unitIds;
-    if ((form.scope === "SINGLE_UNIT" && validUnits.length !== 1) || (form.scope === "SELECTED_UNITS" && (validUnits.length < 1 || validUnits.length > 100))) { setError("Selecione as unidades exigidas pelo escopo da conexão."); return; }
-    if (!form.secretReference) { setError("Informe a referência protegida do segredo."); return; }
-    setSaving(true); setError(undefined);
+    if ((form.scope === "SINGLE_UNIT" && validUnits.length !== 1) || (form.scope === "SELECTED_UNITS" && (validUnits.length < 1 || validUnits.length > 100))) { setFormError("Selecione as unidades exigidas pelo escopo da conexão."); return; }
+    if (!form.secretReference) { setFormError("Informe a referência protegida do segredo."); return; }
+    fetchGeneration.current += 1;
+    setLoading(false); setSaving(true); setFormError(undefined);
     try {
       const payload: ChannelConnectionMetadataRequest = { scope: form.scope, wabaId: form.wabaId, phoneNumberId: form.phoneNumberId, status: form.status, secretReference: form.secretReference, unitIds: validUnits };
       if (form.displayName) payload.displayName = form.displayName;
@@ -101,13 +106,13 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       if (intent !== idempotencyIntent) setIdempotencyIntent(intent);
       const response = await client.setChannelConnectionMetadata(payload, intent.key);
       setPage(current => ({ items: editing ? current?.items.map(item => item.id === response.connection.id ? response.connection : item) ?? [response.connection] : [...(current?.items ?? []), response.connection] }));
-      setEditing(undefined); setFormOpen(false); setIdempotencyIntent(undefined); setForm(current => ({ ...current, secretReference: "" }));
+      setEditing(undefined); setFormOpen(false); setFormError(undefined); setIdempotencyIntent(undefined); setForm(current => ({ ...current, secretReference: "" }));
     } catch (cause: unknown) {
       if (cause instanceof AuthenticationRequired || cause instanceof ApiProblem && cause.problem.status === 401) { onAuthenticationRequired?.(); return; }
-      if (cause instanceof ApiProblem && cause.problem.status === 403) { onAuthorizationChanged?.(); setError("Você não tem permissão para alterar os canais deste tenant."); return; }
-      if (cause instanceof ApiProblem && cause.problem.status === 400) { setError("Revise os dados da conexão e tente novamente."); return; }
-      if (cause instanceof ApiProblem && cause.problem.status === 409) { setError("A conexão foi alterada por outra operação. Atualize a lista e tente novamente."); return; }
-      setError("Não foi possível salvar a conexão de canal.");
+      if (cause instanceof ApiProblem && cause.problem.status === 403) { onAuthorizationChanged?.(); setFormError("Você não tem permissão para alterar os canais deste tenant."); return; }
+      if (cause instanceof ApiProblem && cause.problem.status === 400) { setFormError("Revise os dados da conexão e tente novamente."); return; }
+      if (cause instanceof ApiProblem && cause.problem.status === 409) { setFormError("A conexão foi alterada por outra operação. Atualize a lista e tente novamente."); return; }
+      setFormError("Não foi possível salvar a conexão de canal.");
     } finally { setSaving(false); }
   }
 
@@ -121,9 +126,9 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
     </div>
     <p className="connections-description">Acompanhe as conexões de canal, o escopo de atendimento e a disponibilidade da referência protegida no servidor.</p>
     {!canManage && <p className="connection-readonly" role="status"><strong>Modo somente leitura.</strong> Somente administradores do tenant podem configurar canais.</p>}
-    {error && <p role="alert">{error}</p>}
+    {loadError && <p role="alert">{loadError}</p>}
     {loading && <div className="connection-loading" aria-busy="true" aria-live="polite"><span/><span/><span/><p>Carregando conexões…</p></div>}
-    {!loading && !error && connections.length === 0 && <>
+    {!loading && !loadError && connections.length === 0 && <>
       <div className="connection-empty" role="status"><span className="connection-empty-mark" aria-hidden="true">W</span><div><strong>Nenhuma conexão WhatsApp foi cadastrada neste tenant.</strong><p>Cadastre uma conexão administrativa para que as unidades autorizadas recebam mensagens.</p></div></div>
       <article className="connection-card connection-card-placeholder">
         <div className="connection-card-title"><div><p className="eyebrow">Canal disponível</p><h3>WhatsApp Cloud API</h3><p className="muted">Aguardando configuração administrativa.</p></div><span className="connection-badge connection-badge-disconnected">Não conectado</span></div>
@@ -133,7 +138,9 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
         </div>
       </article>
     </>}
-    {!loading && !error && connections.length>0&&<div className="connection-grid">{connections.map(connection => <article className="connection-card" key={connection.id}>
+    {!loading && !loadError && connections.length>0&&<>
+      {canManage && client?.setChannelConnectionMetadata && <div className="connection-actions"><button type="button" onClick={() => openForm()}>Nova conexão</button></div>}
+      <div className="connection-grid">{connections.map(connection => <article className="connection-card" key={connection.id}>
       <div className="connection-card-title">
         <div>
           <p className="eyebrow">WhatsApp</p>
@@ -163,7 +170,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
         nunca são exibidos ou armazenados neste navegador. QR Code é apenas um atalho para conversa de teste,
         não um método de autenticação.
       </p>
-    </article>)}</div>}
+    </article>)}</div></>}
     {formOpen && <form className="connection-form" onSubmit={event => { event.preventDefault(); void save(); }} aria-label={editing ? "Editar conexão" : "Configurar conexão"}>
       <h3>{editing ? "Editar conexão" : "Configurar conexão"}</h3>
       <label>Nome da conexão<input value={form.displayName} onChange={event => setForm(current => ({ ...current, displayName: event.target.value }))} /></label>
@@ -173,6 +180,7 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
       <label>Escopo<select value={form.scope} onChange={event => updateScope(event.target.value as ChannelConnectionMetadataRequest["scope"])}><option value="CORPORATE">Corporativo</option><option value="SINGLE_UNIT">Uma unidade</option><option value="SELECTED_UNITS">Unidades selecionadas</option></select></label>
       {form.scope !== "CORPORATE" && <fieldset><legend>Unidades</legend>{units.map(unit => <label key={unit.id}><input type="checkbox" checked={form.unitIds.includes(unit.id)} onChange={event => setForm(current => ({ ...current, unitIds: event.target.checked ? [...current.unitIds, unit.id] : current.unitIds.filter(id => id !== unit.id) }))} />{unit.name}</label>)}</fieldset>}
       <p className="muted">O status operacional é determinado pelo backend e pela reconciliação da conexão.</p>
+      {formError && <p role="alert">{formError}</p>}
       <div className="connection-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar conexão"}</button><button type="button" onClick={() => { setEditing(undefined); setFormOpen(false); setIdempotencyIntent(undefined); }} disabled={saving}>Cancelar</button></div>
     </form>}
     <aside className="connection-prerequisites" aria-label="Pré-requisitos da conexão">
