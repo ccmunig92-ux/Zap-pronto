@@ -16,8 +16,8 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-O checkout canônico contém uma Inbox integrada à `main` até a migration `0067`, incorporada pela PR
-#15 após aprovação distinta e CI pós-merge verde, com:
+O candidato local contém uma Inbox validada até a migration `0078`; esse checkpoint ainda não está
+integrado à `main`. O conjunto candidato inclui:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
@@ -25,12 +25,19 @@ O checkout canônico contém uma Inbox integrada à `main` até a migration `006
 - administração de usuários e vínculos unitários;
 - contratos TypeBox/OpenAPI, cliente gerado, PostgreSQL/RLS, audit e outbox;
 - webhook Meta assinado e reconciliação sintética local, sem transporte outbound real.
+- administração tenant-aware de conexões de canal, com escopo corporativo/multiunidade,
+  idempotência e apenas `secret_reference` como apontador opaco para segredo externo;
+- episódios versionados de alerta de capacidade, leitura/acknowledgement protegidos por RBAC e
+  stream SSE da Inbox com payload somente de identificadores;
 - escalas vinculadas causalmente à versão exata do fuso e invalidadas de forma fail-closed quando ele muda;
 - disponibilidade restaurada como `OFFLINE` após reativação de vínculo.
 - convergência automática near-real-time da Inbox por leituras periódicas dos contratos existentes,
   sem push, WebSocket, endpoint ou persistência paralelos.
 - alerta agregado opt-in de demanda sustentada quando há capacidade operacional, configurado no
   módulo de SLA e lido no refresh canônico da Inbox, sem ranking individual nem envio externo.
+
+As migrations `0068`–`0078` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
+aplicação ou um contrato paralelo.
 
 Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta
 contas Meta reais e mantém o transporte externo e Hermes desativados. O histórico de cortes e evidências

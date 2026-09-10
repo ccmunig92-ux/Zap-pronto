@@ -1,15 +1,15 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma e não autoriza deploy. O checkpoint `0067` foi integrado à `main` pela
-PR #15, com CI pós-merge `32429870452` verde. Isso não homologa
+Ele não substitui o cronograma e não autoriza deploy. O checkout canônico atual contém o checkpoint
+`0078`; a PR #15 e o CI pós-merge `32429870452` documentam apenas o corte anterior. Isso não homologa
 Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
 - Cadeia append-only local validada de `0001_core.sql` até
-  `0067_sustained_demand_capacity_alert.sql`.
+  `0078_channel_connection_admin_null_validation.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -275,15 +275,16 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **checkpoint 0067 integrado à `main`**. A PR #15
+Com os gates locais verdes, a declaração permitida é **checkpoint 0078 presente no candidato local**,
+ainda não integrado à `main`. A PR #15
 teve aprovação distinta, checks `validate` verdes e CI pós-merge `32429870452` verde. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
 homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
 gates externos correspondentes.
 
-A migration `0067_sustained_demand_capacity_alert.sql` adiciona uma política unitária versionada e
-opt-in para alerta agregado. Ausência de configuração equivale a `DISABLED`; ativação exige limiar
-de fila e janela sustentada explícitos. O snapshot combina somente fila, tempo e capacidade operacional
-canônicos. A Inbox mostra apenas `ACTIVE`, inclui a leitura no refresh existente e trata falha isolada
-do snapshot sem derrubar fila, conversa ou disponibilidade. O refresh permanece somente `GET`; não há
-mensagem, Meta, Hermes, ranking individual, cron, worker ou polling adicional.
+As migrations `0068`–`0069` adicionam metadados e catálogo de status canônico às conexões; `0070`–`0073`
+endurecem claim outbound, referência de segredo, janela de sessão e templates aprovados; `0074`–`0075`
+persistem episódios de capacidade e sua API; `0076` publica apenas identificadores no stream SSE da Inbox;
+`0077` torna a administração de conexão idempotente e tenant-aware; `0078` rejeita explicitamente
+`NULL` em escopo e status antes da função legada. Nenhuma delas materializa segredo,
+habilita Meta real ou altera a fronteira do Hermes.
