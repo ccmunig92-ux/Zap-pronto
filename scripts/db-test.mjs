@@ -131,6 +131,7 @@ try {
       "0075_capacity_alert_episode_api.sql",
       "0076_inbox_realtime_notifications.sql",
       "0077_channel_connection_admin_command.sql",
+      "0078_channel_connection_admin_null_validation.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
