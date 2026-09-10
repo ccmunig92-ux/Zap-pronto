@@ -69,7 +69,10 @@ export function ConnectionsPanel({ canManage, units = [], client, onAuthenticati
   const connections = page?.items ?? [];
   const headerStatus = loading ? "Carregando…" : connections.length ? "Conexão cadastrada" : "Configuração pendente";
   const headerStatusClass = loading ? "connection-status-pending" : connections.length ? "connection-status-active" : "connection-status-pending";
-  const statusLabel = (status:string) => status === "ACTIVE" ? "Ativa" : status === "DEGRADED" ? "Degradada" : "Desconectada";
+  // O backend é a autoridade do lifecycle. Só traduzimos os estados que a UI
+  // conhece; estados novos devem continuar visíveis, nunca ser classificados
+  // incorretamente como desconectados.
+  const statusLabel = (status:string) => status === "ACTIVE" ? "Ativa" : status === "DEGRADED" ? "Degradada" : status === "DISCONNECTED" ? "Desconectada" : status;
   const scopeLabel = (scope:string, unitIds:readonly string[]) => scope === "CORPORATE" ? "Corporativa · todas as unidades" :
     scope === "SINGLE_UNIT" ? "Uma unidade" : `${unitIds.length} unidades selecionadas`;
   const linkedUnitNames = (unitIds: readonly string[]) => unitIds.map(unitId => units.find(unit => unit.id === unitId)?.name ?? unitId);

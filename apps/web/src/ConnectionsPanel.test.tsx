@@ -65,6 +65,15 @@ describe("ConnectionsPanel", () => {
     expect(screen.getByText("Não configurado")).toBeTruthy();
   });
 
+  it("preserva estados de conexão novos retornados pelo backend", async () => {
+    const clientWithNewStatus = { listChannelConnections: vi.fn().mockResolvedValue({ items: [{
+      ...connection, id: "a4000000-0000-4000-8000-000000000004", status: "PROVISIONING",
+    }] }) };
+    render(<ConnectionsPanel client={clientWithNewStatus} canManage />);
+    await waitFor(() => expect(screen.getByText("PROVISIONING")).toBeTruthy());
+    expect(screen.queryByText("Desconectada")).toBeNull();
+  });
+
   it("reutiliza a chave no retry idêntico e cria outra quando o payload muda", async () => {
     const set = vi.fn().mockRejectedValueOnce(new Error("offline")).mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({ connection, replayed: false });

@@ -35,7 +35,7 @@ export function InvitationPanel({ client, onAuthenticationRequired = () => undef
   const [expiresAt, setExpiresAt] = useState(defaultExpiry);
   const [assignments, setAssignments] = useState<Assignment[]>([{ unitId: "", role: "" }]);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<{ message: string; correlationId?: string }>();
+  const [submitError, setSubmitError] = useState<{ message: string }>();
   const [idempotencyKey, setIdempotencyKey] = useState<string>();
   const [result, setResult] = useState<CreateUserInvitationResponse>();
   const [revealed, setRevealed] = useState(false);
@@ -103,7 +103,9 @@ export function InvitationPanel({ client, onAuthenticationRequired = () => undef
       } else if (error instanceof ApiProblem && error.problem.status === 403) {
         onAuthorizationChanged();
       } else if (error instanceof ApiProblem) {
-        setSubmitError({ message: error.problem.title, correlationId: error.problem.correlationId });
+        setSubmitError({ message: error.problem.status === 409
+          ? "Os dados foram alterados. Atualize e tente novamente."
+          : "Não foi possível criar o convite." });
       } else {
         setSubmitError({ message: "Não foi possível criar o convite." });
       }
@@ -163,8 +165,7 @@ export function InvitationPanel({ client, onAuthenticationRequired = () => undef
       }}>Adicionar unidade</button>
       <button type="submit" disabled={submitting || duplicateUnits || options.providers.length === 0
         || options.units.length === 0 || options.roles.length === 0}>{submitting ? "Criando…" : "Criar convite"}</button>
-      {submitError && <p role="alert">{submitError.message}
-        {submitError.correlationId && <small> Correlação: {submitError.correlationId}</small>}</p>}
+      {submitError && <p role="alert">{submitError.message}</p>}
     </form>
     {result && <div role="dialog" aria-modal="true" aria-labelledby="delivery-title" className="delivery-dialog">
       <h3 id="delivery-title">Entrega manual do convite</h3>

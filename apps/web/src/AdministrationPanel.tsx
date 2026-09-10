@@ -43,7 +43,7 @@ export function AdministrationPanel({ client, onAuthenticationRequired = () => u
   const [reason, setReason] = useState("");
   const [expiresAt, setExpiresAt] = useState(tomorrow);
   const [mutationKey, setMutationKey] = useState<string>();
-  const [mutationError, setMutationError] = useState<{ message: string; correlationId?: string }>();
+  const [mutationError, setMutationError] = useState<{ message: string }>();
   const [submitting, setSubmitting] = useState(false);
   const [delivery, setDelivery] = useState<ReissueInvitationResponse>();
   const [revealed, setRevealed] = useState(false);
@@ -123,7 +123,7 @@ export function AdministrationPanel({ client, onAuthenticationRequired = () => u
     } catch (error) {
       if(g!==generation.current)return;
       if(authFailure(error))return;
-      else if (error instanceof ApiProblem) setMutationError({ message:error.problem.status===409?"Os dados foram alterados. Atualize e tente novamente.":error.problem.status===404?"O vínculo não está mais disponível.":"Não foi possível concluir a ação.",correlationId: error.problem.correlationId });
+      else if (error instanceof ApiProblem) setMutationError({ message:error.problem.status===409?"Os dados foram alterados. Atualize e tente novamente.":error.problem.status===404?"O vínculo não está mais disponível.":"Não foi possível concluir a ação." });
       else setMutationError({ message: "Não foi possível concluir a ação." });
     } finally {if(mutationLock.current===token)mutationLock.current=undefined;if(g===generation.current)setSubmitting(false); }
   }
@@ -183,8 +183,7 @@ export function AdministrationPanel({ client, onAuthenticationRequired = () => u
       <label>Motivo<textarea required minLength={3} maxLength={500} value={reason} onChange={(event) => {
         setReason(event.target.value); setMutationKey(undefined); setMutationError(undefined);
       }}/></label>
-      {mutationError && <p role="alert">{mutationError.message}{mutationError.correlationId &&
-        <small> Correlação: {mutationError.correlationId}</small>}</p>}
+      {mutationError && <p role="alert">{mutationError.message}</p>}
       <button type="button" disabled={submitting || reason.trim().length < 3} onClick={() => void confirmAction()}>
         {submitting ? "Processando…" : `Confirmar ${pending.kind==="MEMBERSHIP"?membershipActionLabels[pending.action].toLowerCase():actionLabels[pending.action].toLowerCase()}`}</button>
       <button type="button" disabled={submitting} onClick={closeAction}>Cancelar</button>

@@ -20,7 +20,7 @@ type SessionState =
   | { status: "loading" }
   | { status: "ready"; currentUser: CurrentUser }
   | { status: "authentication-required" }
-  | { status: "error"; message: string; correlationId?: string };
+  | { status: "error"; message: string };
 
 export type NavigationState = { readonly blocked: boolean; readonly dirty: boolean };
 type ModuleId = "INBOX" | "TEAM_AVAILABILITY" | "ROUTING" | "TENANT_ACCESS" | "UNIT_MEMBERSHIPS" | "UNIT_SLA_POLICY" | "UNIT_OPERATIONAL_TIMEZONE" | "CONNECTIONS" | "OVERVIEW";
@@ -86,8 +86,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     }).catch((error: unknown) => {
       if (!active) return;
       if (error instanceof AuthenticationRequired) setSession({ status: "authentication-required" });
-      else if (error instanceof ApiProblem) setSession({ status: "error", message: error.problem.title,
-        correlationId: error.problem.correlationId });
+      else if (error instanceof ApiProblem) setSession({ status: "error", message: "Não foi possível carregar a sessão." });
       else setSession({ status: "error", message: "Não foi possível carregar a sessão." });
     });
     return () => { active = false; };
@@ -112,8 +111,7 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
     }}>Entrar</button>{loginError && <p>{loginError}</p>}{logoutError && <p role="alert">{logoutError}</p>}
     {configured && <AcceptInvitationPanel client={acceptanceClient} onAuthenticationRequired={invalidateAuthentication}
       onAccepted={(currentUser) => setSession({ status: "ready", currentUser })}/>}</main>;
-  if (session.status === "error") return <main><h1>Falha ao carregar a sessão</h1><p>{session.message}</p>
-    {session.correlationId && <small>Correlação: {session.correlationId}</small>}</main>;
+  if (session.status === "error") return <main><h1>Falha ao carregar a sessão</h1><p>{session.message}</p></main>;
 
   const { currentUser } = session;
   const canManageTenantUsers=currentUser.grants.some(grant=>grant.permission==="tenant.users.manage"&&grant.scope==="TENANT");
