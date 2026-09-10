@@ -8140,6 +8140,21 @@ export interface operations {
                 };
             };
             /** @description Default Response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        type: string;
+                        title: string;
+                        status: number;
+                        detail?: string;
+                        correlationId: string;
+                    };
+                };
+            };
+            /** @description Default Response */
             409: {
                 headers: {
                     [name: string]: unknown;
