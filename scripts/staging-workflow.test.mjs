@@ -35,6 +35,7 @@ test("both candidates are scanned before any registry publication", () => {
   const webPublish = source.indexOf("Publish approved web");
   assert.ok(apiScan > 0 && apiScan < apiPublish);
   assert.ok(webScan > 0 && webScan < webPublish);
+  assert.ok(webScan < apiPublish);
   assert.equal((source.match(/load: true/g) ?? []).length, 2);
   assert.equal((source.match(/push: true/g) ?? []).length, 2);
   assert.equal((source.match(/sbom: true/g) ?? []).length, 2);
