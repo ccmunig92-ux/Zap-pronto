@@ -4,6 +4,15 @@ O `Dockerfile.web` produz o frontend estático e exige configuração OIDC HTTPS
 valor padrão de staging. Informe `VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID` e
 `VITE_OIDC_REDIRECT_URI`; os demais argumentos seguem os nomes documentados em `.env.example`.
 
+Para Auth0, configure `VITE_OIDC_AUDIENCE` no build com o Identifier da API registrada,
+exatamente igual a `OIDC_AUDIENCE` do backend. O workflow de imagens recebe esse valor
+da variável pública `OIDC_AUDIENCE` do environment `oidc-homologation`.
+Na Vercel, configure `VITE_OIDC_AUDIENCE` no ambiente de build e gere um novo deployment.
+Não use o Client ID da SPA como substituto do Identifier da API e não insira client secrets
+em variáveis `VITE_*`. A configuração é opcional para outros provedores que atribuem a
+audiência por mapeamento no servidor; ela não desabilita a validação de audiência da API.
+Login só está homologado após um token real acessar `/v1/me` com tenant e permissões corretos.
+
 Em runtime, informe:
 
 - `API_UPSTREAM`: origin HTTP(S) interno da API, sem path ou credenciais;
