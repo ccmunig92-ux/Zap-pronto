@@ -11,7 +11,7 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
-- Os seis arquivos de secrets existem fora do checkout e são informados por caminhos absolutos. Como o
+- Os quatro arquivos de secrets do banco existem fora do checkout e são informados por caminhos absolutos. Como o
   Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
   imagem PostgreSQL Alpine e as três URLs (`database_migration_url`, `database_runtime_url` e
   `database_worker_url`) ao UID/GID 1000 da imagem API, todos com modo `0400`; modo `0600`
@@ -24,12 +24,14 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   runtime apontam ao mesmo banco, remove memberships e grants diretos residuais, recusa ownership/default
   privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
 - O password do owner contido na migration URL corresponde a `postgres_password`.
-- `META_WHATSAPP_SECRET_ROOT` é um diretório absoluto fora do checkout. O Compose o monta somente como
+- O manifesto base mantém webhook e envio Meta desabilitados e não exige secrets Meta. Para habilitar ambos,
+  adicione `-f deploy/staging/compose.meta.yaml` a todos os comandos Compose e execute o preflight com `--meta`.
+  `META_WHATSAPP_SECRET_ROOT` é um diretório absoluto fora do checkout. O Compose o monta somente como
   bind read-only no worker em `/run/zap-pronto-secrets/meta`; o diretório deve ser regular, sem symlink,
   pertencer a UID/GID `1000:1000` e usar modo `0750`. Cada arquivo deve seguir
   `<tenantId>/<channelConnectionId>/<secret_reference>`. O worker permanece desabilitado até esse diretório
   conter referências reais provisionadas pelo operador; nenhum token é lido do `.env`.
-- `META_WEBHOOK_ENABLED` permanece `false` por padrão. Para habilitá-lo, o operador deve criar os arquivos
+- No override Meta, `META_WEBHOOK_ENABLED` e `OUTBOUND_WORKER_ENABLED` ficam `true`. O operador deve criar os arquivos
   externos `META_APP_SECRET_FILE` e `META_VERIFY_TOKEN_FILE`, ambos com modo `0400`, pertencentes ao UID/GID
   1000 da imagem API. O Compose os monta apenas na API em `/run/secrets/meta_app_secret` e
   `/run/secrets/meta_verify_token`; nenhum segredo aparece no `.env`, logs ou imagem.
@@ -48,7 +50,8 @@ essa variável só deve ser criada depois de configurar reviewer obrigatório e 
 
 ## Critérios de aceite
 
-Antes de iniciar o stack, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.
+Antes de iniciar o stack base, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.
+Para o stack com Meta, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env --meta`.
 O comando não imprime nem lê o conteúdo dos secrets; exige imagens por digest, arquivos fora do repositório
 com a matriz `70:70/0400` para PostgreSQL e `1000:1000/0400` para API, endpoints OIDC HTTPS coerentes e os
 limites mínimos do manifesto. A árvore Meta também é validada fora do checkout (`1000:1000/0750`, sem symlinks).
