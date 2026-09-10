@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CurrentUser } from "@zap-pronto/contracts";
 import { ApiProblem, AuthenticationRequired } from "@zap-pronto/api-client";
 import { apiClient } from "./api.js";
@@ -67,17 +67,17 @@ export function App({ client = apiClient, invitationClient = apiClient, administ
       const previous=current[panel];if(previous?.blocked===state.blocked&&previous.dirty===state.dirty)return current;
       return {...current,[panel]:state};
     })])) as Record<PanelId,(state:NavigationState)=>void>,[]);
-  function invalidateAuthentication(): void {
+  const invalidateAuthentication = useCallback((): void => {
     setSession({ status: "authentication-required" });
     void clearAuthSession();
-  }
-  function refreshAuthorization(): void {
+  }, []);
+  const refreshAuthorization = useCallback((): void => {
     setSession({ status: "loading" });
     client.getCurrentUser().then((currentUser) => setSession({ status: "ready", currentUser })).catch((error: unknown) => {
       if (error instanceof AuthenticationRequired) invalidateAuthentication();
       else setSession({ status: "error", message: "Não foi possível atualizar suas permissões." });
     });
-  }
+  }, [client, invalidateAuthentication]);
   useEffect(() => {
     if (authInitializationFailed) return;
     let active = true;
