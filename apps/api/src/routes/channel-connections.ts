@@ -5,6 +5,7 @@ import { listChannelConnections, setChannelConnectionMetadata } from "@zap-pront
 import { protectedRoute } from "../http/protected-route.js";
 
 const problems = { 400: ProblemDetailsSchema, 401: ProblemDetailsSchema, 403: ProblemDetailsSchema, 409: ProblemDetailsSchema, 500: ProblemDetailsSchema, 503: ProblemDetailsSchema } as const;
+const mutationProblems = { ...problems, 404: ProblemDetailsSchema } as const;
 function idempotencyKey(headers: Record<string, unknown>): string {
   const value=headers["idempotency-key"];
   if(typeof value!=="string"||value.trim()!==value||value.length<8||value.length>200) throw new ChannelConnectionError(400,"INVALID_REQUEST");
@@ -31,7 +32,7 @@ export function registerChannelConnectionRoutes(app: FastifyInstance, pool: Tena
   app.post("/v1/channel-connections", protectedRoute({
     pool, noStore: true,
     authorization: { kind: "permission", permission: "channel_connections.manage", scope: { kind: "tenant" } },
-    schema: { operationId: "setChannelConnectionMetadata", headers: { type: "object", required: ["idempotency-key"], properties: { "idempotency-key": { type: "string", minLength: 8, maxLength: 200 } } }, body: ChannelConnectionMetadataRequestSchema, response: { 200: ChannelConnectionMetadataResponseSchema, ...problems } },
+    schema: { operationId: "setChannelConnectionMetadata", headers: { type: "object", required: ["idempotency-key"], properties: { "idempotency-key": { type: "string", minLength: 8, maxLength: 200 } } }, body: ChannelConnectionMetadataRequestSchema, response: { 200: ChannelConnectionMetadataResponseSchema, ...mutationProblems } },
     async handler(client, request, reply) {
       void reply.header("cache-control", "no-store");
       try {

@@ -179,7 +179,7 @@ test("every versioned route has an explicit policy, scope and coherent error con
   const document = app.swagger() as { paths: Record<string, Record<string, { responses?: Record<string, unknown> }>> };
   const expectedErrors: Record<string, readonly number[]> = {
     "GET /v1/channel-connections": [400, 401, 403, 409, 500, 503],
-    "POST /v1/channel-connections": [400, 401, 403, 409, 500, 503],
+    "POST /v1/channel-connections": [400, 401, 403, 404, 409, 500, 503],
     "GET /v1/inbox/active": [400,401,403,404,409],
     "GET /v1/inbox/capacity-alert-episodes": [400,401,403,404,409,500,503],
     "GET /v1/inbox/conversations/:conversationId": [400,401,403,404],
