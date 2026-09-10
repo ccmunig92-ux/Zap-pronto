@@ -176,7 +176,7 @@ describe("administrative lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmar bloquear" }));
     expect(await screen.findByText(new RegExp(expectedMessage))).toBeTruthy();
     expect(screen.queryByText(/SQL membership secret|users_internal row leaked/)).toBeNull();
-    expect(screen.getByText(new RegExp(`correlation-${status}`))).toBeTruthy();
+    expect(screen.queryByText(new RegExp(`correlation-${status}`))).toBeNull();
   });
 
   it("preserves already loaded users when loading another page fails", async () => {

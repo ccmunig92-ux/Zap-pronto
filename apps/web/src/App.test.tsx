@@ -157,12 +157,13 @@ describe("authenticated shell", () => {
     expect(screen.getByText("OIDC não configurado neste ambiente.")).toBeTruthy();
   });
   it.each([[403, "Forbidden"], [503, "Service Unavailable"]])(
-    "shows API problem %s and its correlation id", async (status, title) => {
+    "sanitizes API problem %s without exposing server details", async (status, title) => {
       render(<App client={{ async getCurrentUser() { throw new ApiProblem({
         type: "urn:test", title, status, correlationId: "correlation-123",
       }); } }} />);
-      expect(await screen.findByText(title)).toBeTruthy();
-      expect(screen.getByText("Correlação: correlation-123")).toBeTruthy();
+      expect(await screen.findByText("Não foi possível carregar a sessão.")).toBeTruthy();
+      expect(screen.queryByText(title)).toBeNull();
+      expect(screen.queryByText("Correlação: correlation-123")).toBeNull();
     },
   );
   it("sanitizes an invalid transport response", async () => {

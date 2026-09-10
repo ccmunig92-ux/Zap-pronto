@@ -204,6 +204,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
   const canReadHistory=historyUnitIds.includes(unitId);
   const canReadSlaAlerts=slaAlertReadUnitIds.includes(unitId);
   const canAcknowledgeSlaAlerts=slaAlertAcknowledgeUnitIds.includes(unitId);
+  const unitScopeKey=units.map(unit=>`${unit.id}:${unit.name}`).join("|");
   const resolvedFiltersDirty=resolvedFilters.priority!==appliedResolvedFilters.priority
     ||resolvedFilters.disposition!==appliedResolvedFilters.disposition
     ||resolvedFilters.resolvedFrom!==appliedResolvedFilters.resolvedFrom
@@ -330,10 +331,20 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
     return promise.catch((cause: unknown) => Promise.reject({ scope, cause } satisfies ScopedReadError));
   }
 
+  // Memberships can change after an authorization refresh. Never keep a
+  // selection that is no longer present in the session-provided scope.
+  useEffect(() => {
+    const nextUnitId = units.some(unit => unit.id === unitId) ? unitId : (units[0]?.id ?? "");
+    if (nextUnitId === unitId) return;
+    generation.current += 1;
+    purgeSensitive();
+    setUnitId(nextUnitId);
+  }, [unitId, unitScopeKey]);
+
   useEffect(() => {
     const g = ++generation.current;
     purgeSensitive();
-    if (!unitId) return () => { generation.current += 1; };
+    if (!unitId || !units.some(unit => unit.id === unitId)) return () => { generation.current += 1; };
     initialLoadFlight.current=true;
     Promise.all([
       scoped("queue", client.listHandoffs(queueInput(unitId))),
@@ -348,7 +359,7 @@ export function InboxPanel({ client, units, supervisedUnitIds=[], historyUnitIds
       if (g === generation.current) { setQueue(queued); setActive(mine);setSupervised(others);setResolved(closed);setSlaAlerts(alerts);setCapacityAlert(nextCapacityAlert.snapshot);setCapacityEpisodes(nextCapacityEpisodes);setCapacityAlertUnavailable(nextCapacityAlert.unavailable);setAvailability(nextAvailability);setConvergence({kind:"updated",at:new Date().toISOString()}); }
     }).catch((caught: unknown) => fail(caught, g)).finally(()=>{if(g===generation.current)initialLoadFlight.current=false});
     return () => { generation.current += 1;initialLoadFlight.current=false };
-  }, [client, unitId, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
+  }, [client, unitId, unitScopeKey, supervisedUnitIds.join(","),historyUnitIds.join(","),slaAlertReadUnitIds.join(",")]);
 
   function openAvailability(){
     if(!availability||mutationBusy||refreshing)return;

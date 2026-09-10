@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CreateUserInvitationRequest } from "@zap-pronto/contracts";
+import { ApiProblem } from "@zap-pronto/api-client";
 import { InvitationPanel, type InvitationClient } from "./InvitationPanel.js";
 
 const unitId = "33333333-3333-4333-8333-333333333333";
@@ -110,6 +111,23 @@ describe("administrative invitation", () => {
     expect(await screen.findByText("Não foi possível criar o convite.")).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(createUserInvitation).toHaveBeenCalledTimes(1);
+  });
+
+  it("sanitizes API problem title and correlation id", async () => {
+    const createUserInvitation = vi.fn(async () => { throw new ApiProblem({
+      type: "urn:test", title: "internal invitation details", status: 500,
+      detail: "private tenant data", correlationId: "corr-private",
+    }); });
+    render(<InvitationPanel client={{ async getUserInvitationOptions() { return options; }, createUserInvitation }}/>);
+    await screen.findByRole("option", { name: "primary" });
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Pessoa" } });
+    fireEvent.change(screen.getByLabelText("E-mail"), { target: { value: "pessoa@example.test" } });
+    fireEvent.change(screen.getByLabelText("Unidade 1"), { target: { value: unitId } });
+    fireEvent.change(screen.getByLabelText("Papel 1"), { target: { value: "ATTENDANT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar convite" }));
+    expect(await screen.findByText("Não foi possível criar o convite.")).toBeTruthy();
+    expect(screen.queryByText("internal invitation details")).toBeNull();
+    expect(screen.queryByText("corr-private")).toBeNull();
   });
 
   it("rejects an expired date before calling the API", async () => {

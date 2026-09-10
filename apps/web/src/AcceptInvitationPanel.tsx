@@ -19,7 +19,7 @@ export function AcceptInvitationPanel({ client, onAccepted, onAuthenticationRequ
   const [token, setToken] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<{ message: string; correlationId?: string }>();
+  const [error, setError] = useState<{ message: string }>();
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -40,10 +40,11 @@ export function AcceptInvitationPanel({ client, onAccepted, onAuthenticationRequ
         if (cause.problem.status === 429) {
           setError({ message: cause.retryAfterSeconds
             ? `Muitas tentativas. Tente novamente manualmente em ${retryDelay(cause.retryAfterSeconds)}.`
-            : "Muitas tentativas. Aguarde antes de tentar novamente manualmente.",
-          correlationId: cause.problem.correlationId });
+            : "Muitas tentativas. Aguarde antes de tentar novamente manualmente." });
         } else {
-          setError({ message: cause.problem.title, correlationId: cause.problem.correlationId });
+          setError({ message: cause.problem.status === 409
+            ? "O convite não está mais disponível. Solicite um novo convite."
+            : "Não foi possível aceitar o convite." });
         }
       } else {
         setError({ message: "Não foi possível aceitar o convite." });
@@ -60,8 +61,7 @@ export function AcceptInvitationPanel({ client, onAccepted, onAuthenticationRequ
           setToken(event.target.value); setIdempotencyKey(undefined); setError(undefined);
         }}/></label>
       <button type="submit" disabled={submitting}>{submitting ? "Aceitando…" : "Aceitar convite"}</button>
-      {error && <p role="alert">{error.message}{error.correlationId &&
-        <small> Correlação: {error.correlationId}</small>}</p>}
+      {error && <p role="alert">{error.message}</p>}
     </form>
   </section>;
 }

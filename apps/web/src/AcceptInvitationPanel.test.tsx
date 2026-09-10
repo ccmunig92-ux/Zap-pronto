@@ -64,7 +64,7 @@ describe("OIDC invitation acceptance", () => {
     fireEvent.change(input, { target: { value: token } });
     fireEvent.click(screen.getByRole("button", { name: "Aceitar convite" }));
     expect(await screen.findByText(`Muitas tentativas. Tente novamente manualmente em ${delay}.`)).toBeTruthy();
-    expect(screen.getByText("Correlação: correlation-429")).toBeTruthy();
+    expect(screen.queryByText("Correlação: correlation-429")).toBeNull();
     expect(input.value).toBe(token);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(accept).toHaveBeenCalledTimes(1);
