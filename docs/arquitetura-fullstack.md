@@ -26,6 +26,9 @@ não executam SQL e não reimplementam casos de uso.
 5. OpenAPI determinístico e cliente TypeScript gerado, com verificação de drift.
 6. Shell autenticado do frontend consumindo exclusivamente o cliente gerado; o provedor OIDC real
    permanece um gate de runtime, não um token simulado no frontend.
+7. Administração de conexões, episódios de capacidade e stream SSE da Inbox permanecem no mesmo
+   cliente OpenAPI, API protegida, domínio tenant-aware e PostgreSQL/RLS; não há BFF ou transporte
+   de segredo paralelo.
 
 Não criar BFF, GraphQL paralelo, acesso Supabase direto, DTO manual duplicado ou microserviço de auth.
 
@@ -45,5 +48,7 @@ O estado de automação da conversa é a autoridade para o takeover: `HUMAN_REQU
 `HUMAN_ACTIVE` e `SUSPENDED` proíbem resposta Hermes. Ocultar o composer no frontend não constitui essa
 garantia; o futuro comando outbound deve revalidar o estado na mesma transação da gravação da mensagem.
 
-O corte inicial cobre apenas listagem e claim. Transferência, devolução, encerramento, presença, SLA
-operacional, produtividade e realtime permanecem incrementos posteriores sobre o mesmo agregado.
+O corte inicial cobre listagem e claim. Transferência, devolução, encerramento, presença, SLA e
+produtividade foram incrementados sobre o mesmo agregado; a Inbox possui convergência por leituras e
+stream SSE opcional com payload somente de identificadores. A autorização continua sendo revalidada
+no servidor; o realtime não é fonte de estado nem de autorização.

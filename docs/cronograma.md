@@ -2,7 +2,7 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 20/08/2026
+## Status de execução — 29/08/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
@@ -10,6 +10,10 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase atual: **Fase 4 — inbox multiusuário e produtividade**. O checkpoint `0064` foi integrado à
   `main` pela PR #10; as migrations `0065`, `0066` e `0067` também foram integradas à `main` pela
   PR #15, com CI pós-merge `32429870452` verde.
+- O estado canônico atual inclui também as migrations `0068`–`0078`: administração de conexões de
+  canal, claim outbound com referência opaca de segredo, janela/template Meta, episódios de capacidade,
+  stream SSE da Inbox, comando administrativo idempotente e validação SQL explícita de nulos. Esses incrementos permanecem no mesmo
+  monólito e não autorizam transporte Meta real, Hermes ou deploy.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
 - RLS com dois tenants: SELECT, INSERT, UPDATE e DELETE testados.

@@ -24,6 +24,8 @@
     ,"release:check:strict": "node scripts/release-check.mjs --strict-git --base-ref origin/main"
     ,"lovable:intake": "node scripts/lovable-intake.mjs"
     ,"test:lovable-intake": "node scripts/lovable-intake.test.mjs"
+    ,"docs:check": "node scripts/check-docs-consistency.mjs"
+    ,"test:docs:check": "node --test scripts/check-docs-consistency.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
