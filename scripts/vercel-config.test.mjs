@@ -9,8 +9,14 @@ const config = JSON.parse(
 test("Vercel serves Vite client-side routes through index.html", () => {
   assert.deepEqual(config.rewrites, [
     {
-      source: "/(.*)",
+      source: "/((?!v1(?:/|$)).*)",
       destination: "/index.html",
     },
   ]);
+});
+
+test("Vercel never turns API failures into the SPA HTML document", () => {
+  const source = config.rewrites[0]?.source;
+  assert.equal(new RegExp(`^${source}$`, "u").test("/configuracoes/canais"), true);
+  assert.equal(new RegExp(`^${source}$`, "u").test("/v1/me"), false);
 });
