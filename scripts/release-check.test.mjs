@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { migrationHashes, releaseGatePlan, runReleaseCheck, validateAdminDatabaseUrl, validateGitReleaseState } from "./release-check.mjs";
+import { migrationHashes, releaseGatePlan, resolvePowerShellCommand, runReleaseCheck, validateAdminDatabaseUrl, validateGitReleaseState } from "./release-check.mjs";
 
 test("preflight aceita apenas PostgreSQL local e não retorna segredo", () => {
   assert.deepEqual(validateAdminDatabaseUrl("postgresql://owner:never-print@127.0.0.1:5432/postgres"),
@@ -26,6 +26,12 @@ test("plano contém uma única sequência canônica e fail-fast", () => {
   /RELEASE_GATE_FAILED:\/d/);
   assert.equal(calls.length,3);
   assert.equal(output.join("\n").includes("top-secret"),false);
+});
+
+test("gate Windows usa pwsh e recua para Windows PowerShell quando necessário", () => {
+  assert.equal(resolvePowerShellCommand("win32", command => command === "pwsh.exe"), "pwsh.exe");
+  assert.equal(resolvePowerShellCommand("win32", command => command === "powershell.exe"), "powershell.exe");
+  assert.equal(resolvePowerShellCommand("linux", () => false), "pwsh");
 });
 
 test("gate Git estrito rejeita árvore suja e aceita candidato limpo baseado na origem", () => {
