@@ -59,24 +59,6 @@ jobs:
           exit-code: "1"
           severity: CRITICAL
           ignore-unfixed: true
-      - name: Publish approved API
-        id: api
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: Dockerfile.api
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/zap-pronto-api:${{ github.sha }}
-          sbom: true
-          provenance: false
-          cache-from: type=gha,scope=staging-api
-      - name: Attest API provenance
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
-        with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/zap-pronto-api
-          subject-digest: ${{ steps.api.outputs.digest }}
-          push-to-registry: true
-
       - name: Build web candidate locally
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -100,6 +82,23 @@ jobs:
           exit-code: "1"
           severity: CRITICAL
           ignore-unfixed: true
+      - name: Publish approved API
+        id: api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/zap-pronto-api:${{ github.sha }}
+          sbom: true
+          provenance: false
+          cache-from: type=gha,scope=staging-api
+      - name: Attest API provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/zap-pronto-api
+          subject-digest: ${{ steps.api.outputs.digest }}
+          push-to-registry: true
       - name: Publish approved web
         id: web
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

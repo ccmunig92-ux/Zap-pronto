@@ -41,7 +41,7 @@ Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels
 ## Imagens publicadas
 
 O workflow manual `Publish staging images` só executa na branch padrão e no environment
-`oidc-homologation`. Ele exige as variáveis públicas `OIDC_ISSUER`, `OIDC_WEB_CLIENT_ID`,
+`oidc-homologation`. Ele exige as variáveis públicas `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_WEB_CLIENT_ID`,
 `OIDC_WEB_REDIRECT_URI` e `OIDC_WEB_POST_LOGOUT_REDIRECT_URI`, publica API e web no GHCR com SBOM,
 gera attestations de proveniência, bloqueia vulnerabilidades críticas conhecidas e registra no resumo as referências imutáveis `repo@sha256`.
 Copie somente essas referências para o `.env` externo de staging; tags por SHA não substituem o digest.
