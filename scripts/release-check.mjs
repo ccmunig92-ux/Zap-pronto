@@ -19,12 +19,26 @@ export function validateAdminDatabaseUrl(value) {
   return { database, host: parsed.hostname };
 }
 
-export function releaseGatePlan(platform = process.platform) {
+export function resolvePowerShellCommand(platform = process.platform, which = defaultWhich) {
+  if (platform !== "win32") return "pwsh";
+  if (which("pwsh.exe")) return "pwsh.exe";
+  if (which("powershell.exe")) return "powershell.exe";
+  return "pwsh.exe";
+}
+
+function defaultWhich(command) {
+  const result = spawnSync(process.platform === "win32" ? "where.exe" : "which", [command], {
+    stdio: "ignore", shell: false,
+  });
+  return result.status === 0;
+}
+
+export function releaseGatePlan(platform = process.platform, { which = defaultWhich } = {}) {
   const packageGate = (script) => platform === "win32"
     ? [process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe", ["/d", "/s", "/c", "pnpm.cmd", script]]
     : ["pnpm", [script]];
   const git = platform === "win32" ? "git.exe" : "git";
-  const powershell = platform === "win32" ? "pwsh.exe" : "pwsh";
+  const powershell = resolvePowerShellCommand(platform, which);
   return [
     packageGate("test:all"),
     packageGate("typecheck:all"),
