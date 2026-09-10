@@ -1,0 +1,28 @@
+services:
+  api:
+    environment:
+      META_WEBHOOK_ENABLED: "true"
+      META_APP_SECRET_FILE: /run/secrets/meta_app_secret
+      META_VERIFY_TOKEN_FILE: /run/secrets/meta_verify_token
+      META_WEBHOOK_MAX_BODY_BYTES: "${META_WEBHOOK_MAX_BODY_BYTES:-1048576}"
+    secrets:
+      - meta_app_secret
+      - meta_verify_token
+
+  worker:
+    environment:
+      OUTBOUND_WORKER_ENABLED: "true"
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:?META_GRAPH_API_VERSION is required}
+      META_WHATSAPP_SECRET_ROOT: /run/zap-pronto-secrets/meta
+      META_WHATSAPP_TIMEOUT_MS: ${META_WHATSAPP_TIMEOUT_MS:-10000}
+    volumes:
+      - type: bind
+        source: ${META_WHATSAPP_SECRET_ROOT:?META_WHATSAPP_SECRET_ROOT must point to an external secret directory}
+        target: /run/zap-pronto-secrets/meta
+        read_only: true
+
+secrets:
+  meta_app_secret:
+    file: ${META_APP_SECRET_FILE:?META_APP_SECRET_FILE must be outside the repository}
+  meta_verify_token:
+    file: ${META_VERIFY_TOKEN_FILE:?META_VERIFY_TOKEN_FILE must be outside the repository}

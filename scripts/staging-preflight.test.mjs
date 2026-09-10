@@ -35,13 +35,19 @@ const compose = { networks:{data:{internal:true}}, services: {
   postgres:{...hardened("1.50","1536M",["data"],["postgres_password"]),read_only:undefined,cap_drop:undefined},
   migrate:hardened("1","512M",["data"],["database_migration_url"],{postgres:{condition:"service_healthy"}}),
   "provision-runtime":hardened("0.5","256M",["data"],["database_migration_url","database_runtime_url","database_worker_url"],{migrate:{condition:"service_completed_successfully"}}),
-  api:{...hardened("1","768M",["app","data"],["database_runtime_url","meta_app_secret","meta_verify_token"],{"provision-runtime":{condition:"service_completed_successfully"}}),environment:{META_WEBHOOK_ENABLED:"false",META_APP_SECRET_FILE:"/run/secrets/meta_app_secret",META_VERIFY_TOKEN_FILE:"/run/secrets/meta_verify_token"}},
-  worker:{...hardened("0.5","384M",["data"],["database_worker_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),volumes:workerMetaSecretMount},
+  api:{...hardened("1","768M",["app","data"],["database_runtime_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),environment:{META_WEBHOOK_ENABLED:"false"}},
+  worker:{...hardened("0.5","384M",["data"],["database_worker_url"],{"provision-runtime":{condition:"service_completed_successfully"}}),environment:{OUTBOUND_WORKER_ENABLED:"false"}},
   web:{...hardened("0.5","256M",["app"],[],{api:{condition:"service_healthy"}}),ports:[{host_ip:"127.0.0.1",target:8080,protocol:"tcp"}]},
 } };
+const metaCompose = structuredClone(compose);
+metaCompose.services.api.secrets.push({source:"meta_app_secret"},{source:"meta_verify_token"});
+Object.assign(metaCompose.services.api.environment,{META_WEBHOOK_ENABLED:"true",META_APP_SECRET_FILE:"/run/secrets/meta_app_secret",META_VERIFY_TOKEN_FILE:"/run/secrets/meta_verify_token"});
+Object.assign(metaCompose.services.worker,{volumes:workerMetaSecretMount,environment:{OUTBOUND_WORKER_ENABLED:"true",META_WHATSAPP_SECRET_ROOT:"/run/zap-pronto-secrets/meta"}});
 
 test("accepts immutable images, coherent HTTPS OIDC and minimum resources", () => {
   validateEnvironment(validEnv); validateResources(compose); validateComposeInvariants(compose);
+  validateEnvironment({...validEnv,META_GRAPH_API_VERSION:"v23.0"},{metaEnabled:true});
+  validateComposeInvariants(metaCompose,{metaEnabled:true});
 });
 
 test("rejects exposed internal services, topology drift and weakened hardening", () => {
@@ -51,13 +57,16 @@ test("rejects exposed internal services, topology drift and weakened hardening",
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,api:{...compose.services.api,read_only:false}}}), /API_HARDENING_INVALID/);
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,migrate:{...compose.services.migrate,secrets:[]}}}), /MIGRATE_SECRETS_INVALID/);
   assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,web:{...compose.services.web,depends_on:{}}}}), /WEB_DEPENDENCY_INVALID/);
-  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,worker:{...compose.services.worker,volumes:[]}}}), /WORKER_META_SECRET_MOUNT_INVALID/);
+  assert.throws(() => validateComposeInvariants({...compose,services:{...compose.services,worker:{...compose.services.worker,volumes:workerMetaSecretMount}}}), /WORKER_META_DISABLED_CONFIGURATION_INVALID/);
+  assert.throws(() => validateComposeInvariants({...metaCompose,services:{...metaCompose.services,worker:{...metaCompose.services.worker,volumes:[]}}},{metaEnabled:true}), /WORKER_META_SECRET_MOUNT_INVALID/);
 });
 
 test("rejects mutable images and unsafe or divergent OIDC endpoints", () => {
   assert.throws(() => validateEnvironment({...validEnv,ZAP_API_IMAGE:"ghcr.io/acme/api:latest"}), /NOT_IMMUTABLE/);
   assert.throws(() => validateEnvironment({...validEnv,OIDC_JWKS_URL:"http://id.example/jwks"}), /OIDC_JWKS_URL_INVALID/);
   assert.throws(() => validateEnvironment({...validEnv,OIDC_JWKS_URL:"https://other.example/jwks"}), /OIDC_ORIGIN_MISMATCH/);
+  assert.throws(() => validateEnvironment(validEnv,{metaEnabled:true}), /META_GRAPH_API_VERSION_REQUIRED/);
+  assert.throws(() => validateEnvironment({...validEnv,META_GRAPH_API_VERSION:"latest"},{metaEnabled:true}), /META_GRAPH_API_VERSION_INVALID/);
 });
 
 test("rejects missing resource guarantees and malformed or duplicate env entries", () => {
@@ -66,12 +75,39 @@ test("rejects missing resource guarantees and malformed or duplicate env entries
   assert.throws(() => parseEnv("A=1\nA=2\n"), /ENV_INVALID/);
 });
 
+test("fails closed on missing, malformed and non-finite resource limits for every service", () => {
+  for (const serviceName of Object.keys(compose.services)) {
+    const original = compose.services[serviceName].deploy.resources.limits;
+    for (const limits of [undefined, {}, {...original, cpus: undefined}, {...original, memory: undefined},
+      {...original, cpus: "invalid"}, {...original, cpus: Infinity}, {...original, cpus: true},
+      {...original, memory: "invalid"}, {...original, memory: Infinity}, {...original, memory: true}]) {
+      const candidate = structuredClone(compose);
+      candidate.services[serviceName].deploy.resources.limits = limits;
+      assert.throws(() => validateResources(candidate), /RESOURCES_BELOW_MINIMUM/, serviceName);
+    }
+  }
+});
+
+test("interprets rendered Compose memory as bytes and enforces the exact threshold", () => {
+  for (const serviceName of Object.keys(compose.services)) {
+    const candidate = structuredClone(compose);
+    const limits = candidate.services[serviceName].deploy.resources.limits;
+    const bytes = Number(limits.memory.slice(0, -1)) * 1048576;
+    for (const value of [bytes, String(bytes)]) {
+      limits.memory = value;
+      assert.doesNotThrow(() => validateResources(candidate));
+    }
+    limits.memory = bytes - 1;
+    assert.throws(() => validateResources(candidate), /RESOURCES_BELOW_MINIMUM/);
+  }
+});
+
 test("requires canonical 0400 ownership for non-root container secret readers", async () => {
   const directory = mkdtempSync(join(tmpdir(), "zap-preflight-"));
     const names = ["postgres", "migration", "runtime", "worker", "meta-app", "meta-verify"].map((name) => join(directory, name));
   try {
     for (const file of names) { writeFileSync(file, "not-read-by-preflight"); chmodSync(file, 0o600); }
-    const env = { POSTGRES_PASSWORD_FILE:names[0], DATABASE_MIGRATION_URL_FILE:names[1], DATABASE_RUNTIME_URL_FILE:names[2], DATABASE_WORKER_URL_FILE:names[3], META_APP_SECRET_FILE:names[4], META_VERIFY_TOKEN_FILE:names[5] };
+    const env = { POSTGRES_PASSWORD_FILE:names[0], DATABASE_MIGRATION_URL_FILE:names[1], DATABASE_RUNTIME_URL_FILE:names[2], DATABASE_WORKER_URL_FILE:names[3] };
     if (typeof process.getuid === "function") {
       await assert.rejects(validateSecrets({...env,POSTGRES_PASSWORD_FILE:"relative-secret"}, process.cwd()), /NOT_ABSOLUTE/);
     } else {
