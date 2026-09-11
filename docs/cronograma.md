@@ -2,7 +2,7 @@
 
 Este cronograma é orientado por gates. Datas não autorizam avançar com critérios de aceite pendentes.
 
-## Status de execução — 29/08/2026
+## Status de execução — 11/09/2026
 
 - Fase 0: concluída, publicada e validada no CI remoto.
 - Fase 1: concluída, integrada ao `main` e validada no CI remoto (PR #1).
@@ -109,10 +109,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   testes, build, integração PostgreSQL e upgrade legado.
 - A UI administrativa foi liberada apenas para este corte comprovado; outras telas continuam bloqueadas
   até identidade, matriz RBAC e testes IDOR correspondentes estarem aprovados.
-- O escopo técnico local da Fase 3 foi concluído; a homologação com IdP HTTPS externo permanece um gate de promoção. A Fase 4 está em desenvolvimento local e as fases 5–9 não foram iniciadas como fases completas.
-- Gate que bloqueia o primeiro endpoint da Fase 4: executar em navegador a jornada com um IdP OIDC
-  externo homologado, usando ao menos um administrador e um atendente reais, e provar login, `/v1/me`,
-  expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não substituem esse gate.
+- O escopo técnico local da Fase 3 foi concluído. A homologação com IdP HTTPS externo foi encerrada para
+  o SHA registrado abaixo e permanece um gate obrigatório para novas promoções. A Fase 4 está em
+  desenvolvimento e as fases 5–9 não foram concluídas como fases completas.
+- O gate que bloqueava o primeiro endpoint da Fase 4 exigia executar em navegador a jornada com um IdP
+  OIDC externo homologado, usando ao menos um administrador e um atendente reais, e provar login,
+  `/v1/me`, expiração/renovação da sessão e negação após bloqueio. Os testes com JWKS local não
+  substituíam esse gate; a evidência de conclusão está registrada abaixo.
 - Pré-check operacional desse gate: preencher `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL` e, quando
   aplicável, `OIDC_ORGANIZATION_CLAIM`, e executar `pnpm --filter @zap-pronto/api oidc:probe`. O comando
   falha fechado para configuração insegura, discovery divergente, redirect, timeout, JSON inválido ou JWKS
@@ -121,9 +124,13 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
   na branch padrão pode usar o environment protegido. O probe aceita apenas chaves públicas RSA compatíveis
   com RS256/verify, exatamente como o verificador de runtime. O E2E exige frontend HTTPS, defaults seguros
   para variáveis opcionais, renovação posterior à expiração original e bloqueio reversível da conta de teste.
-- O environment `oidc-homologation` foi criado pela sessão administrativa do proprietário, ainda sem
-  variáveis, secrets ou proteções aprovadas. A implantação HTTPS e as duas contas sintéticas exclusivas
-  também não estão disponíveis; a Fase 4 continua fechada até configurar e executar o gate na `main`.
+- O environment protegido `oidc-homologation` foi provisionado com revisão independente, variáveis e
+  secrets reais no gerenciador do GitHub, sem registrar seus valores no repositório ou nos logs.
+- O staging HTTPS e as duas contas sintéticas exclusivas estão disponíveis. O run `34563529651`, no SHA
+  `9f1901a9caf1b58ad413d166bb4920c82a537756` da `main`, aprovou discovery/JWKS, administrador,
+  atendente/RBAC, renovação, bloqueio com invalidação, reativação e recuperação idempotente. O gate
+  externo que bloqueava o primeiro endpoint da Fase 4 está encerrado; a homologação integral dos demais
+  módulos e os gates das fases 5–9 continuam separados.
 - A fundação integrada de staging foi incorporada à `main` pela PR #5 no merge `20fed6d`; o gate sobe PostgreSQL 18.3, aplica migrations,
   neutraliza deriva de privilégios do login runtime, inicia API e web, valida health pelo proxy e prova
   recuperação/persistência após reinício do banco. O CI da `main` no run `31178259803` passou no merge final.

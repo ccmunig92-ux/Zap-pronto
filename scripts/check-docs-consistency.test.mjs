@@ -4,8 +4,8 @@ import { latestMigrationNumber, validateDocumentation } from "./check-docs-consi
 
 const current = {
   latest: 79,
-  readme: "O candidato local contém uma Inbox validada até a migration `0079`; ainda não está na main.",
-  release: "O checkpoint `0079` está presente no candidato. A declaração permitida é **checkpoint 0079 presente no candidato local**.",
+  readme: "A `main` contém uma Inbox validada até a migration `0079`.",
+  release: "O checkpoint `0079` está integrado à `main`.",
   schedule: "O estado inclui migrations `0068`–`0079` no mesmo monólito.",
 };
 
@@ -14,7 +14,7 @@ test("deriva o checkpoint mais recente dos nomes das migrations", () => {
 });
 
 test("aceita documentação alinhada ao checkpoint atual", () => {
-  assert.deepEqual(validateDocumentation(current).declarations, { README: 79, release: 79, "release-candidate": 79 });
+  assert.deepEqual(validateDocumentation(current).declarations, { README: 79, release: 79, "release-status": 79 });
 });
 
 test("rejeita declaração obsoleta de checkpoint 0067", () => {

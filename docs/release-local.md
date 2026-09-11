@@ -275,12 +275,13 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **checkpoint 0079 presente no candidato local**,
-ainda não integrado à `main`. A PR #15
-teve aprovação distinta, checks `validate` verdes e CI pós-merge `32429870452` verde. Staging continua bloqueado até
-existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
-homologação própria. Meta real, merge e deploy permanecem proibidos sem autorização explícita e sem os
-gates externos correspondentes.
+O checkpoint `0079` está integrado à `main`. O staging publicado possui artefatos fixados por digest,
+HTTPS, IdP externo, variáveis/segredos no gerenciador do ambiente e contas sintéticas dedicadas. A
+homologação OIDC externa da `main` no SHA `9f1901a9caf1b58ad413d166bb4920c82a537756`
+passou no run `34563529651`, cobrindo administrador, atendente/RBAC, renovação, bloqueio/invalidação,
+reativação e recuperação idempotente. Essa aprovação vale somente para o harness OIDC e o runtime de
+staging testados; não equivale à homologação integral dos demais módulos, não habilita Meta real ou
+Hermes e não autoriza novos deploys sem seus gates e autorização correspondentes.
 
 As migrations `0068`–`0069` adicionam metadados e catálogo de status canônico às conexões; `0070`–`0073`
 endurecem claim outbound, referência de segredo, janela de sessão e templates aprovados; `0074`–`0075`

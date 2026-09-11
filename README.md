@@ -16,8 +16,7 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-O candidato local contém uma Inbox validada até a migration `0079`; esse checkpoint ainda não está
-integrado à `main`. O conjunto candidato inclui:
+A `main` contém uma Inbox validada até a migration `0079`. O conjunto integrado inclui:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
@@ -39,9 +38,13 @@ integrado à `main`. O conjunto candidato inclui:
 As migrations `0068`–`0079` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
 aplicação ou um contrato paralelo.
 
-Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta
-contas Meta reais e mantém o transporte externo e Hermes desativados. O histórico de cortes e evidências
-fica em [docs/cronograma.md](docs/cronograma.md); o procedimento reproduzível de fechamento local fica em
+Esse estado foi validado no overlay OIDC local e em staging HTTPS. A homologação OIDC externa da `main`
+no SHA `9f1901a9caf1b58ad413d166bb4920c82a537756` comprovou as jornadas reais de administrador,
+atendente/RBAC, renovação de token, bloqueio com invalidação da sessão, reativação e recuperação
+idempotente no run `34563529651`. O proxy `/v1` publicado na Vercel preserva o contrato da API e responde
+`401 application/problem+json` sem token. Essa evidência **não** habilita contas Meta reais nem Hermes,
+que permanecem desativados. O histórico de cortes e evidências fica em
+[docs/cronograma.md](docs/cronograma.md); o procedimento reproduzível de fechamento local fica em
 [docs/release-local.md](docs/release-local.md).
 
 ## Desenvolvimento local
