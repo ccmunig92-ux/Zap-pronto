@@ -28,16 +28,17 @@ Gates opcionais fail-closed:
   `E2E_OIDC_TEST_TIMEOUT_MS` com pelo menos a espera mais 15 segundos.
 - `E2E_REQUIRE_BLOCK_REVOCATION=true` autoriza bloquear temporariamente a conta exclusiva do atendente,
   comprovar a perda de `/v1/me` em uma sessão já emitida e reativá-la obrigatoriamente no `finally`.
-  Nunca use conta operacional ou compartilhada nesse gate. Se o username não for o e-mail mostrado na
-  lista administrativa, forneça `E2E_ATTENDANT_ADMIN_LIST_MATCH` pelo mesmo cofre de segredos.
+  Nunca use conta operacional ou compartilhada nesse gate. Forneça o e-mail completo e exato mostrado na
+  lista administrativa em `E2E_ATTENDANT_ADMIN_LIST_MATCH`, pelo mesmo cofre de segredos.
 
 O modo `local` exige o origin, nonce, autorização destrutiva e identidades sintéticas fixadas pelo
 controlador do overlay. O modo `external` rejeita essas flags locais e origins loopback; o workflow
 externo executa somente login/RBAC de administrador e atendente, renovação e bloqueio reversível. As
 jornadas de Inbox, routing, histórico, transferência, takeover, webhook sintético e lifecycle unitário
-dependem do seed local e não são executadas contra staging externo. Para permitir o bloqueio reversível
-externo, o environment protegido deve definir `E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED=true` e usar uma conta
-exclusiva, nunca operacional.
+dependem do seed local e não são executadas contra staging externo. Em execução manual direta do Playwright,
+o operador precisa definir explicitamente `E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED=true`. No workflow canônico,
+a flag é fixada somente no job aprovado pelo environment protegido; ela não é uma variável a cadastrar no
+environment. Em ambos os casos, use uma conta exclusiva, nunca operacional.
 
 No overlay local, a jornada de fuso operacional roda isoladamente antes do bloco residual. O
 controlador exige exatamente uma versão `America/Sao_Paulo`, um comando idempotente e uma auditoria

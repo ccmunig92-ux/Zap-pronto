@@ -178,6 +178,8 @@ test("Playwright recusa origem externa, mutação observadora e skips inesperado
   assert.doesNotMatch(spec,/textContent\?\.includes\(identifier\)/);
   assert.match(spec,/distingue e-mail completo de valores semelhantes[\s\S]*attendant\+copy@example\.test[\s\S]*Attendant@Example\.Test/);
   assert.match(spec,/recusa ausência e duplicidade[\s\S]*ATTENDANT_USER_ROW_NOT_FOUND[\s\S]*ATTENDANT_USER_ROW_AMBIGUOUS/);
+  assert.match(spec,/reativação executa somente a rota de status[\s\S]*\/v1\/users\/[\s\S]*\/status/);
+  assert.match(spec,/reactivateUserRow[\s\S]*\\\/v1\\\/users\\\/\[\^\/\]\+\\\/status\$/);
   assert.match(spec,/bloqueio invalida sessão emitida[\s\S]*reactivateAttendant\(adminPage, attendantListMatch\)[\s\S]*login\(attendantPage, attendant\)/);
   assert.match(spec,/recuperação idempotente reativa a conta dedicada da homologação/);
   assert.match(spec,/transfere atendimento entre dois atendentes[\s\S]*Sob supervisão[\s\S]*Em atendimento[\s\S]*targetMutations\)\.toEqual\(\[\]\)/);

@@ -133,6 +133,22 @@ async function userRow(page: Page, exactEmail: string) {
   return rows.nth(indexes[0]!);
 }
 
+async function reactivateUserRow(page: Page, row: ReturnType<Page["locator"]>): Promise<boolean> {
+  const reactivate = row.getByRole("button", { name: "Reativar" });
+  if (await reactivate.count() === 0) {
+    await expect(row.getByRole("button", { name: "Bloquear" }),
+      "A conta dedicada precisa estar ativa ou bloqueada, nunca revogada").toBeVisible();
+    return false;
+  }
+  await reactivate.click();
+  await page.getByLabel("Motivo").fill("Limpeza obrigatória da homologação OIDC");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST"
+    && /\/v1\/users\/[^/]+\/status$/u.test(new URL(candidate.url()).pathname));
+  await page.getByRole("button", { name: "Confirmar reativar" }).click();
+  expect((await response).status(), "A recuperação da conta dedicada precisa persistir").toBe(200);
+  return true;
+}
+
 async function reactivateAttendant(page: Page, privateIdentifier: string): Promise<void> {
   const users = page.waitForResponse((response) => new URL(response.url()).pathname === "/v1/users"
     && response.request().method() === "GET");
@@ -146,18 +162,7 @@ async function reactivateAttendant(page: Page, privateIdentifier: string): Promi
   expect(invitationsResponse.status(), "A recuperação precisa recarregar convites administrativos").toBe(200);
   await expect(page.getByRole("heading", { name: "Administração de acesso" })).toBeVisible();
   const row = await userRow(page, privateIdentifier);
-  const reactivate = row.getByRole("button", { name: "Reativar" });
-  if (await reactivate.count() === 0) {
-    await expect(row.getByRole("button", { name: "Bloquear" }),
-      "A conta dedicada precisa estar ativa ou bloqueada, nunca revogada").toBeVisible();
-    return;
-  }
-  await reactivate.click();
-  await page.getByLabel("Motivo").fill("Limpeza obrigatória da homologação OIDC");
-  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST"
-    && /\/v1\/users\/[^/]+\/lifecycle$/u.test(new URL(candidate.url()).pathname));
-  await page.getByRole("button", { name: "Confirmar reativar" }).click();
-  expect((await response).status(), "A recuperação da conta dedicada precisa persistir").toBe(200);
+  await reactivateUserRow(page, row);
   await expect((await userRow(page, privateIdentifier)).getByRole("button", { name: "Bloquear" })).toBeVisible();
 }
 
@@ -177,6 +182,31 @@ test.describe("seleção administrativa exata", () => {
     </ul></section>`);
     await expect(userRow(page, "missing@example.test")).rejects.toThrow("ATTENDANT_USER_ROW_NOT_FOUND");
     await expect(userRow(page, "attendant@example.test")).rejects.toThrow("ATTENDANT_USER_ROW_AMBIGUOUS");
+  });
+
+  test("reativação executa somente a rota de status da conta exata", async ({ page }) => {
+    let mutationPath: string | undefined;
+    await page.route("https://app.example.test/v1/users/**/status", async (route) => {
+      const request = route.request();
+      mutationPath = new URL(request.url()).pathname;
+      await route.fulfill({ status: 200, contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" }, body: "{}" });
+    });
+    await page.setContent(`<section><h3>Usuários</h3><ul>
+      <li><div><strong>Exato</strong><small>attendant@example.test · BLOCKED</small>
+      <button type="button" id="open-button">Reativar</button></div></li></ul></section>
+      <div id="dialog" hidden><label>Motivo<textarea></textarea></label>
+      <button type="button" id="confirm-button">Confirmar reativar</button></div>
+      <script>
+        document.getElementById('open-button').onclick=()=>document.getElementById('dialog').hidden=false;
+        document.getElementById('confirm-button').onclick=async()=>{
+          await fetch('https://app.example.test/v1/users/11111111-1111-4111-8111-111111111111/status',{method:'POST'});
+          document.getElementById('open-button').textContent='Bloquear';document.getElementById('dialog').remove();};
+      </script>`);
+    const row = await userRow(page, "attendant@example.test");
+    expect(await reactivateUserRow(page, row)).toBe(true);
+    expect(mutationPath).toBe("/v1/users/11111111-1111-4111-8111-111111111111/status");
+    await expect(row.getByRole("button", { name: "Bloquear" })).toBeVisible();
   });
 });
 
