@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, test, type Page, type Response as PlaywrightResponse } from "@playwright/test";
+import {retryTransientNavigation} from "../src/transientNavigation.js";
 
 const enabled = process.env.E2E_OIDC_ENABLED === "true";
 const requireRenewal = process.env.E2E_REQUIRE_RENEWAL === "true";
@@ -110,8 +111,12 @@ function account(prefix: "ADMIN" | "ATTENDANT" | "ATTENDANT_TWO" | "MANAGER" | "
   return { username, password, tenant };
 }
 
+async function gotoApplication(page:Page):Promise<void>{
+  await retryTransientNavigation(()=>page.goto("/"),delay=>page.waitForTimeout(delay),externalMode);
+}
+
 async function login(page: Page, configuration: AccountConfiguration): Promise<void> {
-  await page.goto("/");
+  await gotoApplication(page);
   const enter = page.getByRole("button", { name: "Entrar" });
   await expect(enter).toBeEnabled();
   const me = page.waitForResponse((response) => new URL(response.url()).pathname === "/v1/me"
@@ -226,7 +231,7 @@ async function reactivateAttendant(page: Page, privateIdentifier: string): Promi
   const invitations = page.waitForResponse((response) =>
     new URL(response.url()).pathname === "/v1/users/invitations"
     && response.request().method() === "GET");
-  await page.goto("/");
+  await gotoApplication(page);
   await openModule(page, "Acessos");
   const [usersResponse, invitationsResponse] = await Promise.all([users, invitations]);
   expect(usersResponse.status(), "A recuperação precisa recarregar usuários administrativos").toBe(200);
@@ -534,7 +539,8 @@ test.describe("shell OIDC real", () => {
       await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();
       await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);
       const activeItem=await reloadAndLocateActiveFixture(page,contactName);await activeItem.click();
-      await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Enviar"})).toBeVisible();
+      await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Devolver à fila"})).toBeVisible();
+      await expect(page.getByRole("button",{name:"Enviar"})).toHaveCount(0);await expect(page.getByRole("textbox",{name:"Mensagem"})).toHaveCount(0);
       await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
       await page.reload();await openModule(page,"Inbox");await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
     },async()=>{await recoverOwnExternalFixture(page,contactName);await restoreOwnAvailabilityOffline(page)});
