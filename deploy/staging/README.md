@@ -165,6 +165,12 @@ comando adicional e chave malformada. O arquivo privado da fixture com tenant e 
 `/srv/zap-pronto/secrets/staging/inbox-e2e.json`, proprietário `root:root` e modo `0400`;
 esses identificadores não são enviados como argumentos nem cadastrados no GitHub.
 
+Para o migrator administrativo rodar como UID 0 sem ampliar a leitura do secret canônico UID 1000, o
+controlador cria em `/run/zap-pronto-staging-inbox-e2e` uma cópia efêmera `root:root/0400` de
+`database-migration-url`, monta apenas essa cópia sobre `/run/secrets/database_migration_url` no container
+e a remove por trap em sucesso, erro ou sinal. O conteúdo nunca é impresso e a permissão do arquivo original
+permanece inalterada.
+
 O workflow executa `cleanup` com `always()`. Se o runner for perdido antes dessa etapa, conecte-se pelo canal
 administrativo da VPS e execute o controlador com `cleanup <run_id>-<run_attempt>`; a limpeza é idempotente.
 Depois, rotacione a chave dedicada se houver suspeita de exposição. Uma execução só é aceita quando `verify`
