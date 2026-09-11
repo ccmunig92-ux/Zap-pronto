@@ -38,6 +38,7 @@ try {
     )
   `);
 
+  const migrationPlan = [];
   for (const filename of migrationFiles) {
     const sql = normalizeMigrationSql(await readFile(resolve(migrationsDirectory, filename), "utf8"));
     const checksum = migrationChecksum(sql);
@@ -49,20 +50,55 @@ try {
 
     if (existing.rowCount === 1) {
       const storedChecksum = existing.rows[0].checksum_sha256.trim();
-      if (storedChecksum === legacyCrlfChecksum && storedChecksum !== checksum) {
-        await client.query(
-          "UPDATE schema_migrations SET checksum_sha256 = $1 WHERE filename = $2 AND checksum_sha256 = $3",
-          [checksum, filename, storedChecksum],
-        );
-        process.stdout.write(`normalized checksum ${filename}\n`);
-        continue;
-      }
-      if (storedChecksum !== checksum) {
+      if (storedChecksum !== checksum && storedChecksum !== legacyCrlfChecksum) {
         throw new Error(`MIGRATION_CHECKSUM_MISMATCH:${filename}`);
       }
+      migrationPlan.push({
+        filename,
+        sql,
+        checksum,
+        legacyChecksum: storedChecksum === legacyCrlfChecksum && storedChecksum !== checksum
+          ? storedChecksum
+          : undefined,
+      });
       continue;
     }
 
+    migrationPlan.push({ filename, sql, checksum });
+  }
+
+  const legacyMigrations = migrationPlan.filter((migration) => migration.legacyChecksum);
+  if (legacyMigrations.length > 0) {
+    await client.query("BEGIN");
+    try {
+      for (const migration of legacyMigrations) {
+        const updated = await client.query(
+          `UPDATE schema_migrations
+             SET checksum_sha256 = $1
+           WHERE filename = $2 AND checksum_sha256 = $3
+           RETURNING filename`,
+          [migration.checksum, migration.filename, migration.legacyChecksum],
+        );
+        if (updated.rowCount !== 1) {
+          throw new Error(`MIGRATION_CHECKSUM_UPDATE_CONFLICT:${migration.filename}`);
+        }
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+    for (const migration of legacyMigrations) {
+      process.stdout.write(`normalized checksum ${migration.filename}\n`);
+    }
+  }
+
+  for (const { filename, sql, checksum } of migrationPlan) {
+    const existing = await client.query(
+      "SELECT 1 FROM schema_migrations WHERE filename = $1",
+      [filename],
+    );
+    if (existing.rowCount === 1) continue;
     const transactionalSql = sql
       .replace(/^\s*BEGIN\s*;\s*/i, "")
       .replace(/\s*COMMIT\s*;\s*$/i, "");
