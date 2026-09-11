@@ -485,10 +485,9 @@ test.describe("shell OIDC real", () => {
     const mutations:string[]=[];const crossOriginRequests:string[]=[];const forbiddenOutbound:string[]=[];page.on("request",request=>{const url=new URL(request.url());
       if(url.origin!==baseOrigin)crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);if(/(?:meta|facebook|whatsapp|hermes)/iu.test(url.href)||url.pathname==="/v1/webhooks/meta"||(request.method()==="POST"&&url.pathname.endsWith("/messages")))forbiddenOutbound.push(`${request.method()} ${url.pathname}`);
       if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
-    const availabilityResponse=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/availability");
-    await page.reload();const initialAvailability=await safeAvailabilitySnapshot(await availabilityResponse);
-    expect(initialAvailability).toMatchObject({status:"OFFLINE",activeCount:0});
-    await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();let claimAvailability=initialAvailability!;
+    await page.reload();await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();
+    await expect(page.getByText(/Status:\s*Offline\s*·\s*0 de \d+ ativos/u)).toBeVisible();
+    let claimAvailability:SafeAvailabilitySnapshot|null=null;
     try{
       claimAvailability=await changeOwnAvailability(page,"AVAILABLE");
       await page.getByRole("button",{name:`${contactName} · NORMAL`}).click();await expect(page.getByText(inboundText)).toBeVisible();
