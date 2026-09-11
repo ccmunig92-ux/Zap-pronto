@@ -16,9 +16,9 @@ test("publication is manual, default-branch-only and environment-scoped", () => 
 test("public web build validates and forwards the API audience", () => {
   assert.match(source, /OIDC_AUDIENCE: \$\{\{ vars\.OIDC_AUDIENCE \}\}/);
   assert.match(source, /test -n "\$OIDC_AUDIENCE"/);
-  assert.equal((source.match(/VITE_OIDC_AUDIENCE=\$\{\{ vars\.OIDC_AUDIENCE \}\}/g) ?? []).length, 2);
-  assert.equal((source.match(/VITE_OIDC_SCOPE=openid profile email/g) ?? []).length, 2);
-  assert.equal((source.match(/VITE_OIDC_AUTOMATIC_SILENT_RENEW=true/g) ?? []).length, 2);
+  assert.equal((source.match(/VITE_OIDC_AUDIENCE=\$\{\{ vars\.OIDC_AUDIENCE \}\}/g) ?? []).length, 1);
+  assert.equal((source.match(/VITE_OIDC_SCOPE=openid profile email/g) ?? []).length, 1);
+  assert.equal((source.match(/VITE_OIDC_AUTOMATIC_SILENT_RENEW=true/g) ?? []).length, 1);
 });
 
 test("external OIDC uses the canonical harness in restricted external mode", () => {
@@ -35,15 +35,18 @@ test("external OIDC uses the canonical harness in restricted external mode", () 
   assert.doesNotMatch(oidcSource, /^  (?:pull_request|push):/m);
 });
 
-test("both candidates are scanned before any registry publication", () => {
-  const apiScan = source.indexOf("Scan API for critical vulnerabilities");
-  const apiPublish = source.indexOf("Publish approved API");
-  const webScan = source.indexOf("Scan web for critical vulnerabilities");
-  const webPublish = source.indexOf("Publish approved web");
-  assert.ok(apiScan > 0 && apiScan < apiPublish);
-  assert.ok(webScan > 0 && webScan < webPublish);
-  assert.ok(webScan < apiPublish);
-  assert.equal((source.match(/load: true/g) ?? []).length, 2);
+test("each published digest is built once, scanned exactly and only then attested", () => {
+  const apiScan = source.indexOf("Scan the published API digest");
+  const apiAttest = source.indexOf("Attest API provenance");
+  const webScan = source.indexOf("Scan the published web digest");
+  const webAttest = source.indexOf("Attest web provenance");
+  assert.ok(apiScan > 0 && apiScan < apiAttest);
+  assert.ok(webScan > 0 && webScan < webAttest);
+  assert.equal((source.match(/file: Dockerfile\.api/g) ?? []).length, 1);
+  assert.equal((source.match(/file: Dockerfile\.web/g) ?? []).length, 1);
+  assert.match(source, /image-ref: ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/zap-pronto-api@\$\{\{ steps\.api\.outputs\.digest \}\}/);
+  assert.match(source, /image-ref: ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/zap-pronto-web@\$\{\{ steps\.web\.outputs\.digest \}\}/);
+  assert.doesNotMatch(source, /load: true/);
   assert.equal((source.match(/push: true/g) ?? []).length, 2);
   assert.equal((source.match(/sbom: true/g) ?? []).length, 2);
 });
