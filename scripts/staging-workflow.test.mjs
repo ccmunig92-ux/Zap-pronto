@@ -11,6 +11,9 @@ const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.ur
 const diagnosticStart = oidcSpec.indexOf("async function safeAvailabilitySnapshot");
 const diagnosticEnd = oidcSpec.indexOf("async function changeOwnAvailability", diagnosticStart);
 const safeDiagnosticSource = oidcSpec.slice(diagnosticStart, diagnosticEnd);
+const externalInboxStart = oidcSpec.indexOf('test("inbound materializado permite claim e devolução segura à fila"');
+const externalInboxEnd = oidcSpec.indexOf('test("resposta humana TEXT fica QUEUED local', externalInboxStart);
+const externalInboxSource = oidcSpec.slice(externalInboxStart, externalInboxEnd);
 
 test("publication is manual, default-branch-only and environment-scoped", () => {
   assert.match(source, /workflow_dispatch:/);
@@ -75,7 +78,8 @@ test("external Inbox fixture is isolated behind pinned SSH and always cleaned", 
   assert.match(safeDiagnosticSource, /unexpected_http_status/);
   assert.match(oidcSpec, /changeOwnAvailability\(page:Page,targetStatus:"AVAILABLE"\|"OFFLINE"\)/);
   assert.match(oidcSpec, /restoreOwnAvailabilityOffline/);
-  assert.match(oidcSpec, /expect\(initialAvailability\)\.toMatchObject\(\{status:"OFFLINE",activeCount:0\}\)/);
+  assert.match(externalInboxSource, /getByText\(\/Status:\\s\*Offline\\s\*·\\s\*0 de \\d\+ ativos\/u\)/);
+  assert.doesNotMatch(externalInboxSource, /waitForResponse\([^\n]*request\(\)\.method\(\)==="GET"[^\n]*\/v1\/inbox\/availability/);
   assert.match(oidcSpec, /mutations\.filter\(value=>value==="POST \/v1\/inbox\/availability"\)\)\.toHaveLength\(2\)/);
   assert.doesNotMatch(safeDiagnosticSource, /console\.|\.text\(\)|correlationId|headers\(\)|url\(\)/);
   assert.doesNotMatch(oidcSource, /DATABASE_(?:URL|ADMIN_URL)/);
