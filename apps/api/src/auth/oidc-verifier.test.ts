@@ -25,6 +25,28 @@ test("OIDC verifier validates signature, issuer, audience, subject and organizat
     assert.deepEqual(await verifier.verifyBearer(token), { issuer, audience: "zap-pronto", subject: "subject-1",
       verifiedEmail: "person@example.test",
       organization: { claim: "org_id", value: "tenant-a" } });
+    const emailClaim = "https://clinicaprontomedic.online/claims/email";
+    const emailVerifiedClaim = "https://clinicaprontomedic.online/claims/email_verified";
+    const namespacedVerifier = createOidcIdentityVerifier({ issuer, audience: "zap-pronto",
+      jwksUrl: `http://127.0.0.1:${address.port}/jwks`, emailClaim, emailVerifiedClaim });
+    const namespacedToken = await new SignJWT({ [emailClaim]: "Person@Example.Test",
+      [emailVerifiedClaim]: true }).setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setIssuer(issuer).setAudience("zap-pronto").setSubject("subject-namespaced")
+      .setExpirationTime("5m").sign(privateKey);
+    assert.deepEqual(await namespacedVerifier.verifyBearer(namespacedToken), { issuer,
+      audience: "zap-pronto", subject: "subject-namespaced", verifiedEmail: "person@example.test" });
+    for (const claims of [
+      { [emailClaim]: "person@example.test" },
+      { [emailClaim]: "person@example.test", [emailVerifiedClaim]: "true" },
+      { [emailClaim]: "not-an-email", [emailVerifiedClaim]: true },
+      { email: "fallback@example.test", email_verified: true, [emailVerifiedClaim]: true },
+    ]) {
+      const incomplete = await new SignJWT(claims)
+        .setProtectedHeader({ alg: "RS256", kid: "test-key" }).setIssuer(issuer)
+        .setAudience("zap-pronto").setSubject("subject-without-verified-email")
+        .setExpirationTime("5m").sign(privateKey);
+      assert.equal((await namespacedVerifier.verifyBearer(incomplete)).verifiedEmail, undefined);
+    }
     const wrongAudience = await new SignJWT({ org_id: "tenant-a" })
       .setProtectedHeader({ alg: "RS256", kid: "test-key" }).setIssuer(issuer).setAudience("other")
       .setSubject("subject-1").setExpirationTime("5m").sign(privateKey);

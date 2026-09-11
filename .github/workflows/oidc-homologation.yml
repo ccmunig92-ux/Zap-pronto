@@ -31,6 +31,8 @@ jobs:
       OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
       OIDC_DISCOVERY_URL: ${{ vars.OIDC_DISCOVERY_URL }}
       OIDC_ORGANIZATION_CLAIM: ${{ vars.OIDC_ORGANIZATION_CLAIM }}
+      OIDC_EMAIL_CLAIM: ${{ vars.OIDC_EMAIL_CLAIM }}
+      OIDC_EMAIL_VERIFIED_CLAIM: ${{ vars.OIDC_EMAIL_VERIFIED_CLAIM }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6

@@ -11,6 +11,17 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
+- Por padrão a API lê `email` e `email_verified` do access token. Para um IdP que publica e-mail
+  verificado em claims namespaced, defina obrigatoriamente o par `OIDC_EMAIL_CLAIM` e
+  `OIDC_EMAIL_VERIFIED_CLAIM` como URIs HTTPS distintas, sem credenciais, query, fragmento ou espaços.
+  Exemplo: `https://clinicaprontomedic.online/claims/email` e
+  `https://clinicaprontomedic.online/claims/email_verified`.
+- O primeiro claim precisa ser string e o segundo precisa ser o booleano JSON `true`. String `"true"`,
+  claim ausente ou os claims padrão quando o par namespaced está configurado não autorizam aceitação
+  de convite.
+- No Auth0, uma Post Login Action deve adicionar esse par somente ao **access token** destinado ao
+  Identifier exato da API. Não envie esses dados apenas no ID token e não use `/userinfo`, corpo da
+  requisição ou Management API como fallback. Tokens emitidos antes da Action precisam ser renovados.
 - Os quatro arquivos de secrets do banco existem fora do checkout e são informados por caminhos absolutos. Como o
   Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
   imagem PostgreSQL Alpine e as três URLs (`database_migration_url`, `database_runtime_url` e

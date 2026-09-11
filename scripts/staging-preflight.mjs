@@ -45,6 +45,25 @@ function httpsUrl(env, name, originOnly = false) {
   return url;
 }
 
+function optionalEmailClaims(env) {
+  const email = env.OIDC_EMAIL_CLAIM;
+  const verified = env.OIDC_EMAIL_VERIFIED_CLAIM;
+  const hasEmail = typeof email === "string" && email.length > 0;
+  const hasVerified = typeof verified === "string" && verified.length > 0;
+  if (hasEmail !== hasVerified) fail("OIDC_EMAIL_CLAIMS_PAIR_REQUIRED");
+  if (!hasEmail) return;
+  for (const [name, value, standard] of [["OIDC_EMAIL_CLAIM", email, "email"],
+    ["OIDC_EMAIL_VERIFIED_CLAIM", verified, "email_verified"]]) {
+    if (value === standard) continue;
+    let parsed;
+    try { parsed = new URL(value); } catch { fail(`${name}_INVALID`); }
+    if (value !== value.trim() || value.length > 512 || /[\u0000-\u0020\u007f]/u.test(value)
+      || parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash
+      || parsed.pathname === "/" || parsed.href !== value) fail(`${name}_INVALID`);
+  }
+  if (email === verified) fail("OIDC_EMAIL_CLAIMS_DISTINCT_REQUIRED");
+}
+
 export function validateEnvironment(env, { metaEnabled = false } = {}) {
   for (const name of ["ZAP_API_IMAGE", "ZAP_WEB_IMAGE", "POSTGRES_IMAGE"]) {
     if (!IMAGE.test(required(env, name))) fail(`${name}_NOT_IMMUTABLE`);
@@ -58,6 +77,7 @@ export function validateEnvironment(env, { metaEnabled = false } = {}) {
     if (discovery.origin !== issuer.origin) fail("OIDC_ORIGIN_MISMATCH");
   }
   if (!/^[A-Za-z0-9._:-]{1,200}$/.test(required(env, "OIDC_AUDIENCE"))) fail("OIDC_AUDIENCE_INVALID");
+  optionalEmailClaims(env);
   if (metaEnabled && !/^v\d+\.\d+$/.test(required(env, "META_GRAPH_API_VERSION"))) fail("META_GRAPH_API_VERSION_INVALID");
 }
 
@@ -168,6 +188,7 @@ export function validateComposeInvariants(compose, { metaEnabled = false } = {})
     }
     if (serviceName === "api") {
       const environment = service.environment ?? {};
+      optionalEmailClaims(environment);
       if (environment.META_WEBHOOK_ENABLED !== String(metaEnabled)) fail("API_META_WEBHOOK_ENABLED_INVALID");
       if (metaEnabled) {
         if (environment.META_APP_SECRET_FILE !== "/run/secrets/meta_app_secret" || environment.META_VERIFY_TOKEN_FILE !== "/run/secrets/meta_verify_token") fail("API_META_WEBHOOK_SECRET_PATH_INVALID");
