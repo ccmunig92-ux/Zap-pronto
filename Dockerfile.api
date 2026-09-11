@@ -27,6 +27,7 @@ COPY --from=build --chown=node:node /runtime/api ./
 COPY --chown=node:node scripts/db-migrate.mjs ./scripts/db-migrate.mjs
 COPY --chown=node:node scripts/db-provision-runtime.mjs ./scripts/db-provision-runtime.mjs
 COPY --chown=node:node scripts/staging-bootstrap-tenant.mjs ./scripts/staging-bootstrap-tenant.mjs
+COPY --chown=node:node scripts/staging-inbox-e2e-fixture.mjs ./scripts/staging-inbox-e2e-fixture.mjs
 COPY --chown=node:node database/migrations ./database/migrations
 USER node
 EXPOSE 3000

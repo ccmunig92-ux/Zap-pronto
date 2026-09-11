@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../.github/workflows/staging-images.yml", import.meta.url), "utf8");
 const oidcSource = await readFile(new URL("../.github/workflows/oidc-homologation.yml", import.meta.url), "utf8");
+const oidcSpec = await readFile(new URL("../apps/web/e2e/shell-oidc.spec.ts", import.meta.url), "utf8");
+const stagingReadme = await readFile(new URL("../deploy/staging/README.md", import.meta.url), "utf8");
 const apiDockerfile = await readFile(new URL("../Dockerfile.api", import.meta.url), "utf8");
 const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
 
@@ -34,9 +36,36 @@ test("external OIDC uses the canonical harness in restricted external mode", () 
   assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*recuperação idempotente/);
   assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 1);
   assert.match(oidcSource, /--grep/);
-  assert.equal((oidcSource.match(/test:e2e:oidc --grep/g) ?? []).length, 2);
+  assert.equal((oidcSource.match(/test:e2e:oidc --grep/g) ?? []).length, 3);
   assert.doesNotMatch(oidcSource, /test:e2e:oidc -- --grep/);
   assert.doesNotMatch(oidcSource, /^  (?:pull_request|push):/m);
+});
+
+test("external Inbox fixture is isolated behind pinned SSH and always cleaned", () => {
+  assert.match(oidcSource, /E2E_INBOX_FIXTURE_KEY: \$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
+  for (const value of ["STAGING_FIXTURE_SSH_HOST", "STAGING_FIXTURE_SSH_PORT", "STAGING_FIXTURE_SSH_USER"]) {
+    assert.match(oidcSource, new RegExp(`vars\\.${value}`));
+  }
+  for (const value of ["STAGING_FIXTURE_SSH_PRIVATE_KEY", "STAGING_FIXTURE_SSH_KNOWN_HOSTS"]) {
+    assert.match(oidcSource, new RegExp(`secrets\\.${value}`));
+  }
+  assert.equal((oidcSource.match(/-o BatchMode=yes/g) ?? []).length, 3);
+  assert.equal((oidcSource.match(/-o PasswordAuthentication=no/g) ?? []).length, 3);
+  assert.equal((oidcSource.match(/-o StrictHostKeyChecking=yes/g) ?? []).length, 3);
+  assert.equal((oidcSource.match(/UserKnownHostsFile=/g) ?? []).length, 3);
+  assert.match(oidcSource, /Prepare isolated staging Inbox fixture[\s\S]*"prepare \$E2E_INBOX_FIXTURE_KEY"/);
+  assert.match(oidcSource, /Verify isolated staging Inbox fixture[\s\S]*if: \$\{\{ always\(\) && inputs\.mode == 'homologate' \}\}[\s\S]*"verify \$E2E_INBOX_FIXTURE_KEY"/);
+  assert.match(oidcSource, /Cleanup isolated staging Inbox fixture[\s\S]*if: \$\{\{ always\(\) && inputs\.mode == 'homologate' \}\}[\s\S]*"cleanup \$E2E_INBOX_FIXTURE_KEY"/);
+  assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*inbound materializado permite claim e devolução segura à fila/);
+  assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*E2E_FORBID_SKIPS: "true"/);
+  assert.match(oidcSpec, /if\(url\.origin!==baseOrigin\)crossOriginRequests\.push/);
+  assert.match(oidcSpec, /expect\(crossOriginRequests\)\.toEqual\(\[\]\)/);
+  assert.match(oidcSpec, /expect\(requeue\?\.\[1\]\)\.toBe\(claim\?\.\[1\]\)/);
+  assert.match(oidcSpec, /expect\(forbiddenOutbound\)\.toEqual\(\[\]\)/);
+  assert.doesNotMatch(oidcSource, /DATABASE_(?:URL|ADMIN_URL)/);
+  assert.doesNotMatch(oidcSource, /sshpass|PreferredAuthentications=password|StrictHostKeyChecking=no/);
+  assert.match(stagingReadme, /command="\/usr\/local\/sbin\/zap-pronto-staging-inbox-e2e-controller",restrict/);
+  assert.match(stagingReadme, /inbox-e2e\.json`, proprietário `root:root` e modo `0400`/);
 });
 
 test("each published digest is built once, scanned exactly and only then attested", () => {

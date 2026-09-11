@@ -444,18 +444,24 @@ test.describe("shell OIDC real", () => {
   });
 
   test("inbound materializado permite claim e devolução segura à fila",async({page})=>{
-    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");await login(page,account("ATTENDANT"));
-    const mutations:string[]=[];const externalHosts:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.hostname!=="zap-pronto.127.0.0.1.nip.io")externalHosts.push(url.host);
+    test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");const fixtureKey=optional("E2E_INBOX_FIXTURE_KEY");
+    if(externalMode&&!fixtureKey?.match(/^[0-9]{1,20}-[1-9][0-9]{0,5}$/u))throw new Error("E2E_INBOX_FIXTURE_KEY_REQUIRED");
+    await login(page,account("ATTENDANT"));
+    const baseOrigin=new URL(optional("E2E_BASE_URL")??page.url()).origin;const contactName=externalMode?`E2E Inbox ${fixtureKey}`:"Contato";
+    const inboundText=externalMode?`Homologação externa Inbox ${fixtureKey}`:"Mensagem inbound sintética da Inbox";
+    const mutations:string[]=[];const crossOriginRequests:string[]=[];const forbiddenOutbound:string[]=[];page.on("request",request=>{const url=new URL(request.url());
+      if(url.origin!==baseOrigin)crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);if(/(?:meta|facebook|whatsapp|hermes)/iu.test(url.href)||url.pathname==="/v1/webhooks/meta"||(request.method()==="POST"&&url.pathname.endsWith("/messages")))forbiddenOutbound.push(`${request.method()} ${url.pathname}`);
       if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
     await page.reload();await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();
-    await page.getByRole("button",{name:"Contato · NORMAL"}).click();await expect(page.getByText("Mensagem inbound sintética da Inbox")).toBeVisible();
-    await page.getByRole("button",{name:"Assumir atendimento"}).click();await expect(page.getByRole("button",{name:"Contato · Em atendimento"})).toBeVisible();
+    await page.getByRole("button",{name:`${contactName} · NORMAL`}).click();await expect(page.getByText(inboundText)).toBeVisible();
+    await page.getByRole("button",{name:"Assumir atendimento"}).click();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();
     await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);
-    await page.reload();await expect(page.getByRole("button",{name:"Contato · Em atendimento"})).toBeVisible();await page.getByRole("button",{name:"Contato · Em atendimento"}).click();
+    await page.reload();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();await page.getByRole("button",{name:`${contactName} · Em atendimento`}).click();
     await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Enviar"})).toBeVisible();
-    await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:"Contato · NORMAL"})).toBeVisible();
-    await page.reload();await expect(page.getByRole("button",{name:"Contato · NORMAL"})).toBeVisible();await expect(page.getByRole("button",{name:"Contato · Em atendimento"})).toHaveCount(0);
-    expect(mutations).toEqual([`POST /v1/inbox/handoffs/90000000-0000-4000-8000-000000000060/claim`,`POST /v1/inbox/handoffs/90000000-0000-4000-8000-000000000060/requeue`]);expect(externalHosts).toEqual([]);
+    await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
+    await page.reload();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
+    expect(mutations).toHaveLength(2);const claim=mutations[0]?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/claim$/u);const requeue=mutations[1]?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/requeue$/u);
+    expect(claim?.[1]).toBeTruthy();expect(requeue?.[1]).toBe(claim?.[1]);expect(crossOriginRequests).toEqual([]);expect(forbiddenOutbound).toEqual([]);
   });
 
   test("resposta humana TEXT fica QUEUED local e persiste sem Meta ou Hermes",async({page})=>{test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar resposta local.");await login(page,account("ATTENDANT"));
