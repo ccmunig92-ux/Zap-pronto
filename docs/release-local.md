@@ -1,15 +1,15 @@
 # Fechamento da release local
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
-Ele não substitui o cronograma e não autoriza deploy. O checkout canônico atual contém o checkpoint
-`0079`; a PR #15 e o CI pós-merge `32429870452` documentam apenas o corte anterior. Isso não homologa
+Ele não substitui o cronograma e não autoriza deploy. O candidato local contém o checkpoint
+`0080`; a PR #15 e o CI pós-merge `32429870452` documentam apenas um corte anterior. Isso não homologa
 Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
-- Cadeia append-only local validada de `0001_core.sql` até
-  `0079_initial_tenant_bootstrap.sql`.
+- Cadeia append-only local de `0001_core.sql` até
+  `0080_capacity_alert_dynamic_discovery.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -275,7 +275,7 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-O checkpoint `0079` está integrado à `main`. O staging publicado possui artefatos fixados por digest,
+O checkpoint `0080` está presente no candidato local. O staging publicado possui artefatos fixados por digest,
 HTTPS, IdP externo, variáveis/segredos no gerenciador do ambiente e contas sintéticas dedicadas. A
 homologação OIDC externa da `main` no SHA `9f1901a9caf1b58ad413d166bb4920c82a537756`
 passou no run `34563529651`, cobrindo administrador, atendente/RBAC, renovação, bloqueio/invalidação,
@@ -293,3 +293,11 @@ habilita Meta real ou altera a fronteira do Hermes.
 `0079` acrescenta o bootstrap administrativo one-shot do primeiro tenant, unidade, administrador e
 identidade OIDC. Ele é inacessível aos papéis da aplicação, exige banco sem tenant no primeiro uso,
 serializa concorrência e só aceita replay com a mesma impressão digital.
+
+`0080` elimina a lista estática de avaliação de capacidade: o worker descobre, em páginas keyset de até
+100 itens, a versão mais recente habilitada de cada política em tenants/unidades ativos. A função global
+é `SECURITY DEFINER`, tem `search_path` fixo, é executável somente pelo worker e não amplia `SELECT`
+direto sobre a tabela protegida de políticas. O catálogo é redescoberto no início de cada ciclo; mudanças
+ocorridas durante a paginação ficam visíveis no ciclo seguinte. Uma desativação concorrente resulta em
+fechamento/no-op e uma falha unitária não interrompe outros tenants. O registro de destinatários continua
+interno, sem afirmar notificação ou habilitar transporte externo.
