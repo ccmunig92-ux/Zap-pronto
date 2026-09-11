@@ -52,6 +52,9 @@ export function registerProblemDetailsHandler(app: FastifyInstance): void {
       });
       return;
     }
+    request.log.error({ event: "http.error", method: request.method,
+      route: request.routeOptions.url, requestId: request.id,
+      errorType: "UnexpectedError" }, "http.error");
     void reply.status(500).type("application/problem+json").send({
       type: "urn:zap-pronto:error:internal-server-error",
       title: "Internal Server Error",

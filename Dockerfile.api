@@ -18,7 +18,10 @@ RUN pnpm --filter @zap-pronto/contracts build && pnpm build && pnpm --filter @za
   && pnpm --offline --filter @zap-pronto/api deploy --prod --legacy /runtime/api
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
-ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=3000
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.source="https://github.com/ccmunig92-ux/Zap-pronto" \
+      org.opencontainers.image.revision=$VCS_REF
+ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=3000 ZAP_RELEASE_ID=$VCS_REF
 WORKDIR /app
 COPY --from=build --chown=node:node /runtime/api ./
 COPY --chown=node:node scripts/db-migrate.mjs ./scripts/db-migrate.mjs

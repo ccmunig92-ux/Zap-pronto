@@ -23,6 +23,21 @@ const notificationPgPool = new pg.Pool({
   idleTimeoutMillis: 30_000,
 });
 const notificationPool: InboxNotificationPool = notificationPgPool;
-const app = await buildApp({ pool, notificationPool, identityVerifier, metaWebhook: runtime.metaWebhook });
+const app = await buildApp({
+  pool,
+  notificationPool,
+  identityVerifier,
+  metaWebhook: runtime.metaWebhook,
+  releaseId: runtime.releaseId,
+  logger: {
+    level: runtime.logLevel,
+    redact: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "res.headers.set-cookie",
+    ],
+  },
+});
 app.addHook("onClose", async () => { await Promise.all([pool.end(), notificationPgPool.end()]); });
 await app.listen({ host: runtime.host, port: runtime.port });
+app.log.info({ releaseId: runtime.releaseId }, "service.started");

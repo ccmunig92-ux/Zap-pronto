@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../.github/workflows/staging-images.yml", import.meta.url), "utf8");
 const oidcSource = await readFile(new URL("../.github/workflows/oidc-homologation.yml", import.meta.url), "utf8");
+const apiDockerfile = await readFile(new URL("../Dockerfile.api", import.meta.url), "utf8");
+const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
 
 test("publication is manual, default-branch-only and environment-scoped", () => {
   assert.match(source, /workflow_dispatch:/);
@@ -51,6 +53,16 @@ test("each published digest is built once, scanned exactly and only then atteste
   assert.doesNotMatch(source, /load: true/);
   assert.equal((source.match(/push: true/g) ?? []).length, 2);
   assert.equal((source.match(/sbom: true/g) ?? []).length, 2);
+});
+
+test("published images carry the exact source revision instead of inherited base labels", () => {
+  assert.equal((source.match(/VCS_REF=\$\{\{ github\.sha \}\}/g) ?? []).length, 2);
+  for (const dockerfile of [apiDockerfile, webDockerfile]) {
+    assert.match(dockerfile, /ARG VCS_REF=unknown/);
+    assert.match(dockerfile, /org\.opencontainers\.image\.revision=\$VCS_REF/);
+    assert.match(dockerfile, /org\.opencontainers\.image\.source="https:\/\/github\.com\/ccmunig92-ux\/Zap-pronto"/);
+  }
+  assert.match(apiDockerfile, /ZAP_RELEASE_ID=\$VCS_REF/);
 });
 
 test("third-party actions are pinned to full commits", () => {

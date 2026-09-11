@@ -105,6 +105,7 @@ services:
     environment:
       API_HOST: 0.0.0.0
       API_PORT: "3000"
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       DATABASE_URL_FILE: /run/secrets/database_runtime_url
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}

@@ -8,16 +8,22 @@ import { loadApiRuntimeConfig } from "./runtime-config.js";
 test("API runtime config validates database and bounded numeric settings", () => {
   assert.deepEqual(loadApiRuntimeConfig({ DATABASE_URL:"postgresql://db/app" }), {
     databaseUrl:"postgresql://db/app",databasePoolMax:10,host:"127.0.0.1",port:3000,
+    logLevel:"info",releaseId:"development",
     metaWebhook:{enabled:false} });
   assert.deepEqual(loadApiRuntimeConfig({ DATABASE_URL:"postgres://db/app",DATABASE_POOL_MAX:"25",
     API_HOST:"0.0.0.0",API_PORT:"8080" }), {
     databaseUrl:"postgres://db/app",databasePoolMax:25,host:"0.0.0.0",port:8080,
+    logLevel:"info",releaseId:"development",
     metaWebhook:{enabled:false} });
+  assert.deepEqual(loadApiRuntimeConfig({ DATABASE_URL:"postgresql://db/app",API_LOG_LEVEL:"warn",
+    ZAP_RELEASE_ID:"ccea3b494cb47525" }).logLevel,"warn");
   for (const env of [{}, { DATABASE_URL:"mysql://db/app" },
     { DATABASE_URL:"postgresql://db/app",DATABASE_POOL_MAX:"0" },
     { DATABASE_URL:"postgresql://db/app",DATABASE_POOL_MAX:"ten" },
     { DATABASE_URL:"postgresql://db/app",API_PORT:"65536" },
-    { DATABASE_URL:"postgresql://db/app",API_HOST:"bad host" }]) {
+    { DATABASE_URL:"postgresql://db/app",API_HOST:"bad host" },
+    { DATABASE_URL:"postgresql://db/app",API_LOG_LEVEL:"verbose" },
+    { DATABASE_URL:"postgresql://db/app",ZAP_RELEASE_ID:"bad release id" }]) {
     assert.throws(() => loadApiRuntimeConfig(env));
   }
 });

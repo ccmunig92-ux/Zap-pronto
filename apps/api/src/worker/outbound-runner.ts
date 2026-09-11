@@ -3,7 +3,8 @@ const EXTERNAL_ID=/^[^\u0000-\u001f\u007f]{1,512}$/;
 
 export interface OutboundWorkerClient { query(text:string,values?:unknown[]):Promise<{rows:unknown[]}>; release(error?:Error|boolean):void; }
 export interface OutboundWorkerPool { connect():Promise<OutboundWorkerClient>; }
-export interface OutboundWorkerOptions { batchSize:number;leaseSeconds:number;pollIntervalMs:number;backoffSeconds:number; }
+export interface OutboundWorkerOptions { batchSize:number;leaseSeconds:number;pollIntervalMs:number;backoffSeconds:number;
+  reportFailure?:(failure:{kind:"OUTBOUND_DELIVERY_FAILED"})=>void; }
 export interface OutboundTemplate { name:string;languageCode:string;components:readonly unknown[]; }
 export interface OutboundTransportInput { tenantId:string;messageId:string;channelConnectionId:string;
   channelAccountId:string;secretReference:string;recipientExternalId:string;body:string;sessionOpen:boolean;template?:OutboundTemplate; }
@@ -105,9 +106,11 @@ function delay(milliseconds:number,signal:AbortSignal):Promise<void>{
 }
 export async function runOutboundWorker(pool:OutboundWorkerPool,options:OutboundWorkerOptions,transport:OutboundTransport,
   signal:AbortSignal):Promise<void>{
+  const report=(failure:{kind:"OUTBOUND_DELIVERY_FAILED"})=>{try{options.reportFailure?.(failure);}catch{/* Logging must not stop processing. */}};
   while(!signal.aborted){
     const jobs=await claimOutboundTextEvents(pool,options);
-    for(const job of jobs){if(signal.aborted)break;await processOutboundClaim(pool,job,options,transport,signal).catch(()=>undefined);}
+    for(const job of jobs){if(signal.aborted)break;await processOutboundClaim(pool,job,options,transport,signal)
+      .catch(()=>report({kind:"OUTBOUND_DELIVERY_FAILED"}));}
     if(!signal.aborted&&jobs.length===0)await delay(options.pollIntervalMs,signal);
   }
 }

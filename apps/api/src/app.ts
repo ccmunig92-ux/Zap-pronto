@@ -1,4 +1,5 @@
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
+import type { FastifyServerOptions } from "fastify";
 import swagger from "@fastify/swagger";
 import { HealthSchema, ProblemDetailsSchema } from "@zap-pronto/contracts";
 import { randomUUID } from "node:crypto";
@@ -33,6 +34,8 @@ export interface BuildAppOptions {
   readonly metaWebhook?: MetaWebhookOptions;
   readonly notificationPool?: InboxNotificationPool;
   readonly notificationConnectTimeoutMs?: number;
+  readonly logger?: FastifyServerOptions["logger"];
+  readonly releaseId?: string;
 }
 
 const unavailablePool: TenantTransactionPool = {
@@ -41,7 +44,8 @@ const unavailablePool: TenantTransactionPool = {
 
 export async function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
-    logger: false,
+    logger: options.logger ?? false,
+    logController: new LogController({ disableRequestLogging: true }),
     requestIdHeader: false,
     genReqId(request) {
       const candidate = request.headers["x-correlation-id"];
@@ -58,8 +62,18 @@ export async function buildApp(options: BuildAppOptions = {}) {
   app.addSchema(ProblemDetailsSchema);
   registerProblemDetailsHandler(app);
   registerAuthenticationBoundary(app, { verifier: options.identityVerifier });
+  app.addHook("onRequest", async (request) => {
+    request.log.info({ event: "http.request", method: request.method,
+      route: request.routeOptions.url, requestId: request.id }, "http.request");
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    request.log.info({ event: "http.response", method: request.method,
+      route: request.routeOptions.url, statusCode: reply.statusCode,
+      durationMs: Math.round(reply.elapsedTime), requestId: request.id }, "http.response");
+  });
   app.addHook("onSend", async (request, reply) => {
     void reply.header("x-correlation-id", request.id);
+    if (options.releaseId) void reply.header("x-zap-pronto-release", options.releaseId);
   });
   app.get("/health/live", {
     config: { public: true },
@@ -76,11 +90,25 @@ export async function buildApp(options: BuildAppOptions = {}) {
     },
   }, async (request, reply) => {
     let connection: Awaited<ReturnType<TenantTransactionPool["connect"]>> | undefined;
+    let transactionStarted = false;
     try {
       connection = await (options.pool ?? unavailablePool).connect();
-      await connection.query("SELECT 1");
+      await connection.query("BEGIN READ ONLY");
+      transactionStarted = true;
+      await connection.query("SET LOCAL ROLE zap_pronto_api");
+      const result = await connection.query("SELECT session_user AS session_user, current_user AS current_user") as
+        { readonly rows: readonly { readonly session_user?: unknown; readonly current_user?: unknown }[] };
+      if (result.rows[0]?.session_user !== "zap_pronto_runtime" ||
+          result.rows[0]?.current_user !== "zap_pronto_api") {
+        throw new Error("DATABASE_RUNTIME_ROLE_UNAVAILABLE");
+      }
+      await connection.query("ROLLBACK");
+      transactionStarted = false;
       return { status: "ok" as const };
     } catch {
+      if (transactionStarted) {
+        try { await connection?.query("ROLLBACK"); } catch { /* best effort */ }
+      }
       return reply.status(503).type("application/problem+json").send({
         type: "urn:zap-pronto:error:service-unavailable",
         title: "Service Unavailable",
