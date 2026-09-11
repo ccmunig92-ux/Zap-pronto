@@ -15,16 +15,19 @@ test("Vercel serves Vite client-side routes through index.html", () => {
       destination: "https://staging.clinicaprontomedic.online/v1/:path*",
     },
     {
-      source: "/((?!v1(?:/|$)).*)",
+      source: "/((?!v1(?:/|$)|health/(?:web|live|ready)(?:/|$)).*)",
       destination: "/index.html",
     },
   ]);
 });
 
-test("Vercel never turns API failures into the SPA HTML document", () => {
+test("Vercel never turns API or health failures into the SPA HTML document", () => {
   const source = config.rewrites[1]?.source;
   assert.equal(new RegExp(`^${source}$`, "u").test("/configuracoes/canais"), true);
   assert.equal(new RegExp(`^${source}$`, "u").test("/v1/me"), false);
+  for (const path of ["/health/web", "/health/live", "/health/ready"]) {
+    assert.equal(new RegExp(`^${source}$`, "u").test(path), false);
+  }
 });
 
 test("Vercel proxies the same-origin API only to the canonical HTTPS staging origin", () => {
@@ -52,7 +55,7 @@ test("Vercel serves the SPA with the same security boundary as staging", () => {
     .replaceAll("${OIDC_AUTHORITY_ORIGIN}", oidcAuthority);
   assert.ok(nginxCsp);
   assert.deepEqual(config.headers[1], {
-    source: "/((?!v1(?:/|$)).*)",
+    source: "/((?!v1(?:/|$)|health/(?:web|live|ready)(?:/|$)).*)",
     headers: [
       {
         key: "Content-Security-Policy",
@@ -69,7 +72,7 @@ test("Vercel serves the SPA with the same security boundary as staging", () => {
   for (const path of ["/", "/assets/app.js", "/oidc/callback", "/v10/example"]) {
     assert.equal(spaHeaderSource.test(path), true, `${path} must receive SPA security headers`);
   }
-  for (const path of ["/v1", "/v1/me"]) {
-    assert.equal(spaHeaderSource.test(path), false, `${path} must preserve upstream API headers`);
+  for (const path of ["/v1", "/v1/me", "/health/web", "/health/live", "/health/ready"]) {
+    assert.equal(spaHeaderSource.test(path), false, `${path} must stay outside the SPA boundary`);
   }
 });
