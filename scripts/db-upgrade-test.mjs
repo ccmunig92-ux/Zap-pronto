@@ -16,6 +16,13 @@ const admin = new pg.Client({ connectionString: adminConnection });
 const targetUrl = new URL(adminConnection);
 targetUrl.pathname = `/${databaseName}`;
 const suffix = randomBytes(4).toString("hex");
+const legacyMigrationFiles = [
+  "0001_core.sql",
+  "0002_tenant_context_hardening.sql",
+  "0003_actor_context_authorization.sql",
+  "0004_component_roles.sql",
+];
+const legacyChecksums = new Map();
 const migrationFiles = (await readdir(resolve("database/migrations")))
   .filter((file) => /^\d+_[a-z0-9_]+\.sql$/.test(file))
   .sort((left, right) => left.localeCompare(right));
@@ -57,17 +64,14 @@ try {
       applied_at timestamptz NOT NULL DEFAULT now()
     )`);
 
-    for (const filename of [
-      "0001_core.sql",
-      "0002_tenant_context_hardening.sql",
-      "0003_actor_context_authorization.sql",
-      "0004_component_roles.sql",
-    ]) {
+    for (const filename of legacyMigrationFiles) {
       const sql = (await readFile(resolve("database/migrations", filename), "utf8")).replace(/\r\n?/gu, "\n");
+      const legacyChecksum = createHash("sha256").update(sql.replace(/\n/gu, "\r\n")).digest("hex");
+      legacyChecksums.set(filename, legacyChecksum);
       await target.query(sql);
       await target.query(
         "INSERT INTO schema_migrations (filename, checksum_sha256) VALUES ($1, $2)",
-        [filename, createHash("sha256").update(sql.replace(/\n/gu, "\r\n")).digest("hex")],
+        [filename, legacyChecksum],
       );
     }
 
@@ -114,6 +118,66 @@ try {
     `);
   } finally {
     await target.end();
+  }
+
+  const regression = new pg.Client({ connectionString: targetUrl.toString() });
+  await regression.connect();
+  try {
+    const invalidChecksum = "f".repeat(64);
+    await regression.query(
+      "UPDATE schema_migrations SET checksum_sha256 = $1 WHERE filename = '0004_component_roles.sql'",
+      [invalidChecksum],
+    );
+    const beforeMismatch = await regression.query(
+      "SELECT filename, checksum_sha256 FROM schema_migrations ORDER BY filename",
+    );
+    await assert.rejects(
+      runMigrator(),
+      /MIGRATION_CHECKSUM_MISMATCH:0004_component_roles\.sql/,
+    );
+    const afterMismatch = await regression.query(
+      "SELECT filename, checksum_sha256 FROM schema_migrations ORDER BY filename",
+    );
+    assert.deepEqual(afterMismatch.rows, beforeMismatch.rows,
+      "a later checksum mismatch must not normalize earlier ledger rows");
+
+    await regression.query(
+      "UPDATE schema_migrations SET checksum_sha256 = $1 WHERE filename = '0004_component_roles.sql'",
+      [legacyChecksums.get("0004_component_roles.sql")],
+    );
+    await regression.query(`
+      CREATE FUNCTION block_legacy_checksum_update() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.filename = '0002_tenant_context_hardening.sql' THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER block_legacy_checksum_update
+      BEFORE UPDATE OF checksum_sha256 ON schema_migrations
+      FOR EACH ROW EXECUTE FUNCTION block_legacy_checksum_update();
+    `);
+    await assert.rejects(
+      runMigrator(),
+      /MIGRATION_CHECKSUM_UPDATE_CONFLICT:0002_tenant_context_hardening\.sql/,
+    );
+    const afterConflict = await regression.query(
+      "SELECT filename, checksum_sha256 FROM schema_migrations ORDER BY filename",
+    );
+    assert.deepEqual(
+      afterConflict.rows,
+      legacyMigrationFiles.map((filename) => ({
+        filename,
+        checksum_sha256: legacyChecksums.get(filename),
+      })),
+      "a compare-and-swap conflict must roll back every checksum normalization",
+    );
+    await regression.query("DROP TRIGGER block_legacy_checksum_update ON schema_migrations");
+    await regression.query("DROP FUNCTION block_legacy_checksum_update()");
+  } finally {
+    await regression.end();
   }
 
   const firstRun = await runMigrator();
