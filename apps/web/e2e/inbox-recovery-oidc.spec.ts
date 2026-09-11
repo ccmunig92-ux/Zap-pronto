@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Response as PlaywrightResponse } from "@playwright/test";
+import {retryTransientNavigation} from "../src/transientNavigation.js";
 
 const optional = (name:string):string|undefined => process.env[name]?.trim() || undefined;
 const enabled = process.env.E2E_OIDC_ENABLED === "true";
@@ -16,7 +17,7 @@ function attendantAccount():Readonly<{username:string;password:string;tenant:str
 }
 
 async function login(page:Page):Promise<void>{
-  const account=attendantAccount();await page.goto("/");const enter=page.getByRole("button",{name:"Entrar"});
+  const account=attendantAccount();await retryTransientNavigation(()=>page.goto("/"),delay=>page.waitForTimeout(delay),externalMode);const enter=page.getByRole("button",{name:"Entrar"});
   await expect(enter).toBeEnabled();const me=page.waitForResponse(response=>new URL(response.url()).pathname==="/v1/me"
     &&response.request().method()==="GET"&&response.status()===200);
   await enter.click();await page.locator(usernameSelector).fill(account.username);
@@ -83,7 +84,7 @@ test.describe("recovery OIDC externo da fixture Inbox",()=>{
         &&new URL(response.url()).pathname==="/v1/inbox/availability");
       await page.getByRole("button",{name:"Confirmar alteração"}).click();expect(await responseStatus(availability)).toBe(200);
     }
-    await page.reload();await openInbox(page);await expect(offline).toBeVisible();
+    await retryTransientNavigation(()=>page.reload(),delay=>page.waitForTimeout(delay),externalMode);await openInbox(page);await expect(offline).toBeVisible();
     expect(mutations.filter(value=>value.endsWith("/requeue"))).toHaveLength(didRequeue?1:0);
     expect(mutations.filter(value=>value==="POST /v1/inbox/availability").length).toBeLessThanOrEqual(1);
     expect(mutations.some(value=>value.endsWith("/takeover")||value.endsWith("/transfer"))).toBe(false);
