@@ -23,9 +23,9 @@ function checkpointIn(pattern, source, label) {
 export function validateDocumentation({ latest, readme, release, schedule }) {
   const expected = String(latest).padStart(4, "0");
   const declarations = [
-    ["README", checkpointIn(/candidato local contém[\s\S]{0,140}?migration `(\d{4})`/u, readme, "README")],
+    ["README", checkpointIn(/(?:candidato local|`main`) contém[\s\S]{0,140}?migration `(\d{4})`/u, readme, "README")],
     ["release", checkpointIn(/checkpoint\s+`(\d{4})`/u, release, "release")],
-    ["release-candidate", checkpointIn(/declaração permitida é \*\*checkpoint (\d{4}) presente no candidato local/u, release, "release-candidate")],
+    ["release-status", checkpointIn(/checkpoint `(\d{4})` está (?:presente no candidato local|integrado à `main`)/u, release, "release-status")],
   ];
   const stale = declarations.filter(([, value]) => value !== latest);
   if (stale.length) throw new Error(`DOCUMENTATION_CHECKPOINT_STALE:expected=${expected}:found=${stale.map(([label, value]) => `${label}=${value}`).join(",")}`);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import{afterEach,describe,expect,it,vi}from"vitest";
-import{getAccessTokenSingleFlight}from"./api.js";
+import{apiClient,getAccessTokenSingleFlight}from"./api.js";
 
 afterEach(()=>{delete window.__ZAP_PRONTO_AUTH__});
 
@@ -14,5 +14,12 @@ describe("API authentication transport",()=>{
     expect(left).toBe(right);expect(getAccessToken).toHaveBeenCalledTimes(1);
     resolve("token-1");expect(await left).toBe("token-1");await Promise.resolve();
     expect(await getAccessTokenSingleFlight()).toBe("token-2");expect(getAccessToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("expõe a mutação administrativa de conexão pelo cliente padrão",async()=>{
+    await expect(apiClient.setChannelConnectionMetadata({
+      scope:"CORPORATE",wabaId:"123456",phoneNumberId:"654321",status:"DISCONNECTED",
+      secretReference:"meta.primary",unitIds:[],
+    },"connection-command-1")).rejects.toThrow("Authentication is required");
   });
 });
