@@ -137,6 +137,40 @@ esgotamento do timeout ainda podem impedir a limpeza. Nesse caso, execute imedia
 em `recover-only`, aprove a execução no environment protegido e confirme o sucesso antes de reutilizar a
 conta ou iniciar outra homologação. Nunca recupere automaticamente uma conta operacional real.
 
+### Fixture privada da Inbox externa
+
+A jornada externa de Inbox cria somente uma conexão corporativa `WHATSAPP` desconectada e sem referência
+de segredo, um contato sintético, uma mensagem inbound do cliente e o handoff correspondente. Ela prova no
+navegador `claim -> reload -> requeue -> reload` e confirma o estado final no banco. Não chama Meta, Hermes,
+webhook, envio outbound ou endpoint administrativo público.
+
+O GitHub Actions não recebe URL de banco, senha da VPS ou acesso genérico ao Docker. O environment protegido
+`oidc-homologation` contém somente as secrets `STAGING_FIXTURE_SSH_PRIVATE_KEY` e
+`STAGING_FIXTURE_SSH_KNOWN_HOSTS`; host, porta e usuário configurado ficam respectivamente nas variables
+`STAGING_FIXTURE_SSH_HOST`, `STAGING_FIXTURE_SSH_PORT` e `STAGING_FIXTURE_SSH_USER`. O `known_hosts` deve ser
+capturado e conferido por um canal administrativo confiável; nunca use `StrictHostKeyChecking=no`.
+
+No host, instale o controlador como
+`/usr/local/sbin/zap-pronto-staging-inbox-e2e-controller`, proprietário `root:root` e modo `0755`. A chave
+é dedicada exclusivamente a essa automação e não deve ser reutilizada para acesso administrativo. Cadastre-a
+como uma linha única no `authorized_keys` de root, sempre com forced command e `restrict`:
+
+```text
+command="/usr/local/sbin/zap-pronto-staging-inbox-e2e-controller",restrict ssh-ed25519 <CHAVE_PUBLICA_DEDICADA> zap-pronto-staging-inbox-e2e
+```
+
+O controlador lê `SSH_ORIGINAL_COMMAND` e aceita exclusivamente `prepare CHAVE`, `verify CHAVE` ou
+`cleanup CHAVE`, em que `CHAVE` é `run_id-run_attempt`. Ele exige UID 0 e recusa shell, PTY, forwarding,
+comando adicional e chave malformada. O arquivo privado da fixture com tenant e unidade fica em
+`/srv/zap-pronto/secrets/staging/inbox-e2e.json`, proprietário `root:root` e modo `0400`;
+esses identificadores não são enviados como argumentos nem cadastrados no GitHub.
+
+O workflow executa `cleanup` com `always()`. Se o runner for perdido antes dessa etapa, conecte-se pelo canal
+administrativo da VPS e execute o controlador com `cleanup <run_id>-<run_attempt>`; a limpeza é idempotente.
+Depois, rotacione a chave dedicada se houver suspeita de exposição. Uma execução só é aceita quando `verify`
+confirma exatamente uma mensagem `INBOUND/CUSTOMER`, nenhuma mensagem outbound, nenhuma ação Hermes/Meta e
+o handoff final `QUEUED` sem responsável.
+
 ## Critérios de aceite
 
 Antes de iniciar o stack base, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.
