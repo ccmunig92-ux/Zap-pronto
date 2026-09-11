@@ -13,6 +13,15 @@ test("OIDC config fails closed for missing or unsafe values", () => {
   assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_ORGANIZATION_CLAIM: "bad claim" }), /CLAIM_FORMAT/);
   assert.throws(() => loadOidcRuntimeConfig({ ...validEnv,
     OIDC_EMAIL_CLAIM: "https://clinicaprontomedic.online/claims/email" }), /PAIR_REQUIRED/);
+  for (const [emailClaim, emailVerifiedClaim] of [
+    ["email", "email_verified"],
+    ["email", "https://clinicaprontomedic.online/claims/email_verified"],
+    ["https://clinicaprontomedic.online/claims/email", "email_verified"],
+  ]) {
+    assert.throws(() => loadOidcRuntimeConfig({ ...validEnv,
+      OIDC_EMAIL_CLAIM: emailClaim, OIDC_EMAIL_VERIFIED_CLAIM: emailVerifiedClaim }),
+    /OIDC_EMAIL_(?:VERIFIED_)?CLAIM_FORMAT/);
+  }
   for (const claim of ["sub", "http://claims.example/email", "https://user:secret@claims.example/email",
     "https://claims.example/email?source=profile", "https://claims.example/#email", " https://claims.example/email"]) {
     assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_EMAIL_CLAIM: claim,

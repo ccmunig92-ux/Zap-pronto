@@ -16,6 +16,9 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   `OIDC_EMAIL_VERIFIED_CLAIM` como URIs HTTPS distintas, sem credenciais, query, fragmento ou espaços.
   Exemplo: `https://clinicaprontomedic.online/claims/email` e
   `https://clinicaprontomedic.online/claims/email_verified`.
+- Não configure explicitamente `email`/`email_verified`: deixe ambas as variáveis ausentes para usar o
+  padrão. Pares padrão explícitos e pares híbridos padrão/namespaced falham fechados. O preflight compara
+  o par de origem exatamente com o ambiente da API renderizado pelo Compose e rejeita ausência ou deriva.
 - O primeiro claim precisa ser string e o segundo precisa ser o booleano JSON `true`. String `"true"`,
   claim ausente ou os claims padrão quando o par namespaced está configurado não autorizam aceitação
   de convite.

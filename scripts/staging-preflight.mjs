@@ -51,10 +51,9 @@ function optionalEmailClaims(env) {
   const hasEmail = typeof email === "string" && email.length > 0;
   const hasVerified = typeof verified === "string" && verified.length > 0;
   if (hasEmail !== hasVerified) fail("OIDC_EMAIL_CLAIMS_PAIR_REQUIRED");
-  if (!hasEmail) return;
-  for (const [name, value, standard] of [["OIDC_EMAIL_CLAIM", email, "email"],
-    ["OIDC_EMAIL_VERIFIED_CLAIM", verified, "email_verified"]]) {
-    if (value === standard) continue;
+  if (!hasEmail) return null;
+  for (const [name, value] of [["OIDC_EMAIL_CLAIM", email],
+    ["OIDC_EMAIL_VERIFIED_CLAIM", verified]]) {
     let parsed;
     try { parsed = new URL(value); } catch { fail(`${name}_INVALID`); }
     if (value !== value.trim() || value.length > 512 || /[\u0000-\u0020\u007f]/u.test(value)
@@ -62,6 +61,7 @@ function optionalEmailClaims(env) {
       || parsed.pathname === "/" || parsed.href !== value) fail(`${name}_INVALID`);
   }
   if (email === verified) fail("OIDC_EMAIL_CLAIMS_DISTINCT_REQUIRED");
+  return Object.freeze({ emailClaim: email, emailVerifiedClaim: verified });
 }
 
 export function validateEnvironment(env, { metaEnabled = false } = {}) {
@@ -159,7 +159,7 @@ const EXPECTED_DEPENDS = Object.freeze({
 const EXPECTED_NETWORKS = Object.freeze({ postgres:["data"], migrate:["data"], "provision-runtime":["data"],
   api:["app","data"],worker:["data"],web:["app"] });
 
-export function validateComposeInvariants(compose, { metaEnabled = false } = {}) {
+export function validateComposeInvariants(compose, { metaEnabled = false, expectedEmailClaims = null } = {}) {
   if (compose.networks?.data?.internal !== true) fail("DATA_NETWORK_NOT_INTERNAL");
   for (const serviceName of Object.keys(MINIMUMS)) {
     const service = compose.services?.[serviceName];
@@ -188,7 +188,13 @@ export function validateComposeInvariants(compose, { metaEnabled = false } = {})
     }
     if (serviceName === "api") {
       const environment = service.environment ?? {};
-      optionalEmailClaims(environment);
+      const renderedEmailClaims = optionalEmailClaims(environment);
+      if ((expectedEmailClaims === null && renderedEmailClaims !== null)
+        || (expectedEmailClaims !== null && (renderedEmailClaims === null
+          || renderedEmailClaims.emailClaim !== expectedEmailClaims.emailClaim
+          || renderedEmailClaims.emailVerifiedClaim !== expectedEmailClaims.emailVerifiedClaim))) {
+        fail("OIDC_EMAIL_CLAIMS_RENDERED_MISMATCH");
+      }
       if (environment.META_WEBHOOK_ENABLED !== String(metaEnabled)) fail("API_META_WEBHOOK_ENABLED_INVALID");
       if (metaEnabled) {
         if (environment.META_APP_SECRET_FILE !== "/run/secrets/meta_app_secret" || environment.META_VERIFY_TOKEN_FILE !== "/run/secrets/meta_verify_token") fail("API_META_WEBHOOK_SECRET_PATH_INVALID");
@@ -200,6 +206,7 @@ export function validateComposeInvariants(compose, { metaEnabled = false } = {})
 export async function runPreflight(envFile, repoRoot = resolve(import.meta.dirname, ".."), { metaEnabled = false } = {}) {
   const env = parseEnv(await readFile(envFile, "utf8"));
   validateEnvironment(env, { metaEnabled });
+  const expectedEmailClaims = optionalEmailClaims(env);
   await validateSecrets(env, repoRoot, { metaEnabled });
   const composeArgs = ["compose", "--env-file", envFile, "-f", resolve(repoRoot, "deploy/staging/compose.yaml")];
   if (metaEnabled) composeArgs.push("-f", resolve(repoRoot, "deploy/staging/compose.meta.yaml"));
@@ -207,7 +214,7 @@ export async function runPreflight(envFile, repoRoot = resolve(import.meta.dirna
   if (rendered.status !== 0) fail("COMPOSE_INVALID");
   let compose; try { compose = JSON.parse(rendered.stdout); } catch { fail("COMPOSE_INVALID"); }
   validateResources(compose);
-  validateComposeInvariants(compose, { metaEnabled });
+  validateComposeInvariants(compose, { metaEnabled, expectedEmailClaims });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

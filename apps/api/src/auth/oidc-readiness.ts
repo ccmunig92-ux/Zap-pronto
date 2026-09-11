@@ -28,11 +28,10 @@ function secureUrl(value: string, name: string): URL {
   return parsed;
 }
 
-function configuredClaimName(value: string, name: string, standard: string): string {
+function configuredClaimName(value: string, name: string): string {
   if (value !== value.trim() || /[\u0000-\u0020\u007f]/u.test(value) || value.length > 512) {
     throw new Error(`OIDC_CONFIGURATION_INVALID:${name}_FORMAT`);
   }
-  if (value === standard) return value;
   let parsed: URL;
   try { parsed = new URL(value); } catch { throw new Error(`OIDC_CONFIGURATION_INVALID:${name}_FORMAT`); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash
@@ -64,11 +63,10 @@ export function loadOidcRuntimeConfig(env: Environment = process.env): OidcRunti
     throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_EMAIL_CLAIMS_PAIR_REQUIRED");
   }
   const emailClaim = hasEmailClaim
-    ? configuredClaimName(configuredEmailClaim, "OIDC_EMAIL_CLAIM", STANDARD_EMAIL_CLAIM)
+    ? configuredClaimName(configuredEmailClaim, "OIDC_EMAIL_CLAIM")
     : STANDARD_EMAIL_CLAIM;
   const emailVerifiedClaim = hasEmailVerifiedClaim
-    ? configuredClaimName(configuredEmailVerifiedClaim, "OIDC_EMAIL_VERIFIED_CLAIM",
-      STANDARD_EMAIL_VERIFIED_CLAIM)
+    ? configuredClaimName(configuredEmailVerifiedClaim, "OIDC_EMAIL_VERIFIED_CLAIM")
     : STANDARD_EMAIL_VERIFIED_CLAIM;
   if (emailClaim === emailVerifiedClaim) {
     throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_EMAIL_CLAIMS_DISTINCT_REQUIRED");
