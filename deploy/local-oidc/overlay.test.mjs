@@ -173,6 +173,15 @@ test("Playwright recusa origem externa, mutação observadora e skips inesperado
   const config=await readFile(new URL("../../apps/web/playwright.config.ts",directory),"utf8");const reporter=await readFile(new URL("../../apps/web/e2e/no-unexpected-skips-reporter.ts",directory),"utf8");const controller=await readFile(new URL("local-oidc.ps1",directory),"utf8");
   assert.match(spec,/E2E_LOCAL_DESTRUCTIVE_ALLOWED/);assert.match(spec,/https:\/\/zap-pronto\.127\.0\.0\.1\.nip\.io:18443/);
   assert.match(spec,/E2E_LOCAL_INSTANCE_NONCE/);assert.match(spec,/E2E_LOCAL_HARNESS_AUTHORIZATION_REQUIRED/);
+  assert.match(spec,/E2E_ATTENDANT_ADMIN_LIST_MATCH_EXACT_EMAIL_REQUIRED/);
+  assert.match(spec,/locator\(":scope > li"\)[\s\S]*identity === expectedEmail[\s\S]*ATTENDANT_USER_ROW_AMBIGUOUS/);
+  assert.doesNotMatch(spec,/textContent\?\.includes\(identifier\)/);
+  assert.match(spec,/distingue e-mail completo de valores semelhantes[\s\S]*attendant\+copy@example\.test[\s\S]*Attendant@Example\.Test/);
+  assert.match(spec,/recusa ausência e duplicidade[\s\S]*ATTENDANT_USER_ROW_NOT_FOUND[\s\S]*ATTENDANT_USER_ROW_AMBIGUOUS/);
+  assert.match(spec,/reativação executa somente a rota de status[\s\S]*\/v1\/users\/[\s\S]*\/status/);
+  assert.match(spec,/reactivateUserRow[\s\S]*\\\/v1\\\/users\\\/\[\^\/\]\+\\\/status\$/);
+  assert.match(spec,/bloqueio invalida sessão emitida[\s\S]*reactivateAttendant\(adminPage, attendantListMatch\)[\s\S]*login\(attendantPage, attendant\)/);
+  assert.match(spec,/recuperação idempotente reativa a conta dedicada da homologação/);
   assert.match(spec,/transfere atendimento entre dois atendentes[\s\S]*Sob supervisão[\s\S]*Em atendimento[\s\S]*targetMutations\)\.toEqual\(\[\]\)/);
   assert.match(config,/E2E_FORBID_SKIPS[\s\S]*no-unexpected-skips-reporter/);assert.match(reporter,/result\.status === "skipped"[\s\S]*UNEXPECTED_E2E_SKIPS[\s\S]*status: "failed"/);assert.match(controller,/hadE2EForbidSkips=Test-Path 'Env:E2E_FORBID_SKIPS'[\s\S]*previousE2EForbidSkips=\[Environment\]::GetEnvironmentVariable[\s\S]*E2E_FORBID_SKIPS='true'[\s\S]*if\(\$hadE2EForbidSkips\)\{Set-Item 'Env:E2E_FORBID_SKIPS' \$previousE2EForbidSkips\}else\{Remove-Item 'Env:E2E_FORBID_SKIPS'/);
   assert.match(spec,/gestor consulta disponibilidade da equipe sob demanda[\s\S]*gets[\s\S]*Atendente Local[\s\S]*Capacidade: 0\/100 · Restante: 100[\s\S]*selectOption\("PAUSED"\)[\s\S]*mutations\)\.toEqual\(\[\]\)[\s\S]*externalHosts\)\.toEqual\(\[\]\)/);
