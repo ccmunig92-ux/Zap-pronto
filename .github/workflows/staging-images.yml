@@ -50,6 +50,8 @@ jobs:
           file: Dockerfile.api
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/zap-pronto-api:${{ github.sha }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
           sbom: true
           provenance: false
           cache-from: type=gha,scope=staging-api
@@ -73,6 +75,7 @@ jobs:
           sbom: true
           provenance: false
           build-args: |
+            VCS_REF=${{ github.sha }}
             VITE_OIDC_AUTHORITY=${{ vars.OIDC_ISSUER }}
             VITE_OIDC_CLIENT_ID=${{ vars.OIDC_WEB_CLIENT_ID }}
             VITE_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}
@@ -107,6 +110,7 @@ jobs:
         run: |
           echo '### Immutable staging images' >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ZAP_RELEASE_ID=${{ github.sha }}' >> "$GITHUB_STEP_SUMMARY"
           echo 'ZAP_API_IMAGE=ghcr.io/${{ github.repository_owner }}/zap-pronto-api@${{ steps.api.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
           echo 'ZAP_WEB_IMAGE=ghcr.io/${{ github.repository_owner }}/zap-pronto-web@${{ steps.web.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

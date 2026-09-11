@@ -37,6 +37,9 @@ RUN node deploy/web/validate-build.mjs \
  && pnpm --filter @zap-pronto/web build
 
 FROM nginxinc/nginx-unprivileged:1.30.4-alpine@sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce AS runtime
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.source="https://github.com/ccmunig92-ux/Zap-pronto" \
+      org.opencontainers.image.revision=$VCS_REF
 
 ENV API_UPSTREAM="" \
     OIDC_AUTHORITY_ORIGIN="" \

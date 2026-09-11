@@ -7,6 +7,8 @@ export interface ApiRuntimeConfig {
   readonly databasePoolMax: number;
   readonly host: string;
   readonly port: number;
+  readonly logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+  readonly releaseId: string;
   readonly metaWebhook: MetaWebhookRuntimeConfig;
 }
 
@@ -75,6 +77,15 @@ export function loadApiRuntimeConfig(env: Environment = process.env): ApiRuntime
   }
   const host = env.API_HOST?.trim() || "127.0.0.1";
   if (host.length > 253 || /[\s/]/.test(host)) throw new Error("API_CONFIGURATION_INVALID:API_HOST");
+  const logLevel = env.API_LOG_LEVEL?.trim() || "info";
+  if (!["fatal", "error", "warn", "info", "debug", "trace", "silent"].includes(logLevel)) {
+    throw new Error("API_CONFIGURATION_INVALID:API_LOG_LEVEL");
+  }
+  const releaseId = env.ZAP_RELEASE_ID?.trim() || "development";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{6,127}$/.test(releaseId)) {
+    throw new Error("API_CONFIGURATION_INVALID:ZAP_RELEASE_ID");
+  }
   return { databaseUrl, databasePoolMax: integer(env,"DATABASE_POOL_MAX",10,1,100),
-    host, port: integer(env,"API_PORT",3000,1,65535), metaWebhook: metaWebhookConfig(env) };
+    host, port: integer(env,"API_PORT",3000,1,65535),
+    logLevel: logLevel as ApiRuntimeConfig["logLevel"], releaseId, metaWebhook: metaWebhookConfig(env) };
 }

@@ -54,6 +54,14 @@ test("invalid or failed transport never finalizes and fails with a sanitized cod
     assert.doesNotMatch(JSON.stringify(failed),/phone body provider-secret/);
   }
 });
+test("worker reports only a sanitized delivery failure kind",async()=>{
+  const controller=new AbortController();const failures:unknown[]=[];
+  const mock=poolFor(text=>({rows:text.includes("claim_outbound_delivery_events")?[job]:[]}));
+  await runOutboundWorker(mock.pool,{...options,reportFailure:failure=>{failures.push(failure);controller.abort();}},
+    {async sendText(){throw new Error("recipient and provider secret");}},controller.signal);
+  assert.deepEqual(failures,[{kind:"OUTBOUND_DELIVERY_FAILED"}]);
+  assert.doesNotMatch(JSON.stringify(failures),/recipient|provider|tenant|message/i);
+});
 
 test("abort before processing performs no transport or database mutation",async()=>{
   let sends=0;const mock=poolFor(()=>({rows:[]}));const controller=new AbortController();controller.abort();

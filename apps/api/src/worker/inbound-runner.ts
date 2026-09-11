@@ -4,7 +4,8 @@ import { materializeInboundChannelEvent } from "@zap-pronto/core/domain/inbound-
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export interface WorkerClient { query(text:string,values?:unknown[]):Promise<{rows:unknown[]}>; release(error?:Error|boolean):void; }
 export interface WorkerPool { connect():Promise<WorkerClient>; end():Promise<void>; }
-export interface InboundWorkerOptions { batchSize:number; leaseSeconds:number; pollIntervalMs:number; backoffSeconds:number; }
+export interface InboundWorkerOptions { batchSize:number; leaseSeconds:number; pollIntervalMs:number; backoffSeconds:number;
+  reportFailure?:(failure:{kind:"INBOUND_MATERIALIZATION_FAILED"})=>void; }
 interface ClaimedInbound { tenant_id:string;outbox_id:string;aggregate_id:string;event_type:string;payload_version:number;lease_token:string; }
 
 function claimed(row:unknown):ClaimedInbound {
@@ -59,9 +60,11 @@ function abortableDelay(milliseconds:number,signal:AbortSignal):Promise<void>{
 }
 
 export async function runInboundWorker(pool:WorkerPool,options:InboundWorkerOptions,signal:AbortSignal):Promise<void>{
+  const report=(failure:{kind:"INBOUND_MATERIALIZATION_FAILED"})=>{try{options.reportFailure?.(failure);}catch{/* Logging must not stop processing. */}};
   while(!signal.aborted){
     const jobs=await claimInboundMaterializationEvents(pool,options);
-    for(const job of jobs){if(signal.aborted)break;await processInboundClaim(pool,job,options).catch(()=>undefined);}
+    for(const job of jobs){if(signal.aborted)break;await processInboundClaim(pool,job,options)
+      .catch(()=>report({kind:"INBOUND_MATERIALIZATION_FAILED"}));}
     if(!signal.aborted&&jobs.length===0)await abortableDelay(options.pollIntervalMs,signal);
   }
 }

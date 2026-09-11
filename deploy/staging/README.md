@@ -7,6 +7,8 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 ## Pré-condições
 
 - `ZAP_API_IMAGE`, `ZAP_WEB_IMAGE` e `POSTGRES_IMAGE` apontam para imagens publicadas e fixadas por digest;
+- `ZAP_RELEASE_ID` é gravado de forma imutável na imagem API pelo workflow e devolvido no header `x-zap-pronto-release`; o Compose não permite sobrescrevê-lo;
+- `API_LOG_LEVEL` aceita somente `fatal`, `error`, `warn`, `info`, `debug`, `trace` ou `silent`; staging usa `info`;
   o Postgres deve permanecer na linha 18.3 homologada pelo projeto.
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,

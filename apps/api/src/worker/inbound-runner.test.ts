@@ -32,6 +32,17 @@ test("transient failure is persisted only as an allowlisted code",async()=>{
   assert.equal(failed?.values?.[2],"INBOUND_MATERIALIZATION_FAILED");
   assert.doesNotMatch(JSON.stringify(failed?.values),/phone|body|secret/);
 });
+test("worker reports only a sanitized failure kind and continues shutdown",async()=>{
+  const controller=new AbortController();const failures:unknown[]=[];
+  const mock=poolFor(async text=>{
+    if(text.includes("claim_inbound"))return{rows:[job]};
+    if(text.includes("FROM materialize_inbound"))throw new Error("private inbound payload");
+    return{rows:[]};
+  });
+  await runInboundWorker(mock.pool,{...options,reportFailure:failure=>{failures.push(failure);controller.abort();}},controller.signal);
+  assert.deepEqual(failures,[{kind:"INBOUND_MATERIALIZATION_FAILED"}]);
+  assert.doesNotMatch(JSON.stringify(failures),/private|tenant|outbox/i);
+});
 test("abort interrupts idle polling and prevents another claim",async()=>{
   const controller=new AbortController();let claims=0;
   const mock=poolFor(async text=>{if(text.includes("claim_inbound")){claims++;controller.abort();}return {rows:[]};});
