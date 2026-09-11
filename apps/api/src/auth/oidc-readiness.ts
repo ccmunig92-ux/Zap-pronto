@@ -4,7 +4,12 @@ export interface OidcRuntimeConfig {
   readonly jwksUrl: string;
   readonly discoveryUrl: string;
   readonly organizationClaim?: string;
+  readonly emailClaim?: string;
+  readonly emailVerifiedClaim?: string;
 }
+
+const STANDARD_EMAIL_CLAIM = "email";
+const STANDARD_EMAIL_VERIFIED_CLAIM = "email_verified";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -23,6 +28,19 @@ function secureUrl(value: string, name: string): URL {
   return parsed;
 }
 
+function configuredClaimName(value: string, name: string): string {
+  if (value !== value.trim() || /[\u0000-\u0020\u007f]/u.test(value) || value.length > 512) {
+    throw new Error(`OIDC_CONFIGURATION_INVALID:${name}_FORMAT`);
+  }
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new Error(`OIDC_CONFIGURATION_INVALID:${name}_FORMAT`); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash
+    || parsed.pathname === "/" || parsed.href !== value) {
+    throw new Error(`OIDC_CONFIGURATION_INVALID:${name}_FORMAT`);
+  }
+  return value;
+}
+
 export function loadOidcRuntimeConfig(env: Environment = process.env): OidcRuntimeConfig {
   const issuer = required(env, "OIDC_ISSUER");
   const audience = required(env, "OIDC_AUDIENCE");
@@ -36,10 +54,28 @@ export function loadOidcRuntimeConfig(env: Environment = process.env): OidcRunti
   if (organizationClaim && !/^[A-Za-z][A-Za-z0-9_.:-]{0,126}$/.test(organizationClaim)) {
     throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_ORGANIZATION_CLAIM_FORMAT");
   }
+  const configuredEmailClaim = env.OIDC_EMAIL_CLAIM;
+  const configuredEmailVerifiedClaim = env.OIDC_EMAIL_VERIFIED_CLAIM;
+  const hasEmailClaim = typeof configuredEmailClaim === "string" && configuredEmailClaim.length > 0;
+  const hasEmailVerifiedClaim = typeof configuredEmailVerifiedClaim === "string"
+    && configuredEmailVerifiedClaim.length > 0;
+  if (hasEmailClaim !== hasEmailVerifiedClaim) {
+    throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_EMAIL_CLAIMS_PAIR_REQUIRED");
+  }
+  const emailClaim = hasEmailClaim
+    ? configuredClaimName(configuredEmailClaim, "OIDC_EMAIL_CLAIM")
+    : STANDARD_EMAIL_CLAIM;
+  const emailVerifiedClaim = hasEmailVerifiedClaim
+    ? configuredClaimName(configuredEmailVerifiedClaim, "OIDC_EMAIL_VERIFIED_CLAIM")
+    : STANDARD_EMAIL_VERIFIED_CLAIM;
+  if (emailClaim === emailVerifiedClaim) {
+    throw new Error("OIDC_CONFIGURATION_INVALID:OIDC_EMAIL_CLAIMS_DISTINCT_REQUIRED");
+  }
   const discoveryUrl = env.OIDC_DISCOVERY_URL?.trim()
     || new URL(`${issuerUrl.pathname.replace(/\/$/, "")}/.well-known/openid-configuration`, issuerUrl.origin).href;
   secureUrl(discoveryUrl, "OIDC_DISCOVERY_URL");
-  return { issuer, audience, jwksUrl, discoveryUrl, ...(organizationClaim ? { organizationClaim } : {}) };
+  return { issuer, audience, jwksUrl, discoveryUrl, ...(organizationClaim ? { organizationClaim } : {}),
+    ...(hasEmailClaim ? { emailClaim, emailVerifiedClaim } : {}) };
 }
 
 interface ProbeOptions { readonly fetch?: typeof fetch; readonly timeoutMs?: number }

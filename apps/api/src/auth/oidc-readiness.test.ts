@@ -11,6 +11,26 @@ test("OIDC config fails closed for missing or unsafe values", () => {
   assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_JWKS_URL: "https:\/\/user:secret@id.example\/keys" }), /UNSAFE/);
   assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_AUDIENCE: "zap pronto" }), /AUDIENCE_FORMAT/);
   assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_ORGANIZATION_CLAIM: "bad claim" }), /CLAIM_FORMAT/);
+  assert.throws(() => loadOidcRuntimeConfig({ ...validEnv,
+    OIDC_EMAIL_CLAIM: "https://clinicaprontomedic.online/claims/email" }), /PAIR_REQUIRED/);
+  for (const [emailClaim, emailVerifiedClaim] of [
+    ["email", "email_verified"],
+    ["email", "https://clinicaprontomedic.online/claims/email_verified"],
+    ["https://clinicaprontomedic.online/claims/email", "email_verified"],
+  ]) {
+    assert.throws(() => loadOidcRuntimeConfig({ ...validEnv,
+      OIDC_EMAIL_CLAIM: emailClaim, OIDC_EMAIL_VERIFIED_CLAIM: emailVerifiedClaim }),
+    /OIDC_EMAIL_(?:VERIFIED_)?CLAIM_FORMAT/);
+  }
+  for (const claim of ["sub", "http://claims.example/email", "https://user:secret@claims.example/email",
+    "https://claims.example/email?source=profile", "https://claims.example/#email", " https://claims.example/email"]) {
+    assert.throws(() => loadOidcRuntimeConfig({ ...validEnv, OIDC_EMAIL_CLAIM: claim,
+      OIDC_EMAIL_VERIFIED_CLAIM: "https://clinicaprontomedic.online/claims/email_verified" }),
+    /OIDC_EMAIL_CLAIM_FORMAT/);
+  }
+  assert.throws(() => loadOidcRuntimeConfig({ ...validEnv,
+    OIDC_EMAIL_CLAIM: "https://clinicaprontomedic.online/claims/email",
+    OIDC_EMAIL_VERIFIED_CLAIM: "https://clinicaprontomedic.online/claims/email" }), /DISTINCT_REQUIRED/);
 });
 
 test("OIDC config derives discovery from issuer path without changing canonical issuer", () => {
@@ -23,6 +43,15 @@ test("OIDC config derives discovery from issuer path without changing canonical 
 test("OIDC config treats an empty optional discovery URL as absent", () => {
   const config = loadOidcRuntimeConfig({ ...validEnv, OIDC_DISCOVERY_URL: "   " });
   assert.equal(config.discoveryUrl, "https://id.example/realms/zap/.well-known/openid-configuration");
+});
+
+test("OIDC config accepts an explicit pair of HTTPS namespaced email claims", () => {
+  const emailClaim = "https://clinicaprontomedic.online/claims/email";
+  const emailVerifiedClaim = "https://clinicaprontomedic.online/claims/email_verified";
+  const config = loadOidcRuntimeConfig({ ...validEnv, OIDC_EMAIL_CLAIM: emailClaim,
+    OIDC_EMAIL_VERIFIED_CLAIM: emailVerifiedClaim });
+  assert.equal(config.emailClaim, emailClaim);
+  assert.equal(config.emailVerifiedClaim, emailVerifiedClaim);
 });
 
 function json(value: unknown, status = 200): Response {

@@ -11,6 +11,20 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 - O web foi compilado com URLs HTTPS e client ID do mesmo IdP configurado na API.
 - `OIDC_AUTHORITY_ORIGIN` contém somente o origin HTTPS da authority usada no build, sem path,
   credenciais, query ou fragmento; divergência faz o container web falhar fechado.
+- Por padrão a API lê `email` e `email_verified` do access token. Para um IdP que publica e-mail
+  verificado em claims namespaced, defina obrigatoriamente o par `OIDC_EMAIL_CLAIM` e
+  `OIDC_EMAIL_VERIFIED_CLAIM` como URIs HTTPS distintas, sem credenciais, query, fragmento ou espaços.
+  Exemplo: `https://clinicaprontomedic.online/claims/email` e
+  `https://clinicaprontomedic.online/claims/email_verified`.
+- Não configure explicitamente `email`/`email_verified`: deixe ambas as variáveis ausentes para usar o
+  padrão. Pares padrão explícitos e pares híbridos padrão/namespaced falham fechados. O preflight compara
+  o par de origem exatamente com o ambiente da API renderizado pelo Compose e rejeita ausência ou deriva.
+- O primeiro claim precisa ser string e o segundo precisa ser o booleano JSON `true`. String `"true"`,
+  claim ausente ou os claims padrão quando o par namespaced está configurado não autorizam aceitação
+  de convite.
+- No Auth0, uma Post Login Action deve adicionar esse par somente ao **access token** destinado ao
+  Identifier exato da API. Não envie esses dados apenas no ID token e não use `/userinfo`, corpo da
+  requisição ou Management API como fallback. Tokens emitidos antes da Action precisam ser renovados.
 - Os quatro arquivos de secrets do banco existem fora do checkout e são informados por caminhos absolutos. Como o
   Compose monta secrets de arquivo por bind mount, `postgres-password` deve pertencer ao UID/GID 70 da
   imagem PostgreSQL Alpine e as três URLs (`database_migration_url`, `database_runtime_url` e
@@ -97,8 +111,9 @@ O workflow manual `Publish staging images` só executa na branch padrão e no en
 `OIDC_WEB_REDIRECT_URI` e `OIDC_WEB_POST_LOGOUT_REDIRECT_URI`, publica API e web no GHCR com SBOM,
 gera attestations de proveniência, bloqueia vulnerabilidades críticas conhecidas e registra no resumo as referências imutáveis `repo@sha256`.
 Copie somente essas referências para o `.env` externo de staging; tags por SHA não substituem o digest.
-O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` no environment;
-essa variável só deve ser criada depois de configurar reviewer obrigatório e política restrita à `main`.
+Antes de promover cada digest, verifique sua attestation com `gh attestation verify oci://<imagem@sha256> --repo ccmunig92-ux/Zap-pronto --signer-workflow ccmunig92-ux/Zap-pronto/.github/workflows/staging-images.yml` autenticado no GHCR.
+O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` como variável do repositório;
+essa variável só deve ser criada depois de configurar no environment o reviewer obrigatório e a política restrita à `main`.
 
 ## Homologação OIDC externa e recuperação da conta dedicada
 

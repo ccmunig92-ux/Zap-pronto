@@ -46,6 +46,18 @@ Object.assign(metaCompose.services.worker,{volumes:workerMetaSecretMount,environ
 
 test("accepts immutable images, coherent HTTPS OIDC and minimum resources", () => {
   validateEnvironment(validEnv); validateResources(compose); validateComposeInvariants(compose);
+  const expectedEmailClaims = {
+    emailClaim:"https://clinicaprontomedic.online/claims/email",
+    emailVerifiedClaim:"https://clinicaprontomedic.online/claims/email_verified",
+  };
+  validateEnvironment({...validEnv,OIDC_EMAIL_CLAIM:expectedEmailClaims.emailClaim,
+    OIDC_EMAIL_VERIFIED_CLAIM:expectedEmailClaims.emailVerifiedClaim});
+  const claimsCompose = structuredClone(compose);
+  Object.assign(claimsCompose.services.api.environment, {
+    OIDC_EMAIL_CLAIM:expectedEmailClaims.emailClaim,
+    OIDC_EMAIL_VERIFIED_CLAIM:expectedEmailClaims.emailVerifiedClaim,
+  });
+  validateComposeInvariants(claimsCompose,{expectedEmailClaims});
   validateEnvironment({...validEnv,META_GRAPH_API_VERSION:"v23.0"},{metaEnabled:true});
   validateComposeInvariants(metaCompose,{metaEnabled:true});
 });
@@ -67,6 +79,40 @@ test("rejects mutable images and unsafe or divergent OIDC endpoints", () => {
   assert.throws(() => validateEnvironment({...validEnv,OIDC_JWKS_URL:"https://other.example/jwks"}), /OIDC_ORIGIN_MISMATCH/);
   assert.throws(() => validateEnvironment(validEnv,{metaEnabled:true}), /META_GRAPH_API_VERSION_REQUIRED/);
   assert.throws(() => validateEnvironment({...validEnv,META_GRAPH_API_VERSION:"latest"},{metaEnabled:true}), /META_GRAPH_API_VERSION_INVALID/);
+  assert.throws(() => validateEnvironment({...validEnv,
+    OIDC_EMAIL_CLAIM:"https://clinicaprontomedic.online/claims/email"}), /PAIR_REQUIRED/);
+  assert.throws(() => validateEnvironment({...validEnv,
+    OIDC_EMAIL_CLAIM:"https://claims.example/email?source=profile",
+    OIDC_EMAIL_VERIFIED_CLAIM:"https://clinicaprontomedic.online/claims/email_verified"}), /EMAIL_CLAIM_INVALID/);
+  for (const [emailClaim, emailVerifiedClaim] of [
+    ["email", "email_verified"],
+    ["email", "https://clinicaprontomedic.online/claims/email_verified"],
+    ["https://clinicaprontomedic.online/claims/email", "email_verified"],
+  ]) {
+    assert.throws(() => validateEnvironment({...validEnv,
+      OIDC_EMAIL_CLAIM:emailClaim,OIDC_EMAIL_VERIFIED_CLAIM:emailVerifiedClaim}),
+    /OIDC_EMAIL_(?:VERIFIED_)?CLAIM_INVALID/);
+  }
+});
+
+test("binds source email claims exactly to the rendered API environment", () => {
+  const expectedEmailClaims = {
+    emailClaim:"https://clinicaprontomedic.online/claims/email",
+    emailVerifiedClaim:"https://clinicaprontomedic.online/claims/email_verified",
+  };
+  const rendered = structuredClone(compose);
+  Object.assign(rendered.services.api.environment, {
+    OIDC_EMAIL_CLAIM:expectedEmailClaims.emailClaim,
+    OIDC_EMAIL_VERIFIED_CLAIM:expectedEmailClaims.emailVerifiedClaim,
+  });
+  assert.doesNotThrow(() => validateComposeInvariants(rendered,{expectedEmailClaims}));
+  assert.throws(() => validateComposeInvariants(compose,{expectedEmailClaims}), /OIDC_EMAIL_CLAIMS_RENDERED_MISMATCH/);
+  assert.throws(() => validateComposeInvariants(rendered), /OIDC_EMAIL_CLAIMS_RENDERED_MISMATCH/);
+  const mismatched = structuredClone(rendered);
+  mismatched.services.api.environment.OIDC_EMAIL_VERIFIED_CLAIM =
+    "https://clinicaprontomedic.online/claims/other_email_verified";
+  assert.throws(() => validateComposeInvariants(mismatched,{expectedEmailClaims}),
+    /OIDC_EMAIL_CLAIMS_RENDERED_MISMATCH/);
 });
 
 test("rejects missing resource guarantees and malformed or duplicate env entries", () => {
