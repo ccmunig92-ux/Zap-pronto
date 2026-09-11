@@ -72,6 +72,8 @@ jobs:
             VITE_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}
             VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
             VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
+            VITE_OIDC_SCOPE=openid profile email
+            VITE_OIDC_AUTOMATIC_SILENT_RENEW=true
           cache-from: type=gha,scope=staging-web
           cache-to: type=gha,mode=max,scope=staging-web
       - name: Scan web for critical vulnerabilities
@@ -115,6 +117,8 @@ jobs:
             VITE_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}
             VITE_OIDC_REDIRECT_URI=${{ vars.OIDC_WEB_REDIRECT_URI }}
             VITE_OIDC_POST_LOGOUT_REDIRECT_URI=${{ vars.OIDC_WEB_POST_LOGOUT_REDIRECT_URI }}
+            VITE_OIDC_SCOPE=openid profile email
+            VITE_OIDC_AUTOMATIC_SILENT_RENEW=true
           cache-from: type=gha,scope=staging-web
       - name: Attest web provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3

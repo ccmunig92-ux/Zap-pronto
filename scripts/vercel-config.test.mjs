@@ -49,7 +49,7 @@ test("Vercel disables browser and CDN caching for every proxied API response", (
 test("Vercel serves the SPA with the same security boundary as staging", () => {
   assert.equal(config.headers.length, 2);
   const nginxCsp = nginxConfig.match(/default "([^"]+)";/u)?.[1]
-    .replace("${OIDC_AUTHORITY_ORIGIN}", oidcAuthority);
+    .replaceAll("${OIDC_AUTHORITY_ORIGIN}", oidcAuthority);
   assert.ok(nginxCsp);
   assert.deepEqual(config.headers[1], {
     source: "/((?!v1(?:/|$)).*)",
@@ -60,7 +60,7 @@ test("Vercel serves the SPA with the same security boundary as staging", () => {
       },
       { key: "Referrer-Policy", value: "no-referrer" },
       { key: "X-Content-Type-Options", value: "nosniff" },
-      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
     ],
   });
