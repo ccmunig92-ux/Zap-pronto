@@ -69,7 +69,7 @@ test("external Inbox fixture is isolated behind pinned SSH and always cleaned", 
   assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*E2E_FORBID_SKIPS: "true"/);
   assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*E2E_ATTENDANT_USERNAME: \$\{\{ secrets\.E2E_ATTENDANT_USERNAME \}\}[\s\S]*"recuperação idempotente reativa a conta dedicada da homologação"/);
   assert.match(oidcSpec, /recuperação idempotente restaura disponibilidade OFFLINE/);
-  assert.match(oidcSpec, /if\(url\.origin!==baseOrigin\)crossOriginRequests\.push/);
+  assert.match(oidcSpec, /if\(!isExpectedBrowserOrigin\(request\.url\(\),baseOrigin,oidcIssuer\)\)crossOriginRequests\.push/);
   assert.match(oidcSpec, /expect\(crossOriginRequests\)\.toEqual\(\[\]\)/);
   assert.match(oidcSpec, /expect\(requeue\?\.\[1\]\)\.toBe\(claimMutation\?\.\[1\]\)/);
   assert.match(oidcSpec, /expect\(forbiddenOutbound\)\.toEqual\(\[\]\)/);
