@@ -38,6 +38,58 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
 
 Nenhum valor secreto deve ser colocado no `.env`, na linha de comando, em labels ou no repositório.
 
+## Bootstrap do primeiro administrador
+
+O primeiro tenant não pode usar o fluxo normal de convites porque ainda não existe um administrador.
+Crie `/srv/zap-pronto/secrets/staging/initial-bootstrap.json` fora do checkout, pertencente a
+`1000:1000`, modo `0400`, com exatamente estas chaves (valores abaixo são apenas marcadores):
+
+```json
+{
+  "tenantId": "UUID_GERADO_OFFLINE",
+  "tenantName": "NOME_DO_TENANT",
+  "unitId": "UUID_GERADO_OFFLINE",
+  "unitCode": "MATRIZ",
+  "unitName": "NOME_DA_UNIDADE",
+  "adminUserId": "UUID_GERADO_OFFLINE",
+  "adminEmail": "EMAIL_VERIFICADO_NO_IDP",
+  "adminDisplayName": "NOME_DO_ADMIN",
+  "oidcProviderId": "UUID_GERADO_OFFLINE",
+  "oidcProviderCode": "auth0",
+  "oidcIssuer": "https://TENANT_DO_IDP/",
+  "oidcAudience": "zap-pronto",
+  "oidcOrganizationClaim": null,
+  "oidcOrganizationValue": null,
+  "oidcConfigReference": "auth0://TENANT/APLICACAO",
+  "oidcSubject": "SUB_EXATO_DO_TOKEN"
+}
+```
+
+Com o Postgres saudável e após `migrate`, execute uma única vez:
+
+```sh
+docker compose --env-file /srv/zap-pronto/secrets/staging/compose.env \
+  -f /opt/Zap-pronto/deploy/staging/compose.yaml run --rm --no-deps \
+  --volume /srv/zap-pronto/secrets/staging/initial-bootstrap.json:/run/secrets/initial-bootstrap.json:ro \
+  --env BOOTSTRAP_CONFIG_FILE=/run/secrets/initial-bootstrap.json \
+  migrate node scripts/staging-bootstrap-tenant.mjs --apply
+```
+
+A referência `oidcConfigReference` é somente um localizador opaco não secreto no formato
+`esquema://identificador/caminho`; usuário, senha, `@`, query, fragmento, espaços e caracteres de
+controle são recusados. Não coloque client secret, token ou senha nesse campo.
+
+O serviço `migrate` recebe `OIDC_ISSUER`, `OIDC_AUDIENCE` e `OIDC_ORGANIZATION_CLAIM` do mesmo
+`compose.env` usado pela API. Antes de abrir conexão ou executar SQL, o comando exige igualdade exata
+entre issuer, audience e organization claim do JSON e a configuração OIDC efetiva; claim vazio no
+ambiente corresponde a `null` no JSON. Assim, um bootstrap preparado para outro IdP falha fechado.
+
+A credencial administrativa vem somente de `/run/secrets/database_migration_url`. A operação recusa
+banco parcialmente povoado, não corrige cadastros existentes e só admite repetição com configuração
+idêntica e estado persistido integralmente inalterado. Depois de `INITIAL_TENANT_BOOTSTRAPPED`, remova
+o arquivo de configuração do host; ele contém identificadores pessoais, embora não contenha senha nem
+client secret.
+
 ## Imagens publicadas
 
 O workflow manual `Publish staging images` só executa na branch padrão e no environment

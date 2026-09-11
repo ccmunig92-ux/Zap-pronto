@@ -44,6 +44,9 @@ services:
     command: ["node", "scripts/db-migrate.mjs"]
     environment:
       DATABASE_URL_FILE: /run/secrets/database_migration_url
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}
+      OIDC_ORGANIZATION_CLAIM: ${OIDC_ORGANIZATION_CLAIM:-}
     secrets:
       - database_migration_url
     networks:

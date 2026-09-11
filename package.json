@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "build:all": "pnpm --filter @zap-pronto/contracts build && pnpm build && pnpm --filter @zap-pronto/api --filter @zap-pronto/api-client build && pnpm --filter @zap-pronto/web build",
     "db:migrate": "node scripts/db-migrate.mjs",
+    "db:bootstrap:initial": "node scripts/staging-bootstrap-tenant.mjs --apply",
     "db:test": "pnpm build:all && node scripts/db-test.mjs",
     "db:test:upgrade": "node scripts/db-upgrade-test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
