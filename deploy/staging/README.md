@@ -192,17 +192,20 @@ controlador cria em `/run/zap-pronto-staging-inbox-e2e` uma cópia efêmera `roo
 e a remove por trap em sucesso, erro ou sinal. O conteúdo nunca é impresso e a permissão do arquivo original
 permanece inalterada.
 
-O workflow executa `cleanup` com `always()`. Se o runner for perdido antes dessa etapa, conecte-se pelo canal
-administrativo da VPS e execute o controlador com `cleanup <run_id>-<run_attempt>`; a limpeza é idempotente.
+O workflow executa `cleanup` com `always()`, mas somente depois de a conta dedicada usar a rota autenticada
+canônica de requeue e retornar a `OFFLINE`. O cleanup falha fechado enquanto o handoff estiver `ACTIVE` ou
+qualquer registro da fixture continuar atribuído a uma pessoa; ele não substitui requeue, takeover ou transferência.
+Se o runner for perdido, recupere primeiro a fixture pela UI com a conta dedicada e somente então execute pelo
+canal administrativo da VPS `cleanup <run_id>-<run_attempt>`; a limpeza de fixture já inativa é idempotente.
 Depois, rotacione a chave dedicada se houver suspeita de exposição. Uma execução só é aceita quando `verify`
 confirma exatamente uma mensagem `INBOUND/CUSTOMER`, nenhuma mensagem outbound, nenhuma ação Hermes/Meta e
 o handoff final `QUEUED` sem responsável.
 
 A conta atendente dedicada deve iniciar em `OFFLINE`, sem atendimentos ativos. A própria UI a coloca em
 `AVAILABLE` somente durante a jornada e retorna a `OFFLINE` no `finally`. Um job de recuperação separado,
-protegido pelo mesmo environment e executado com `needs: homologate` mais `always()`, limpa a fixture por SSH
-e repete as recuperações da conta e da disponibilidade de forma idempotente. Ele não altera disponibilidade
-diretamente no banco.
+protegido pelo mesmo environment e executado com `needs: homologate` mais `always()`, reativa a conta, devolve
+pela UI apenas a fixture exata ainda pertencente ao atendente, restaura a disponibilidade e só então limpa a
+fixture por SSH. Ele não altera disponibilidade diretamente no banco e não executa takeover nem transferência.
 
 ## Critérios de aceite
 

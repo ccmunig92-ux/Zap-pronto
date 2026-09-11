@@ -133,7 +133,26 @@ async function assertAttendantReady(client, config, fixture) {
   }
 }
 
+async function assertFixtureCleanupSafe(client, config, fixture) {
+  const handoff = await client.query(`SELECT status,assigned_user_id FROM human_handoffs
+    WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, [config.tenantId, fixture.handoffId]);
+  const conversation = await client.query(`SELECT assigned_user_id FROM conversations
+    WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, [config.tenantId, fixture.conversationId]);
+  const forbiddenCommands = await client.query(`SELECT
+    EXISTS(SELECT 1 FROM handoff_transfer_commands WHERE tenant_id=$1 AND handoff_id=$2) transfer_exists,
+    EXISTS(SELECT 1 FROM handoff_takeover_commands WHERE tenant_id=$1 AND handoff_id=$2) takeover_exists`,
+  [config.tenantId, fixture.handoffId]);
+  const handoffRow = handoff.rows[0], conversationRow = conversation.rows[0], commandRow = forbiddenCommands.rows[0];
+  if (handoff.rowCount > 1 || conversation.rowCount > 1
+    || handoffRow?.status === "ACTIVE" || handoffRow?.assigned_user_id != null
+    || conversationRow?.assigned_user_id != null || forbiddenCommands.rowCount !== 1
+    || commandRow?.transfer_exists !== false || commandRow.takeover_exists !== false) {
+    throw new Error("FIXTURE_CLEANUP_ACTIVE_WORK_CONFLICT");
+  }
+}
+
 async function deleteFixtureRows(client, config, fixture) {
+  await assertFixtureCleanupSafe(client, config, fixture);
   const handoff = [config.tenantId, fixture.handoffId];
   const aggregateIds = [config.tenantId, fixture.handoffId, fixture.serviceCaseId, fixture.conversationId];
   const entityIds = [...aggregateIds, fixture.messageId];

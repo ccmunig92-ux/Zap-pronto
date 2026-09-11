@@ -15,6 +15,7 @@ const submitSelector = optional("E2E_OIDC_SUBMIT_SELECTOR") ?? 'button[type="sub
 
 type SafeAvailabilitySnapshot = Readonly<{ status:"AVAILABLE"|"PAUSED"|"OFFLINE"; maxActive:number; activeCount:number }>;
 type SafeClaimDiagnostic = Readonly<{ status:number; reason:"success"|"outside_shift"|"availability_not_available"|"capacity_exhausted"|"handoff_conflict"|"unexpected_http_status" }>;
+type SafeActiveListDiagnostic = Readonly<{status:number;validBody:boolean;itemCount:number;fixtureMatchCount:number}>;
 
 async function safeAvailabilitySnapshot(response:PlaywrightResponse):Promise<SafeAvailabilitySnapshot|null>{
   if(response.status()!==200)return null;try{const body:unknown=await response.json();if(!body||typeof body!=="object")return null;
@@ -44,6 +45,19 @@ async function changeOwnAvailability(page:Page,targetStatus:"AVAILABLE"|"OFFLINE
 
 async function restoreOwnAvailabilityOffline(page:Page):Promise<void>{
   if(await page.getByText(/Status:\s*Offline/u).isVisible())return;await changeOwnAvailability(page,"OFFLINE");
+}
+
+async function withPreservedPrimaryFailure<T>(operation:()=>Promise<T>,recovery:()=>Promise<void>):Promise<T>{
+  let primaryFailure:unknown;try{return await operation()}catch(error){primaryFailure=error;throw error}finally{
+    try{await recovery()}catch(recoveryError){if(primaryFailure===undefined)throw recoveryError;test.info().annotations.push({type:"recovery",description:"E2E_INBOX_RECOVERY_FAILED"})}
+  }
+}
+
+async function safeActiveListDiagnostic(response:PlaywrightResponse,contactName:string):Promise<SafeActiveListDiagnostic>{
+  const status=response.status();if(status!==200)return{status,validBody:false,itemCount:0,fixtureMatchCount:0};
+  try{const body:unknown=await response.json();if(!body||typeof body!=="object"||!("items" in body)||!Array.isArray((body as{items?:unknown}).items))return{status,validBody:false,itemCount:0,fixtureMatchCount:0};
+    const items=(body as{items:unknown[]}).items;return{status,validBody:true,itemCount:items.length,fixtureMatchCount:items.filter(item=>Boolean(item)&&typeof item==="object"&&(item as{contactName?:unknown}).contactName===contactName).length};
+  }catch{return{status,validBody:false,itemCount:0,fixtureMatchCount:0}}
 }
 
 if (enabled) {
@@ -110,12 +124,30 @@ async function login(page: Page, configuration: AccountConfiguration): Promise<v
   await expect(page.getByRole("banner").getByText(configuration.tenant, { exact: true })).toBeVisible();
 }
 
-async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Equipe" | "Escalas" | "Visão geral"): Promise<void> {
+async function openModule(page: Page, name: "Inbox" | "Acessos" | "Roteamento" | "Vínculos" | "Política de SLA" | "Equipe" | "Escalas" | "Visão geral"): Promise<void> {
   const navigation = page.getByRole("navigation", { name: "Módulos" });
   const button = navigation.getByRole("button", { name });
   await expect(button).toBeVisible();
   await button.click();
   await expect(button).toHaveAttribute("aria-current", "page");
+}
+
+async function reloadAndLocateActiveFixture(page:Page,contactName:string){
+  const firstActive=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/active");
+  await page.reload();await openModule(page,"Inbox");let diagnostic=await safeActiveListDiagnostic(await firstActive,contactName);
+  if(diagnostic.status!==200||!diagnostic.validBody||diagnostic.fixtureMatchCount!==1){
+    const refreshed=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/active");
+    await page.getByRole("button",{name:"Atualizar Inbox"}).click();diagnostic=await safeActiveListDiagnostic(await refreshed,contactName);
+  }
+  expect(diagnostic).toEqual({status:200,validBody:true,itemCount:expect.any(Number),fixtureMatchCount:1});
+  const activeItem=page.getByRole("button",{name:`${contactName} · Em atendimento`});await expect(activeItem).toBeVisible();return activeItem;
+}
+
+async function recoverOwnExternalFixture(page:Page,contactName:string):Promise<void>{
+  if(!externalMode)return;await openModule(page,"Inbox");const activeItem=page.getByRole("button",{name:`${contactName} · Em atendimento`});
+  if(!await activeItem.isVisible())return;await activeItem.click();const requeueButton=page.getByRole("button",{name:"Devolver à fila"});await expect(requeueButton).toBeVisible();
+  const requeued=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/requeue"));await requeueButton.click();expect((await requeued).status()).toBe(200);
+  await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
 }
 
 async function oidcAccessTokenExpiration(page: Page): Promise<number> {
@@ -488,18 +520,18 @@ test.describe("shell OIDC real", () => {
     await page.reload();await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();
     await expect(page.getByText(/Status:\s*Offline\s*·\s*0 de \d+ ativos/u)).toBeVisible();
     let claimAvailability:SafeAvailabilitySnapshot|null=null;
-    try{
+    await withPreservedPrimaryFailure(async()=>{
       claimAvailability=await changeOwnAvailability(page,"AVAILABLE");
       await page.getByRole("button",{name:`${contactName} · NORMAL`}).click();await expect(page.getByText(inboundText)).toBeVisible();
       const claimResponse=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/claim"));
       await page.getByRole("button",{name:"Assumir atendimento"}).click();expect(await safeClaimDiagnostic(await claimResponse,claimAvailability)).toEqual({status:200,reason:"success"});
       await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();
       await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);
-      await page.reload();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();await page.getByRole("button",{name:`${contactName} · Em atendimento`}).click();
+      const activeItem=await reloadAndLocateActiveFixture(page,contactName);await activeItem.click();
       await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Enviar"})).toBeVisible();
       await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
-      await page.reload();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
-    }finally{await restoreOwnAvailabilityOffline(page)}
+      await page.reload();await openModule(page,"Inbox");await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
+    },async()=>{await recoverOwnExternalFixture(page,contactName);await restoreOwnAvailabilityOffline(page)});
     const claimMutation=mutations.find(value=>value.endsWith("/claim"))?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/claim$/u);
     const requeue=mutations.find(value=>value.endsWith("/requeue"))?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/requeue$/u);
     expect(claimMutation?.[1]).toBeTruthy();expect(requeue?.[1]).toBe(claimMutation?.[1]);expect(mutations.filter(value=>value==="POST /v1/inbox/availability")).toHaveLength(2);
