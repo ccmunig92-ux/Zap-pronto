@@ -111,8 +111,9 @@ O workflow manual `Publish staging images` só executa na branch padrão e no en
 `OIDC_WEB_REDIRECT_URI` e `OIDC_WEB_POST_LOGOUT_REDIRECT_URI`, publica API e web no GHCR com SBOM,
 gera attestations de proveniência, bloqueia vulnerabilidades críticas conhecidas e registra no resumo as referências imutáveis `repo@sha256`.
 Copie somente essas referências para o `.env` externo de staging; tags por SHA não substituem o digest.
-O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` no environment;
-essa variável só deve ser criada depois de configurar reviewer obrigatório e política restrita à `main`.
+Antes de promover cada digest, verifique sua attestation com `gh attestation verify oci://<imagem@sha256> --repo ccmunig92-ux/Zap-pronto --signer-workflow ccmunig92-ux/Zap-pronto/.github/workflows/staging-images.yml` autenticado no GHCR.
+O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` como variável do repositório;
+essa variável só deve ser criada depois de configurar no environment o reviewer obrigatório e a política restrita à `main`.
 
 ## Homologação OIDC externa e recuperação da conta dedicada
 
