@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, test, type Page, type Response as PlaywrightResponse } from "@playwright/test";
+import {isExpectedBrowserOrigin} from "../src/requestOriginPolicy.js";
 import {retryTransientNavigation} from "../src/transientNavigation.js";
 
 const enabled = process.env.E2E_OIDC_ENABLED === "true";
@@ -81,6 +82,11 @@ if (enabled) {
     ||parsed.origin==="https://zap-pronto.127.0.0.1.nip.io:18443"
     ||parsed.hostname==="localhost"||parsed.hostname==="127.0.0.1"||parsed.hostname==="::1")){
     throw new Error("E2E_EXTERNAL_HARNESS_PUBLIC_ORIGIN_REQUIRED");
+  }
+  if(externalMode){
+    const oidcIssuer=optional("OIDC_ISSUER");let parsedIssuer:URL;
+    try{parsedIssuer=new URL(oidcIssuer??"")}catch{throw new Error("OIDC_ISSUER_VALID_HTTPS_REQUIRED")}
+    if(parsedIssuer.protocol!=="https:"||parsedIssuer.username||parsedIssuer.password||parsedIssuer.search||parsedIssuer.hash)throw new Error("OIDC_ISSUER_VALID_HTTPS_REQUIRED");
   }
   if(externalMode&&requireBlockRevocation&&process.env.E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED!=="true"){
     throw new Error("E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED_REQUIRED");
@@ -523,10 +529,10 @@ test.describe("shell OIDC real", () => {
     test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar a Inbox.");const fixtureKey=optional("E2E_INBOX_FIXTURE_KEY");
     if(externalMode&&!fixtureKey?.match(/^[0-9]{1,20}-[1-9][0-9]{0,5}$/u))throw new Error("E2E_INBOX_FIXTURE_KEY_REQUIRED");
     await login(page,account("ATTENDANT"));
-    const baseOrigin=new URL(optional("E2E_BASE_URL")??page.url()).origin;const contactName=externalMode?`E2E Inbox ${fixtureKey}`:"Contato";
+    const baseOrigin=new URL(optional("E2E_BASE_URL")??page.url()).origin;const oidcIssuer=optional("OIDC_ISSUER");const contactName=externalMode?`E2E Inbox ${fixtureKey}`:"Contato";
     const inboundText=externalMode?`Homologação externa Inbox ${fixtureKey}`:"Mensagem inbound sintética da Inbox";
     const mutations:string[]=[];const crossOriginRequests:string[]=[];const forbiddenOutbound:string[]=[];page.on("request",request=>{const url=new URL(request.url());
-      if(url.origin!==baseOrigin)crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);if(/(?:meta|facebook|whatsapp|hermes)/iu.test(url.href)||url.pathname==="/v1/webhooks/meta"||(request.method()==="POST"&&url.pathname.endsWith("/messages")))forbiddenOutbound.push(`${request.method()} ${url.pathname}`);
+      if(!isExpectedBrowserOrigin(request.url(),baseOrigin,oidcIssuer))crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);if(/(?:meta|facebook|whatsapp|hermes)/iu.test(url.href)||url.pathname==="/v1/webhooks/meta"||(request.method()==="POST"&&url.pathname.endsWith("/messages")))forbiddenOutbound.push(`${request.method()} ${url.pathname}`);
       if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
     await page.reload();await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();
     await expect(page.getByText(/Status:\s*Offline\s*·\s*0 de \d+ ativos/u)).toBeVisible();
