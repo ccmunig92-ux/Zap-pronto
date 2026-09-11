@@ -102,7 +102,10 @@ export function migrationHashes(directory = resolve("database/migrations")) {
   for (let number = 1; number <= latest; number += 1) {
     if (!seen.has(number)) throw new Error(`MIGRATION_SEQUENCE_GAP:${String(number).padStart(4, "0")}`);
   }
-  return files.map((name) => ({ name, sha256: createHash("sha256").update(readFileSync(resolve(directory, name))).digest("hex") }));
+  return files.map((name) => {
+    const sql = readFileSync(resolve(directory, name), "utf8").replace(/\r\n?/gu, "\n");
+    return { name, sha256: createHash("sha256").update(sql).digest("hex") };
+  });
 }
 
 function defaultRun(command, args, options) {

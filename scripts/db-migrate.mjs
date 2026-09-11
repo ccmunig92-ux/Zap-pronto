@@ -25,6 +25,9 @@ const migrationFiles = (await readdir(migrationsDirectory))
 const client = new pg.Client({ connectionString });
 await client.connect();
 
+const normalizeMigrationSql = (sql) => sql.replace(/\r\n?/gu, "\n");
+const migrationChecksum = (sql) => createHash("sha256").update(sql).digest("hex");
+
 try {
   await client.query("SELECT pg_advisory_lock($1)", [820260805]);
   await client.query(`
@@ -36,15 +39,25 @@ try {
   `);
 
   for (const filename of migrationFiles) {
-    const sql = await readFile(resolve(migrationsDirectory, filename), "utf8");
-    const checksum = createHash("sha256").update(sql).digest("hex");
+    const sql = normalizeMigrationSql(await readFile(resolve(migrationsDirectory, filename), "utf8"));
+    const checksum = migrationChecksum(sql);
+    const legacyCrlfChecksum = migrationChecksum(sql.replace(/\n/gu, "\r\n"));
     const existing = await client.query(
       "SELECT checksum_sha256 FROM schema_migrations WHERE filename = $1",
       [filename],
     );
 
     if (existing.rowCount === 1) {
-      if (existing.rows[0].checksum_sha256.trim() !== checksum) {
+      const storedChecksum = existing.rows[0].checksum_sha256.trim();
+      if (storedChecksum === legacyCrlfChecksum && storedChecksum !== checksum) {
+        await client.query(
+          "UPDATE schema_migrations SET checksum_sha256 = $1 WHERE filename = $2 AND checksum_sha256 = $3",
+          [checksum, filename, storedChecksum],
+        );
+        process.stdout.write(`normalized checksum ${filename}\n`);
+        continue;
+      }
+      if (storedChecksum !== checksum) {
         throw new Error(`MIGRATION_CHECKSUM_MISMATCH:${filename}`);
       }
       continue;
