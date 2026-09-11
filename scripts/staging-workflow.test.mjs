@@ -32,6 +32,8 @@ test("external OIDC uses the canonical harness in restricted external mode", () 
   assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*recuperação idempotente/);
   assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 1);
   assert.match(oidcSource, /--grep/);
+  assert.equal((oidcSource.match(/test:e2e:oidc --grep/g) ?? []).length, 2);
+  assert.doesNotMatch(oidcSource, /test:e2e:oidc -- --grep/);
   assert.doesNotMatch(oidcSource, /^  (?:pull_request|push):/m);
 });
 

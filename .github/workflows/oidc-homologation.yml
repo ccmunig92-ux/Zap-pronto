@@ -76,7 +76,7 @@ jobs:
           E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
           E2E_ATTENDANT_ADMIN_LIST_MATCH: ${{ secrets.E2E_ATTENDANT_ADMIN_LIST_MATCH }}
         run: >-
-          pnpm --filter @zap-pronto/web test:e2e:oidc -- --grep
+          pnpm --filter @zap-pronto/web test:e2e:oidc --grep
           "administrador autentica|atendente autentica|renovação mantém|bloqueio invalida"
       - name: Recover dedicated attendant account
         if: ${{ always() }}
@@ -96,5 +96,5 @@ jobs:
           E2E_ADMIN_EXPECTED_TENANT: ${{ secrets.E2E_ADMIN_EXPECTED_TENANT }}
           E2E_ATTENDANT_ADMIN_LIST_MATCH: ${{ secrets.E2E_ATTENDANT_ADMIN_LIST_MATCH }}
         run: >-
-          pnpm --filter @zap-pronto/web test:e2e:oidc -- --grep
+          pnpm --filter @zap-pronto/web test:e2e:oidc --grep
           "recuperação idempotente"
