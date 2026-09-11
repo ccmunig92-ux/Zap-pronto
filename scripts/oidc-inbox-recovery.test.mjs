@@ -7,15 +7,17 @@ const recoverySpec=await readFile(new URL("../apps/web/e2e/inbox-recovery-oidc.s
 const fixture=await readFile(new URL("./staging-inbox-e2e-fixture.mjs",import.meta.url),"utf8");
 
 test("recovery performs canonical browser recovery before guarded SSH cleanup",()=>{
-  const job=workflow.slice(workflow.indexOf("  recovery:"));
-  const reactivate=job.indexOf("Recover dedicated attendant account");
-  const browserRecovery=job.indexOf("Recover owned Inbox fixture and restore OFFLINE");
-  const configureSsh=job.indexOf("Configure restricted staging fixture SSH for cleanup");
-  const cleanup=job.indexOf("Cleanup isolated staging Inbox fixture");
+  const recovery=workflow.slice(workflow.indexOf("  recovery:"),workflow.indexOf("  cleanup:"));
+  const cleanupJob=workflow.slice(workflow.indexOf("  cleanup:"));
+  const reactivate=recovery.indexOf("Recover dedicated attendant account");
+  const browserRecovery=recovery.indexOf("Recover owned Inbox fixture and restore OFFLINE");
+  const configureSsh=cleanupJob.indexOf("Configure restricted staging fixture SSH for cleanup");
+  const cleanup=cleanupJob.indexOf("Cleanup isolated staging Inbox fixture");
   assert.ok(reactivate>=0&&reactivate<browserRecovery);
-  assert.ok(browserRecovery<configureSsh&&configureSsh<cleanup);
-  assert.match(job,/inbox-recovery-oidc\.spec\.ts/);
-  assert.match(job,/if: \$\{\{ always\(\) && steps\.fixture_ssh\.outcome == 'success' \}\}/);
+  assert.ok(configureSsh>=0&&configureSsh<cleanup);
+  assert.match(recovery,/timeout-minutes: 20[\s\S]*inbox-recovery-oidc\.spec\.ts/);
+  assert.match(cleanupJob,/needs: \[homologate, recovery\][\s\S]*timeout-minutes: 5/);
+  assert.match(cleanupJob,/if: \$\{\{ always\(\) && steps\.fixture_ssh\.outcome == 'success' \}\}/);
 });
 
 test("browser recovery targets only the deterministic fixture and never takes over or transfers",()=>{
@@ -24,6 +26,8 @@ test("browser recovery targets only the deterministic fixture and never takes ov
   assert.match(recoverySpec,/name:"Devolver à fila"/);
   assert.match(recoverySpec,/pathname\.endsWith\("\/requeue"\)/);
   assert.match(recoverySpec,/responseStatus\(requeue\)\)\.toBe\(200\)/);
+  assert.match(recoverySpec,/safeActiveListDiagnostic[\s\S]*fixtureMatchCount/);
+  assert.doesNotMatch(recoverySpec,/if\(await active\.isVisible\(\)\)/);
   assert.match(recoverySpec,/selectOption\("OFFLINE"\)/);
   assert.doesNotMatch(recoverySpec,/getByRole\([^\n]+Assumir atendimento/);
   assert.doesNotMatch(recoverySpec,/\.click\([^\n]*(?:takeover|transfer)|fetch\([^\n]*(?:takeover|transfer)/i);

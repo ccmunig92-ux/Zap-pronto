@@ -43,11 +43,21 @@ test("private inputs require the owner database URL and never accept runtime cre
   const fixtureConfig = join(directory, "config.json");
   await writeFile(database, "postgresql://zap_pronto_owner:private@postgres/zap_pronto\n", { mode: 0o400 });
   await writeFile(fixtureConfig, JSON.stringify(config), { mode: 0o400 });
+  await chmod(database, 0o400);
+  await chmod(fixtureConfig, 0o400);
   const loaded = await loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig });
   assert.equal(loaded.config.tenantId, config.tenantId);
-  if (process.platform === "win32") await chmod(database, 0o600);
+  await chmod(database, 0o600);
   await writeFile(database, "postgresql://zap_pronto_runtime:private@postgres/zap_pronto\n", { mode: 0o400 });
+  await chmod(database, 0o400);
   await assert.rejects(loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig }), /DATABASE_URL_INVALID/);
+  if (process.platform === "linux") {
+    await chmod(database, 0o600);
+    await writeFile(database, "postgresql://zap_pronto_owner:private@postgres/zap_pronto\n");
+    await chmod(database, 0o400);
+    await chmod(fixtureConfig, 0o600);
+    await assert.rejects(loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig }), /FIXTURE_FILE_PERMISSIONS_INVALID/);
+  }
 });
 
 test("prepare is transactional, parameterized and verifies zero outbound or Hermes messages", async () => {

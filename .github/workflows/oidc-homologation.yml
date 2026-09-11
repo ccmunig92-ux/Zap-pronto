@@ -153,7 +153,7 @@ jobs:
     needs: homologate
     if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment: oidc-homologation
     env:
       E2E_INBOX_FIXTURE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -214,6 +214,15 @@ jobs:
           E2E_ATTENDANT_PASSWORD: ${{ secrets.E2E_ATTENDANT_PASSWORD }}
           E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
         run: pnpm --filter @zap-pronto/web test:e2e:oidc inbox-recovery-oidc.spec.ts
+  cleanup:
+    needs: [homologate, recovery]
+    if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oidc-homologation
+    env:
+      E2E_INBOX_FIXTURE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
       - name: Configure restricted staging fixture SSH for cleanup
         id: fixture_ssh
         if: ${{ always() }}

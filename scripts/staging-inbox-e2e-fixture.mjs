@@ -91,9 +91,10 @@ export async function loadFixtureInputs(env = process.env) {
   if (!databasePath) throw new Error("DATABASE_URL_FILE_REQUIRED");
   if (!configPath) throw new Error("INBOX_E2E_CONFIG_FILE_REQUIRED");
   const uid = process.getuid?.();
+  const localOwnerUids = [0, uid].filter(Number.isInteger);
   const [databaseRaw, configRaw] = await Promise.all([
     privateRegularFile(databasePath, MAX_DATABASE_URL_BYTES, [0, 1000, uid].filter(Number.isInteger)),
-    privateRegularFile(configPath, MAX_CONFIG_BYTES, [0]),
+    privateRegularFile(configPath, MAX_CONFIG_BYTES, localOwnerUids),
   ]);
   let config;
   try { config = JSON.parse(configRaw); } catch { throw new Error("FIXTURE_CONFIG_INVALID"); }

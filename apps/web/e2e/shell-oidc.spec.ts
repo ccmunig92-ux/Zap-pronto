@@ -44,6 +44,7 @@ async function changeOwnAvailability(page:Page,targetStatus:"AVAILABLE"|"OFFLINE
 }
 
 async function restoreOwnAvailabilityOffline(page:Page):Promise<void>{
+  await expect(page.getByText(/Status:\s*(?:Disponível|Pausado|Offline)/u)).toBeVisible();
   if(await page.getByText(/Status:\s*Offline/u).isVisible())return;await changeOwnAvailability(page,"OFFLINE");
 }
 
@@ -144,8 +145,13 @@ async function reloadAndLocateActiveFixture(page:Page,contactName:string){
 }
 
 async function recoverOwnExternalFixture(page:Page,contactName:string):Promise<void>{
-  if(!externalMode)return;await openModule(page,"Inbox");const activeItem=page.getByRole("button",{name:`${contactName} · Em atendimento`});
-  if(!await activeItem.isVisible())return;await activeItem.click();const requeueButton=page.getByRole("button",{name:"Devolver à fila"});await expect(requeueButton).toBeVisible();
+  if(!externalMode)return;await openModule(page,"Inbox");
+  const refreshed=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/active");
+  await page.getByRole("button",{name:"Atualizar Inbox"}).click();const diagnostic=await safeActiveListDiagnostic(await refreshed,contactName);
+  if(diagnostic.status!==200||!diagnostic.validBody||diagnostic.fixtureMatchCount>1)throw new Error("E2E_INBOX_ACTIVE_SNAPSHOT_INVALID");
+  const activeItem=page.getByRole("button",{name:`${contactName} · Em atendimento`});
+  if(diagnostic.fixtureMatchCount===0){await expect(activeItem).toHaveCount(0);return}
+  await expect(activeItem).toBeVisible();await activeItem.click();const requeueButton=page.getByRole("button",{name:"Devolver à fila"});await expect(requeueButton).toBeVisible();
   const requeued=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/requeue"));await requeueButton.click();expect((await requeued).status()).toBe(200);
   await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
 }

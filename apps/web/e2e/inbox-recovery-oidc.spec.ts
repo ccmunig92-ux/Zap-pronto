@@ -6,6 +6,7 @@ const externalMode = optional("E2E_OIDC_TARGET") === "external";
 const usernameSelector = optional("E2E_OIDC_USERNAME_SELECTOR") ?? 'input[name="username"]';
 const passwordSelector = optional("E2E_OIDC_PASSWORD_SELECTOR") ?? 'input[name="password"]';
 const submitSelector = optional("E2E_OIDC_SUBMIT_SELECTOR") ?? 'button[type="submit"]';
+type SafeActiveListDiagnostic=Readonly<{status:number;validBody:boolean;fixtureMatchCount:number}>;
 
 function attendantAccount():Readonly<{username:string;password:string;tenant:string}>{
   const username=optional("E2E_ATTENDANT_USERNAME"),password=optional("E2E_ATTENDANT_PASSWORD"),
@@ -32,6 +33,13 @@ async function openInbox(page:Page):Promise<void>{
 
 async function responseStatus(response:Promise<PlaywrightResponse>):Promise<number>{return(await response).status()}
 
+async function safeActiveListDiagnostic(response:PlaywrightResponse,contactName:string):Promise<SafeActiveListDiagnostic>{
+  const status=response.status();if(status!==200)return{status,validBody:false,fixtureMatchCount:0};
+  try{const body:unknown=await response.json();if(!body||typeof body!=="object"||!("items" in body)||!Array.isArray((body as{items?:unknown}).items))return{status,validBody:false,fixtureMatchCount:0};
+    return{status,validBody:true,fixtureMatchCount:(body as{items:unknown[]}).items.filter(item=>Boolean(item)&&typeof item==="object"&&(item as{contactName?:unknown}).contactName===contactName).length};
+  }catch{return{status,validBody:false,fixtureMatchCount:0}}
+}
+
 test.describe("recovery OIDC externo da fixture Inbox",()=>{
   test("requeue próprio precede OFFLINE sem takeover ou transferência",async({page})=>{
     test.skip(!enabled||!externalMode,"Executa somente na recuperação OIDC externa.");
@@ -42,12 +50,14 @@ test.describe("recovery OIDC externo da fixture Inbox",()=>{
       throw new Error("E2E_EXTERNAL_HARNESS_PUBLIC_ORIGIN_REQUIRED");
     }
 
+    const contactName=`E2E Inbox ${runKey}`;
     await login(page);await openInbox(page);
     const activeSnapshot=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/active");
     const queueSnapshot=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/handoffs");
     await page.getByRole("button",{name:"Atualizar Inbox"}).click();
-    expect(await responseStatus(activeSnapshot)).toBe(200);expect(await responseStatus(queueSnapshot)).toBe(200);
-    const contactName=`E2E Inbox ${runKey}`;
+    const activeDiagnostic=await safeActiveListDiagnostic(await activeSnapshot,contactName);
+    expect(await responseStatus(queueSnapshot)).toBe(200);
+    if(activeDiagnostic.status!==200||!activeDiagnostic.validBody||activeDiagnostic.fixtureMatchCount>1)throw new Error("E2E_INBOX_ACTIVE_SNAPSHOT_INVALID");
     const active=page.getByRole("button",{name:`${contactName} · Em atendimento`});
     const queued=page.getByRole("button",{name:`${contactName} · NORMAL`});
     const mutations:string[]=[];
@@ -55,16 +65,17 @@ test.describe("recovery OIDC externo da fixture Inbox",()=>{
     page.on("request",request=>{const path=new URL(request.url()).pathname;
       if(path.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${path}`)});
 
-    if(await active.isVisible()){
-      await active.click();await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();
+    if(activeDiagnostic.fixtureMatchCount===1){
+      await expect(active).toBeVisible();await active.click();await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();
       const requeueButton=page.getByRole("button",{name:"Devolver à fila"});
       if(!await requeueButton.isVisible())throw new Error("E2E_INBOX_RECOVERY_NOT_OWNED");
       const requeue=page.waitForResponse(response=>response.request().method()==="POST"
         &&new URL(response.url()).pathname.endsWith("/requeue"));
       await requeueButton.click();expect(await responseStatus(requeue)).toBe(200);didRequeue=true;await expect(queued).toBeVisible();
-    }
+    }else await expect(active).toHaveCount(0);
 
     const offline=page.getByText(/Status:\s*Offline/u);
+    await expect(page.getByText(/Status:\s*(?:Disponível|Pausado|Offline)/u)).toBeVisible();
     if(!await offline.isVisible()){
       await page.getByRole("button",{name:"Alterar disponibilidade"}).click();
       await page.getByLabel("Status da disponibilidade").selectOption("OFFLINE");

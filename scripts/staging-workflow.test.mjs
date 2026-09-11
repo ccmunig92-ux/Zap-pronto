@@ -40,8 +40,9 @@ test("external OIDC uses the canonical harness in restricted external mode", () 
   assert.match(oidcSource, /concurrency:[\s\S]*group: oidc-external-homologation[\s\S]*cancel-in-progress: false/);
   assert.match(oidcSource, /homologate:[\s\S]*if: \$\{\{ github\.ref_name == github\.event\.repository\.default_branch && inputs\.mode == 'homologate' \}\}/);
   assert.match(oidcSource, /recovery:[\s\S]*needs: homologate[\s\S]*if: \$\{\{ always\(\) && github\.ref_name == github\.event\.repository\.default_branch \}\}/);
+  assert.match(oidcSource, /cleanup:[\s\S]*needs: \[homologate, recovery\][\s\S]*if: \$\{\{ always\(\) && github\.ref_name == github\.event\.repository\.default_branch \}\}/);
   assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*recuperação idempotente/);
-  assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 2);
+  assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 3);
   assert.match(oidcSource, /--grep/);
   assert.equal((oidcSource.match(/test:e2e:oidc --grep/g) ?? []).length, 3);
   assert.doesNotMatch(oidcSource, /test:e2e:oidc -- --grep/);
@@ -62,7 +63,7 @@ test("external Inbox fixture is isolated behind pinned SSH and always cleaned", 
   assert.equal((oidcSource.match(/UserKnownHostsFile=/g) ?? []).length, 3);
   assert.match(oidcSource, /Prepare isolated staging Inbox fixture[\s\S]*"prepare \$E2E_INBOX_FIXTURE_KEY"/);
   assert.match(oidcSource, /Verify isolated staging Inbox fixture[\s\S]*if: \$\{\{ always\(\) && inputs\.mode == 'homologate' \}\}[\s\S]*"verify \$E2E_INBOX_FIXTURE_KEY"/);
-  assert.match(oidcSource, /recovery:[\s\S]*actions\/checkout@[a-f0-9]{40}[\s\S]*Recover dedicated attendant account[\s\S]*Recover owned Inbox fixture and restore OFFLINE[\s\S]*Configure restricted staging fixture SSH for cleanup[\s\S]*Cleanup isolated staging Inbox fixture[\s\S]*"cleanup \$E2E_INBOX_FIXTURE_KEY"/);
+  assert.match(oidcSource, /recovery:[\s\S]*actions\/checkout@[a-f0-9]{40}[\s\S]*Recover dedicated attendant account[\s\S]*Recover owned Inbox fixture and restore OFFLINE[\s\S]*cleanup:[\s\S]*Configure restricted staging fixture SSH for cleanup[\s\S]*Cleanup isolated staging Inbox fixture[\s\S]*"cleanup \$E2E_INBOX_FIXTURE_KEY"/);
   assert.match(oidcSource, /Recover owned Inbox fixture and restore OFFLINE[\s\S]*inbox-recovery-oidc\.spec\.ts/);
   assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*inbound materializado permite claim e devolução segura à fila/);
   assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*E2E_FORBID_SKIPS: "true"/);
