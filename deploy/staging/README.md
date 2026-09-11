@@ -37,6 +37,11 @@ separada, provisiona o login restrito `zap_pronto_runtime`, inicia a API e publi
   `zap_pronto_worker_runtime`, separado da API e autorizado somente a assumir `zap_pronto_worker`. O provisionador valida que admin e
   runtime apontam ao mesmo banco, remove memberships e grants diretos residuais, recusa ownership/default
   privileges e confirma uma conexão real capaz de assumir somente `zap_pronto_api`.
+- O worker inicia um novo ciclo a cada 60 segundos e redescobre políticas de alerta habilitadas em tenants e unidades ativos.
+  A descoberta usa páginas keyset de até 100 alvos por uma função `SECURITY DEFINER` exclusiva do worker;
+  não exige lista estática de tenants/unidades e não amplia grants diretos sobre a tabela de políticas.
+  O heartbeat é atualizado após cada página descoberta; três ciclos consecutivos sem concluir o catálogo
+  encerram o processo com o código sanitizado `CAPACITY_ALERT_DISCOVERY_UNAVAILABLE` para reinício pelo Compose.
 - O password do owner contido na migration URL corresponde a `postgres_password`.
 - O manifesto base mantém webhook e envio Meta desabilitados e não exige secrets Meta. Para habilitar ambos,
   adicione `-f deploy/staging/compose.meta.yaml` a todos os comandos Compose e execute o preflight com `--meta`.

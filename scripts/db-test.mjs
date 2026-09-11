@@ -133,6 +133,7 @@ try {
       "0077_channel_connection_admin_command.sql",
       "0078_channel_connection_admin_null_validation.sql",
       "0079_initial_tenant_bootstrap.sql",
+      "0080_capacity_alert_dynamic_discovery.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
@@ -187,6 +188,9 @@ try {
     const capacityAlertTestClient=new pg.Client({connectionString:targetUrl.toString()});await capacityAlertTestClient.connect();
     try{await capacityAlertTestClient.query(await readFile(resolve("database/tests","0011_capacity_alert.sql"),"utf8"));}
     finally{await capacityAlertTestClient.end();}
+    const capacityAlertDiscoveryTestClient=new pg.Client({connectionString:targetUrl.toString()});await capacityAlertDiscoveryTestClient.connect();
+    try{await capacityAlertDiscoveryTestClient.query(await readFile(resolve("database/tests","0013_capacity_alert_discovery.sql"),"utf8"));}
+    finally{await capacityAlertDiscoveryTestClient.end();}
 
     const assignmentRaceTenant="99100000-0000-4000-8000-000000000001",assignmentRaceUnit="99100000-0000-4000-8000-000000000002",
       assignmentRaceManager="99100000-0000-4000-8000-000000000003";

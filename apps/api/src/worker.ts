@@ -1,4 +1,5 @@
 import pg from "pg";
+import { writeFile } from "node:fs/promises";
 import { runInboundWorker } from "./worker/inbound-runner.js";
 import { runOutboundWorker,type OutboundTransport } from "./worker/outbound-runner.js";
 import { createFileSecretResolver, createMetaWhatsAppTransport, loadMetaWhatsAppTransportConfig } from "./worker/meta-whatsapp-transport.js";
@@ -16,8 +17,13 @@ function stop(){if(!stopped){stopped=true;controller.abort();}}
 process.once("SIGTERM",stop);process.once("SIGINT",stop);
 let timer:NodeJS.Timeout|undefined;
 try{
-  const workers:Promise<void>[]=[runInboundWorker(pool,config,controller.signal)];
-  if(config.capacityAlertTargets.length)workers.push(runCapacityAlertWorker(pool,{pollIntervalMs:config.pollIntervalMs,targets:config.capacityAlertTargets},controller.signal));
+  const workers:Promise<void>[]= [
+    runInboundWorker(pool,config,controller.signal),
+    runCapacityAlertWorker(pool,{pollIntervalMs:config.capacityAlertPollIntervalMs,
+      pageSize:config.capacityAlertDiscoveryPageSize,
+      maxConsecutiveDiscoveryFailures:config.capacityAlertDiscoveryFailureThreshold,
+      markDiscoveryHealthy:()=>writeFile("/tmp/zap-pronto-capacity-alert.healthy","",{mode:0o600})},controller.signal),
+  ];
   if(outboundTransport)workers.push(runOutboundWorker(pool,config,outboundTransport,controller.signal));
   await Promise.race([Promise.all(workers).then(()=>undefined),new Promise<never>((_,reject)=>{
     if(!controller.signal.aborted)controller.signal.addEventListener("abort",()=>{

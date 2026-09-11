@@ -19,11 +19,12 @@ test("staging smoke scripts provision the isolated worker credential", () => {
   }
 });
 
-test("staging worker exposes a process liveness healthcheck for compose wait", () => {
+test("staging worker healthcheck requires a recent successful capacity discovery", () => {
   const source = readFileSync(new URL("../deploy/staging/compose.yaml", import.meta.url), "utf8");
   const worker = source.match(/\r?\n  worker:\r?\n([\s\S]*?)\r?\n  web:/)?.[1];
   assert.ok(worker, "worker service must exist");
-  assert.match(worker, /healthcheck:\s*\n\s+test: \["CMD", "node", "-e", "process\.kill\(1, 0\)"\]/);
+  assert.match(worker, /healthcheck:\s*\n\s+test: \["CMD", "node", "-e", ".*zap-pronto-capacity-alert\.healthy.*"\]/);
+  assert.match(worker, /CAPACITY_ALERT_DISCOVERY_FAILURE_THRESHOLD: "3"/);
   assert.doesNotMatch(worker, /healthcheck:\s*\n\s+disable: true/);
 });
 const hardened = (cpus,memory,networks,secrets,depends_on={}) => ({deploy:{resources:{limits:{cpus,memory}}},

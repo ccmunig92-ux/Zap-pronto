@@ -10,9 +10,10 @@ Este cronograma é orientado por gates. Datas não autorizam avançar com crité
 - Fase atual: **Fase 4 — inbox multiusuário e produtividade**. O checkpoint `0064` foi integrado à
   `main` pela PR #10; as migrations `0065`, `0066` e `0067` também foram integradas à `main` pela
   PR #15, com CI pós-merge `32429870452` verde.
-- O estado canônico atual inclui também as migrations `0068`–`0079`: administração de conexões de
+- O candidato local inclui também as migrations `0068`–`0080`: administração de conexões de
   canal, claim outbound com referência opaca de segredo, janela/template Meta, episódios de capacidade,
-  stream SSE da Inbox, comando administrativo idempotente e validação SQL explícita de nulos. Esses incrementos permanecem no mesmo
+  stream SSE da Inbox, comando administrativo idempotente, validação SQL explícita de nulos e descoberta
+  paginada de políticas de capacidade pelo worker. Esses incrementos permanecem no mesmo
   monólito e não autorizam transporte Meta real, Hermes ou deploy.
 - PostgreSQL real: aprovado localmente em PostgreSQL 18.3.
 - Migration do zero: aprovada.
@@ -268,7 +269,7 @@ Entregas:
 - inbox em tempo real e composer humano;
 - SLA de espera e primeira resposta;
 - turnos, presença, pausas e capacidade;
-- alertas configuráveis de baixa produtividade.
+- alertas agregados configuráveis de demanda sustentada e capacidade operacional.
 
 O alerta só pode disparar quando há atendente em turno, demanda disponível, limiar violado por uma janela sustentada e cooldown encerrado. O sistema registra alerta, destinatário, reconhecimento, justificativa e escalonamento.
 
@@ -282,8 +283,8 @@ Critérios de aceite:
 
 ### Primeiro corte vertical da Fase 4 — inbox humana mínima
 
-Este corte permanece **bloqueado pelo gate final da Fase 3** e não deve registrar rotas antes da prova
-OIDC externa descrita acima. Quando liberado, deve reutilizar exclusivamente `human_handoffs`,
+O gate OIDC externo da Fase 3 foi encerrado pela evidência registrada acima. Este corte reutiliza
+exclusivamente `human_handoffs`,
 `conversations`, `service_cases`, `workflow_transitions`, outbox, RLS, `protectedRoute` e o cliente
 OpenAPI existentes.
 

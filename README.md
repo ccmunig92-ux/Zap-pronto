@@ -16,7 +16,7 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-A `main` contém uma Inbox validada até a migration `0079`. O conjunto integrado inclui:
+O candidato local contém uma Inbox validada até a migration `0080`. O conjunto inclui:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
 - fila multiatendente, claim, devolução, transferência, takeover, encerramento, histórico e reabertura por novo episódio;
@@ -34,8 +34,10 @@ A `main` contém uma Inbox validada até a migration `0079`. O conjunto integrad
   sem push, WebSocket, endpoint ou persistência paralelos.
 - alerta agregado opt-in de demanda sustentada quando há capacidade operacional, configurado no
   módulo de SLA e lido no refresh canônico da Inbox, sem ranking individual nem envio externo.
+- descoberta dinâmica e paginada das políticas de alerta habilitadas, isolada por tenant e exclusiva
+  do worker, sem lista estática de unidades nem acesso direto às tabelas protegidas.
 
-As migrations `0068`–`0079` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
+As migrations `0068`–`0080` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
 aplicação ou um contrato paralelo.
 
 Esse estado foi validado no overlay OIDC local e em staging HTTPS. A homologação OIDC externa da `main`

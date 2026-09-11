@@ -154,6 +154,9 @@ services:
       INBOUND_WORKER_LEASE_SECONDS: "60"
       INBOUND_WORKER_POLL_INTERVAL_MS: "1000"
       INBOUND_WORKER_SHUTDOWN_TIMEOUT_MS: "10000"
+      CAPACITY_ALERT_POLL_INTERVAL_MS: "60000"
+      CAPACITY_ALERT_DISCOVERY_PAGE_SIZE: "100"
+      CAPACITY_ALERT_DISCOVERY_FAILURE_THRESHOLD: "3"
       OUTBOUND_WORKER_ENABLED: "false"
     secrets:
       - database_worker_url
@@ -163,11 +166,11 @@ services:
       provision-runtime:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "node", "-e", "process.kill(1, 0)"]
+      test: ["CMD", "node", "-e", "const fs=require('node:fs');process.kill(1,0);if(Date.now()-fs.statSync('/tmp/zap-pronto-capacity-alert.healthy').mtimeMs>180000)process.exit(1)"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 10s
+      start_period: 30s
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
