@@ -70,6 +70,19 @@ test("hashes acompanham automaticamente uma nova migration contígua", () => {
   } finally { rmSync(directory,{recursive:true,force:true}); }
 });
 
+test("hashes de migrations não dependem de LF ou CRLF", () => {
+  const lf = mkdtempSync(join(tmpdir(), "zap-pronto-migrations-lf-"));
+  const crlf = mkdtempSync(join(tmpdir(), "zap-pronto-migrations-crlf-"));
+  try {
+    writeFileSync(join(lf, "0001_first.sql"), "SELECT 1;\nSELECT 2;\n");
+    writeFileSync(join(crlf, "0001_first.sql"), "SELECT 1;\r\nSELECT 2;\r\n");
+    assert.deepEqual(migrationHashes(lf), migrationHashes(crlf));
+  } finally {
+    rmSync(lf, { recursive: true, force: true });
+    rmSync(crlf, { recursive: true, force: true });
+  }
+});
+
 test("hashes rejeitam gap e prefixo duplicado", () => {
   const gap=mkdtempSync(join(tmpdir(),"zap-pronto-migrations-gap-"));
   const duplicate=mkdtempSync(join(tmpdir(),"zap-pronto-migrations-duplicate-"));

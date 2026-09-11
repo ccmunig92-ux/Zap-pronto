@@ -63,11 +63,11 @@ try {
       "0003_actor_context_authorization.sql",
       "0004_component_roles.sql",
     ]) {
-      const sql = await readFile(resolve("database/migrations", filename), "utf8");
+      const sql = (await readFile(resolve("database/migrations", filename), "utf8")).replace(/\r\n?/gu, "\n");
       await target.query(sql);
       await target.query(
         "INSERT INTO schema_migrations (filename, checksum_sha256) VALUES ($1, $2)",
-        [filename, createHash("sha256").update(sql).digest("hex")],
+        [filename, createHash("sha256").update(sql.replace(/\n/gu, "\r\n")).digest("hex")],
       );
     }
 
@@ -117,6 +117,8 @@ try {
   }
 
   const firstRun = await runMigrator();
+  assert.match(firstRun, /normalized checksum 0001_core\.sql/);
+  assert.match(firstRun, /normalized checksum 0004_component_roles\.sql/);
   assert.match(firstRun, /applied 0005_workflow_foundation\.sql/);
   assert.match(firstRun, /applied 0008_medical_orders\.sql/);
   assert.match(firstRun, /applied 0010_identity_rbac\.sql/);
@@ -179,8 +181,12 @@ try {
   const verify = new pg.Client({ connectionString: targetUrl.toString() });
   await verify.connect();
   try {
-    const migrations = await verify.query("SELECT filename FROM schema_migrations ORDER BY filename");
+    const migrations = await verify.query("SELECT filename, checksum_sha256 FROM schema_migrations ORDER BY filename");
     assert.deepEqual(migrations.rows.map((row) => row.filename), migrationFiles);
+    for (const row of migrations.rows.slice(0, 4)) {
+      const sql = (await readFile(resolve("database/migrations", row.filename), "utf8")).replace(/\r\n?/gu, "\n");
+      assert.equal(row.checksum_sha256.trim(), createHash("sha256").update(sql).digest("hex"));
+    }
     const assignmentPolicyUpgrade=await verify.query(`SELECT
       (SELECT count(*)::integer FROM unit_assignment_policies) policy_count,
       (SELECT count(*)::integer FROM units) unit_count,
