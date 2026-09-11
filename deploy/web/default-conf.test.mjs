@@ -12,6 +12,14 @@ function location(path) {
   return configuration.slice(start, next === -1 ? configuration.length : next);
 }
 
+function prefixLocation(path) {
+  const marker = `location ${path} {`;
+  const start = configuration.indexOf(marker);
+  assert.notEqual(start, -1, `${path} must have a prefix location`);
+  const next = configuration.indexOf("\n  location ", start + marker.length);
+  return configuration.slice(start, next === -1 ? configuration.length : next);
+}
+
 test("expõe somente o liveness da API sem cair no fallback SPA", () => {
   const live = location("/health/live");
   assert.match(live, /proxy_pass \$zap_health_live_upstream;/);
@@ -30,4 +38,7 @@ test("não registra segredos da query e renova DNS da API", () => {
   assert.match(configuration, /resolver 127\.0\.0\.11 valid=5s ipv6=off;/);
   assert.match(configuration, /set \$zap_api_upstream "\$\{API_UPSTREAM\}";/);
   assert.match(configuration, /proxy_pass \$zap_api_upstream;/);
+
+  const api = prefixLocation("/v1/");
+  assert.match(api, /Cache-Control "no-store" always;/);
 });
