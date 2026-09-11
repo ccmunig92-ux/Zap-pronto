@@ -8,7 +8,7 @@ const MAX_CONFIG_BYTES = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const RUN_KEY = /^[0-9]{1,20}-[1-9][0-9]{0,5}$/;
 const ACTIONS = new Set(["prepare", "verify", "cleanup"]);
-const CONFIG_KEYS = Object.freeze(["tenantId", "unitId"]);
+const CONFIG_KEYS = Object.freeze(["tenantId", "unitId", "attendantUserId"]);
 const LOCK_NAMESPACE = "zap-pronto:staging-inbox-e2e";
 
 function requiredUuid(value, name) {
@@ -24,8 +24,9 @@ export function validateFixtureConfig(input) {
   }
   const tenantId = requiredUuid(input.tenantId, "TENANT_ID");
   const unitId = requiredUuid(input.unitId, "UNIT_ID");
-  if (tenantId === unitId) throw new Error("FIXTURE_IDS_NOT_DISTINCT");
-  return Object.freeze({ tenantId, unitId });
+  const attendantUserId = requiredUuid(input.attendantUserId, "ATTENDANT_USER_ID");
+  if (new Set([tenantId, unitId, attendantUserId]).size !== 3) throw new Error("FIXTURE_IDS_NOT_DISTINCT");
+  return Object.freeze({ tenantId, unitId, attendantUserId });
 }
 
 export function validateRunKey(value) {
@@ -109,6 +110,29 @@ async function assertTarget(client, config) {
   }
 }
 
+async function assertAttendantReady(client, config, fixture) {
+  const readiness = await client.query(`SELECT
+    EXISTS(SELECT 1 FROM users account WHERE account.tenant_id=$1 AND account.id=$3
+      AND account.status='ACTIVE') actor_active,
+    EXISTS(SELECT 1 FROM user_units membership WHERE membership.tenant_id=$1 AND membership.unit_id=$2
+      AND membership.user_id=$3 AND membership.role='ATTENDANT' AND membership.status='ACTIVE') membership_active,
+    EXISTS(SELECT 1 FROM unit_assignment_policies policy WHERE policy.tenant_id=$1 AND policy.unit_id=$2
+      AND policy.mode='OBSERVE') policy_observe,
+    EXISTS(SELECT 1 FROM attendant_unit_availability availability
+      WHERE availability.tenant_id=$1 AND availability.unit_id=$2 AND availability.user_id=$3
+        AND availability.status='OFFLINE' AND
+          (SELECT count(*) FROM human_handoffs active WHERE active.tenant_id=$1 AND active.unit_id=$2
+            AND active.assigned_user_id=$3 AND active.status='ACTIVE' AND active.id<>$4)<availability.max_active) capacity_available,
+    NOT EXISTS(SELECT 1 FROM human_handoffs active WHERE active.tenant_id=$1 AND active.assigned_user_id=$3
+      AND active.status='ACTIVE' AND active.id<>$4) no_active_work`,
+  [config.tenantId, config.unitId, config.attendantUserId, fixture.handoffId]);
+  const row = readiness.rows[0];
+  if (readiness.rowCount !== 1 || row?.actor_active !== true || row.membership_active !== true
+    || row.policy_observe !== true || row.capacity_available !== true || row.no_active_work !== true) {
+    throw new Error("FIXTURE_ATTENDANT_NOT_READY");
+  }
+}
+
 async function deleteFixtureRows(client, config, fixture) {
   const handoff = [config.tenantId, fixture.handoffId];
   const aggregateIds = [config.tenantId, fixture.handoffId, fixture.serviceCaseId, fixture.conversationId];
@@ -158,6 +182,7 @@ async function deleteFixtureRows(client, config, fixture) {
 export async function prepareFixture(client, config, fixture) {
   await assertTarget(client, config);
   await deleteFixtureRows(client, config, fixture);
+  await assertAttendantReady(client, config, fixture);
   await client.query(`INSERT INTO channel_connections
     (id,tenant_id,type,scope,external_account_id,status,secret_reference,display_name)
     VALUES($2,$1,'WHATSAPP','CORPORATE',$3,'DISCONNECTED',NULL,$4)`,
@@ -200,19 +225,22 @@ export async function verifyFixture(client, config, fixture, journeyCompleted = 
     (SELECT version FROM conversations WHERE tenant_id=$1 AND id=$5) conversation_version,
     (SELECT version FROM service_cases WHERE tenant_id=$1 AND id=$6) service_case_version,
     (SELECT version FROM human_handoffs WHERE tenant_id=$1 AND id=$7) handoff_version,
+    (SELECT status::text FROM attendant_unit_availability WHERE tenant_id=$1 AND unit_id=$2
+      AND user_id=$10) attendant_availability_status,
     (SELECT count(*)::int FROM messages WHERE tenant_id=$1 AND conversation_id=$5 AND direction='INBOUND'
       AND actor='CUSTOMER' AND id=$8 AND body=$9) inbound_count,
     (SELECT count(*)::int FROM messages WHERE tenant_id=$1 AND conversation_id=$5 AND direction='OUTBOUND') outbound_count,
     (SELECT count(*)::int FROM messages WHERE tenant_id=$1 AND conversation_id=$5 AND actor='HERMES') hermes_count,
-    (SELECT count(*)::int FROM handoff_claim_commands WHERE tenant_id=$1 AND handoff_id=$7
+    (SELECT count(*)::int FROM handoff_claim_commands WHERE tenant_id=$1 AND handoff_id=$7 AND actor_id=$10
       AND conversation_id=$5 AND service_case_id=$6 AND expected_version=1 AND result_version=2
-      AND result_assigned_user_id=actor_id AND result_automation_status='HUMAN_ACTIVE') claim_count,
-    (SELECT count(*)::int FROM handoff_requeue_commands WHERE tenant_id=$1 AND handoff_id=$7
+      AND result_assigned_user_id=$10 AND result_automation_status='HUMAN_ACTIVE') claim_count,
+    (SELECT count(*)::int FROM handoff_requeue_commands WHERE tenant_id=$1 AND handoff_id=$7 AND actor_id=$10
       AND conversation_id=$5 AND service_case_id=$6 AND expected_version=2 AND result_handoff_version=3
       AND result_conversation_version=3 AND result_service_case_version=3) requeue_count,
     (SELECT count(*)::int FROM handoff_claim_commands claimed JOIN handoff_requeue_commands requeued
       ON requeued.tenant_id=claimed.tenant_id AND requeued.handoff_id=claimed.handoff_id
-      AND requeued.actor_id=claimed.actor_id WHERE claimed.tenant_id=$1 AND claimed.handoff_id=$7) same_actor_journey_count,
+      AND requeued.actor_id=claimed.actor_id WHERE claimed.tenant_id=$1 AND claimed.handoff_id=$7
+        AND claimed.actor_id=$10) same_actor_journey_count,
     (SELECT count(*)::int FROM meta_delivery_status_receipts WHERE tenant_id=$1 AND channel_connection_id=$3) meta_receipt_count,
     (SELECT count(*)::int FROM inbound_channel_events WHERE tenant_id=$1 AND channel_connection_id=$3) meta_inbound_event_count,
     (SELECT count(*)::int FROM outbox_events event WHERE event.tenant_id=$1
@@ -225,7 +253,7 @@ export async function verifyFixture(client, config, fixture, journeyCompleted = 
         OR event.actor_type='HERMES')) forbidden_audit_count,
     EXISTS(SELECT 1 FROM channel_connection_units WHERE tenant_id=$1 AND channel_connection_id=$3 AND unit_id=$2) unit_linked`,
   [config.tenantId, config.unitId, fixture.connectionId, fixture.contactId, fixture.conversationId,
-    fixture.serviceCaseId, fixture.handoffId, fixture.messageId, fixture.messageBody]);
+    fixture.serviceCaseId, fixture.handoffId, fixture.messageId, fixture.messageBody, config.attendantUserId]);
   const row = result.rows[0];
   const expectedVersion = journeyCompleted ? 3 : 1;
   const expectedCommandCount = journeyCompleted ? 1 : 0;
@@ -236,6 +264,7 @@ export async function verifyFixture(client, config, fixture, journeyCompleted = 
     || row.service_case_status !== "WAITING_HUMAN" || row.handoff_status !== "QUEUED"
     || row.handoff_assignee !== null || row.conversation_version !== expectedVersion
     || row.service_case_version !== expectedVersion || row.handoff_version !== expectedVersion
+    || row.attendant_availability_status !== "OFFLINE"
     || row.inbound_count !== 1 || row.outbound_count !== 0 || row.hermes_count !== 0
     || row.claim_count !== expectedCommandCount || row.requeue_count !== expectedCommandCount
     || row.same_actor_journey_count !== expectedCommandCount
@@ -260,10 +289,8 @@ export async function cleanupFixture(client, config, fixture) {
   return fixtureResult(config, fixture);
 }
 
-function fixtureResult(config, fixture) {
-  return Object.freeze({ runKey: fixture.runKey, tenantId: config.tenantId, unitId: config.unitId,
-    connectionId: fixture.connectionId, contactId: fixture.contactId, conversationId: fixture.conversationId,
-    serviceCaseId: fixture.serviceCaseId, handoffId: fixture.handoffId });
+function fixtureResult() {
+  return Object.freeze({ status: "ok" });
 }
 
 export async function runFixtureAction(action, runKey, inputs, Client = pg.Client) {

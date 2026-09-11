@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response as PlaywrightResponse } from "@playwright/test";
 
 const enabled = process.env.E2E_OIDC_ENABLED === "true";
 const requireRenewal = process.env.E2E_REQUIRE_RENEWAL === "true";
@@ -12,6 +12,39 @@ const testTimeoutMs = Number(optional("E2E_OIDC_TEST_TIMEOUT_MS") ?? 90_000);
 const usernameSelector = optional("E2E_OIDC_USERNAME_SELECTOR") ?? 'input[name="username"]';
 const passwordSelector = optional("E2E_OIDC_PASSWORD_SELECTOR") ?? 'input[name="password"]';
 const submitSelector = optional("E2E_OIDC_SUBMIT_SELECTOR") ?? 'button[type="submit"]';
+
+type SafeAvailabilitySnapshot = Readonly<{ status:"AVAILABLE"|"PAUSED"|"OFFLINE"; maxActive:number; activeCount:number }>;
+type SafeClaimDiagnostic = Readonly<{ status:number; reason:"success"|"outside_shift"|"availability_not_available"|"capacity_exhausted"|"handoff_conflict"|"unexpected_http_status" }>;
+
+async function safeAvailabilitySnapshot(response:PlaywrightResponse):Promise<SafeAvailabilitySnapshot|null>{
+  if(response.status()!==200)return null;try{const body:unknown=await response.json();if(!body||typeof body!=="object")return null;
+    const value=body as Record<string,unknown>;if(!["AVAILABLE","PAUSED","OFFLINE"].includes(String(value.status))
+      ||!Number.isSafeInteger(value.maxActive)||!Number.isSafeInteger(value.activeCount))return null;
+    return{status:value.status as SafeAvailabilitySnapshot["status"],maxActive:value.maxActive as number,activeCount:value.activeCount as number};
+  }catch{return null}
+}
+
+async function safeClaimDiagnostic(response:PlaywrightResponse,availability:SafeAvailabilitySnapshot|null):Promise<SafeClaimDiagnostic>{
+  const status=response.status();if(status===200)return{status,reason:"success"};if(status!==409)return{status,reason:"unexpected_http_status"};
+  let detail="";try{const body:unknown=await response.json();if(body&&typeof body==="object"&&"detail" in body){const candidate=(body as{detail?:unknown}).detail;
+    if(candidate==="ASSIGNMENT_OUTSIDE_SHIFT"||candidate==="HANDOFF_CONFLICT")detail=candidate}}catch{detail=""}
+  if(detail==="ASSIGNMENT_OUTSIDE_SHIFT")return{status,reason:"outside_shift"};
+  if(detail==="HANDOFF_CONFLICT"&&availability?.status!==undefined&&availability.status!=="AVAILABLE")return{status,reason:"availability_not_available"};
+  if(detail==="HANDOFF_CONFLICT"&&availability?.status==="AVAILABLE"&&availability.activeCount>=availability.maxActive)return{status,reason:"capacity_exhausted"};
+  return{status,reason:"handoff_conflict"};
+}
+
+async function changeOwnAvailability(page:Page,targetStatus:"AVAILABLE"|"OFFLINE"):Promise<SafeAvailabilitySnapshot>{
+  await page.getByRole("button",{name:"Alterar disponibilidade"}).click();await page.getByLabel("Status da disponibilidade").selectOption(targetStatus);
+  const changed=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname==="/v1/inbox/availability");
+  await page.getByRole("button",{name:"Confirmar alteração"}).click();const response=await changed;const snapshot=await safeAvailabilitySnapshot(response);
+  expect({status:response.status(),appliedStatus:snapshot?.status??"INVALID"}).toEqual({status:200,appliedStatus:targetStatus});
+  await expect(page.getByText(targetStatus==="AVAILABLE"?/Status:\s*Disponível/u:/Status:\s*Offline/u)).toBeVisible();return snapshot!;
+}
+
+async function restoreOwnAvailabilityOffline(page:Page):Promise<void>{
+  if(await page.getByText(/Status:\s*Offline/u).isVisible())return;await changeOwnAvailability(page,"OFFLINE");
+}
 
 if (enabled) {
   if (!localMode && !externalMode) throw new Error("E2E_OIDC_TARGET_LOCAL_OR_EXTERNAL_REQUIRED");
@@ -452,16 +485,27 @@ test.describe("shell OIDC real", () => {
     const mutations:string[]=[];const crossOriginRequests:string[]=[];const forbiddenOutbound:string[]=[];page.on("request",request=>{const url=new URL(request.url());
       if(url.origin!==baseOrigin)crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);if(/(?:meta|facebook|whatsapp|hermes)/iu.test(url.href)||url.pathname==="/v1/webhooks/meta"||(request.method()==="POST"&&url.pathname.endsWith("/messages")))forbiddenOutbound.push(`${request.method()} ${url.pathname}`);
       if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
-    await page.reload();await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();
-    await page.getByRole("button",{name:`${contactName} · NORMAL`}).click();await expect(page.getByText(inboundText)).toBeVisible();
-    await page.getByRole("button",{name:"Assumir atendimento"}).click();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();
-    await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);
-    await page.reload();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();await page.getByRole("button",{name:`${contactName} · Em atendimento`}).click();
-    await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Enviar"})).toBeVisible();
-    await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
-    await page.reload();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
-    expect(mutations).toHaveLength(2);const claim=mutations[0]?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/claim$/u);const requeue=mutations[1]?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/requeue$/u);
-    expect(claim?.[1]).toBeTruthy();expect(requeue?.[1]).toBe(claim?.[1]);expect(crossOriginRequests).toEqual([]);expect(forbiddenOutbound).toEqual([]);
+    const availabilityResponse=page.waitForResponse(response=>response.request().method()==="GET"&&new URL(response.url()).pathname==="/v1/inbox/availability");
+    await page.reload();const initialAvailability=await safeAvailabilitySnapshot(await availabilityResponse);
+    expect(initialAvailability).toMatchObject({status:"OFFLINE",activeCount:0});
+    await expect(page.getByRole("heading",{name:"Inbox"})).toBeVisible();let claimAvailability=initialAvailability!;
+    try{
+      claimAvailability=await changeOwnAvailability(page,"AVAILABLE");
+      await page.getByRole("button",{name:`${contactName} · NORMAL`}).click();await expect(page.getByText(inboundText)).toBeVisible();
+      const claimResponse=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname.endsWith("/claim"));
+      await page.getByRole("button",{name:"Assumir atendimento"}).click();expect(await safeClaimDiagnostic(await claimResponse,claimAvailability)).toEqual({status:200,reason:"success"});
+      await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();
+      await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();expect(mutations.filter(value=>value.endsWith("/claim"))).toHaveLength(1);
+      await page.reload();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toBeVisible();await page.getByRole("button",{name:`${contactName} · Em atendimento`}).click();
+      await expect(page.getByText("Estado: HUMAN_ACTIVE")).toBeVisible();await expect(page.getByRole("button",{name:"Enviar"})).toBeVisible();
+      await page.getByRole("button",{name:"Devolver à fila"}).click();await expect(page.getByText("Atendimento devolvido à fila.")).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();
+      await page.reload();await expect(page.getByRole("button",{name:`${contactName} · NORMAL`})).toBeVisible();await expect(page.getByRole("button",{name:`${contactName} · Em atendimento`})).toHaveCount(0);
+    }finally{await restoreOwnAvailabilityOffline(page)}
+    const claimMutation=mutations.find(value=>value.endsWith("/claim"))?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/claim$/u);
+    const requeue=mutations.find(value=>value.endsWith("/requeue"))?.match(/^POST (\/v1\/inbox\/handoffs\/[^/]+)\/requeue$/u);
+    expect(claimMutation?.[1]).toBeTruthy();expect(requeue?.[1]).toBe(claimMutation?.[1]);expect(mutations.filter(value=>value==="POST /v1/inbox/availability")).toHaveLength(2);
+    expect(mutations.filter(value=>!value.endsWith("/claim")&&!value.endsWith("/requeue")&&value!=="POST /v1/inbox/availability")).toEqual([]);
+    expect(crossOriginRequests).toEqual([]);expect(forbiddenOutbound).toEqual([]);
   });
 
   test("resposta humana TEXT fica QUEUED local e persiste sem Meta ou Hermes",async({page})=>{test.skip(!enabled,"Defina E2E_OIDC_ENABLED=true para homologar resposta local.");await login(page,account("ATTENDANT"));
@@ -737,5 +781,12 @@ test.describe("shell OIDC real", () => {
       "Defina E2E_REQUIRE_BLOCK_REVOCATION=true para recuperar a conta dedicada.");
     await login(page, account("ADMIN"));
     await reactivateAttendant(page, attendantAdministrativeEmail());
+  });
+
+  test("recuperação idempotente restaura disponibilidade OFFLINE",async({page})=>{
+    test.skip(!enabled||!externalMode,"A recuperação de disponibilidade executa somente na homologação externa.");await login(page,account("ATTENDANT"));
+    const mutations:string[]=[];page.on("request",request=>{const url=new URL(request.url());if(url.pathname.startsWith("/v1/")&&["POST","PATCH","PUT","DELETE"].includes(request.method()))mutations.push(`${request.method()} ${url.pathname}`)});
+    await restoreOwnAvailabilityOffline(page);await page.reload();await expect(page.getByText(/Status:\s*Offline/u)).toBeVisible();
+    expect(mutations.filter(value=>value!=="POST /v1/inbox/availability")).toEqual([]);expect(mutations.filter(value=>value==="POST /v1/inbox/availability").length).toBeLessThanOrEqual(1);
   });
 });
