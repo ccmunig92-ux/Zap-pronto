@@ -6,7 +6,7 @@
       "destination": "https://staging.clinicaprontomedic.online/v1/:path*"
     },
     {
-      "source": "/((?!v1(?:/|$)).*)",
+      "source": "/((?!v1(?:/|$)|health/(?:web|live|ready)(?:/|$)).*)",
       "destination": "/index.html"
     }
   ],
@@ -25,7 +25,7 @@
       ]
     },
     {
-      "source": "/((?!v1(?:/|$)).*)",
+      "source": "/((?!v1(?:/|$)|health/(?:web|live|ready)(?:/|$)).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
