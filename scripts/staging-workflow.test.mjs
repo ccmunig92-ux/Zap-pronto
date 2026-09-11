@@ -71,6 +71,8 @@ test("external Inbox fixture is isolated behind pinned SSH and always cleaned", 
   assert.match(oidcSpec, /recuperação idempotente restaura disponibilidade OFFLINE/);
   assert.match(oidcSpec, /if\(!isExpectedBrowserOrigin\(request\.url\(\),baseOrigin,oidcIssuer\)\)crossOriginRequests\.push/);
   assert.match(oidcSpec, /expect\(crossOriginRequests\)\.toEqual\(\[\]\)/);
+  assert.equal((externalInboxSource.match(/OIDC_ISSUER_VALID_HTTPS_REQUIRED/g) ?? []).length, 2);
+  assert.doesNotMatch(oidcSpec.slice(0, externalInboxStart), /OIDC_ISSUER_VALID_HTTPS_REQUIRED/);
   assert.match(oidcSpec, /expect\(requeue\?\.\[1\]\)\.toBe\(claimMutation\?\.\[1\]\)/);
   assert.match(oidcSpec, /expect\(forbiddenOutbound\)\.toEqual\(\[\]\)/);
   assert.match(safeDiagnosticSource, /ASSIGNMENT_OUTSIDE_SHIFT/);
