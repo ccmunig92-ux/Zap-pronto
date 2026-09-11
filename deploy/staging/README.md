@@ -100,6 +100,21 @@ Copie somente essas referências para o `.env` externo de staging; tags por SHA 
 O job permanece ignorado enquanto um administrador não definir `STAGING_RELEASE_ENABLED=true` no environment;
 essa variável só deve ser criada depois de configurar reviewer obrigatório e política restrita à `main`.
 
+## Homologação OIDC externa e recuperação da conta dedicada
+
+O workflow manual `OIDC external homologation` aceita os modos `homologate` e `recover-only`. Configure
+`E2E_ATTENDANT_ADMIN_LIST_MATCH` como o e-mail completo da conta de atendente dedicada; correspondência
+parcial, nome de exibição e identificador ambíguo são recusados. Essa conta não pode ser usada por uma
+pessoa ou integração operacional enquanto a homologação estiver habilitada.
+As execuções usam um grupo de concorrência único e nunca cancelam automaticamente a execução ativa, para
+que duas homologações não alterem simultaneamente a mesma conta.
+
+O modo completo reativa a conta de teste antes da mutação, bloqueia-a apenas para comprovar a invalidação
+da sessão e tenta reativá-la novamente em uma etapa `always`. Cancelamento forçado, perda do runner ou
+esgotamento do timeout ainda podem impedir a limpeza. Nesse caso, execute imediatamente o mesmo workflow
+em `recover-only`, aprove a execução no environment protegido e confirme o sucesso antes de reutilizar a
+conta ou iniciar outra homologação. Nunca recupere automaticamente uma conta operacional real.
+
 ## Critérios de aceite
 
 Antes de iniciar o stack base, execute `node scripts/staging-preflight.mjs /caminho/absoluto/staging.env`.

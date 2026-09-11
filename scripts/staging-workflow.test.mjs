@@ -23,9 +23,14 @@ test("public web build validates and forwards the API audience", () => {
 
 test("external OIDC uses the canonical harness in restricted external mode", () => {
   assert.match(oidcSource, /workflow_dispatch:/);
+  assert.match(oidcSource, /mode:[\s\S]*homologate[\s\S]*recover-only/);
   assert.match(oidcSource, /environment: oidc-homologation/);
   assert.match(oidcSource, /E2E_OIDC_TARGET: "external"/);
   assert.match(oidcSource, /E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED: "true"/);
+  assert.match(oidcSource, /concurrency:[\s\S]*group: oidc-external-homologation[\s\S]*cancel-in-progress: false/);
+  assert.match(oidcSource, /if: \$\{\{ always\(\) && github\.ref_name == github\.event\.repository\.default_branch \}\}/);
+  assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*recuperação idempotente/);
+  assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 1);
   assert.match(oidcSource, /--grep/);
   assert.doesNotMatch(oidcSource, /^  (?:pull_request|push):/m);
 });

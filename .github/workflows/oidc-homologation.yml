@@ -2,15 +2,28 @@ name: OIDC external homologation
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Homologar ou somente recuperar a conta dedicada
+        required: true
+        default: homologate
+        type: choice
+        options:
+          - homologate
+          - recover-only
 
 permissions:
   contents: read
 
+concurrency:
+  group: oidc-external-homologation
+  cancel-in-progress: false
+
 jobs:
   homologate:
-    if: github.ref_name == github.event.repository.default_branch
+    if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     environment: oidc-homologation
     env:
       OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
@@ -29,14 +42,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Validate canonical contracts and harnesses
+        if: ${{ inputs.mode == 'homologate' }}
         run: |
           pnpm typecheck:all
           pnpm test:all
       - name: Probe external OIDC discovery and signing keys
+        if: ${{ inputs.mode == 'homologate' }}
         run: pnpm --filter @zap-pronto/api oidc:probe
       - name: Install isolated browser runtime
         run: pnpm --filter @zap-pronto/web exec playwright install --with-deps chromium
       - name: Exercise real administrator and attendant browser journeys
+        if: ${{ inputs.mode == 'homologate' }}
+        timeout-minutes: 15
         env:
           E2E_OIDC_ENABLED: "true"
           E2E_OIDC_TARGET: "external"
@@ -59,3 +76,23 @@ jobs:
         run: >-
           pnpm --filter @zap-pronto/web test:e2e:oidc -- --grep
           "administrador autentica|atendente autentica|renovação mantém|bloqueio invalida"
+      - name: Recover dedicated attendant account
+        if: ${{ always() }}
+        timeout-minutes: 3
+        env:
+          E2E_OIDC_ENABLED: "true"
+          E2E_OIDC_TARGET: "external"
+          E2E_REQUIRE_BLOCK_REVOCATION: "true"
+          E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED: "true"
+          E2E_BASE_URL: ${{ vars.OIDC_E2E_WEB_URL }}
+          E2E_OIDC_TEST_TIMEOUT_MS: "120000"
+          E2E_OIDC_USERNAME_SELECTOR: ${{ vars.E2E_OIDC_USERNAME_SELECTOR }}
+          E2E_OIDC_PASSWORD_SELECTOR: ${{ vars.E2E_OIDC_PASSWORD_SELECTOR }}
+          E2E_OIDC_SUBMIT_SELECTOR: ${{ vars.E2E_OIDC_SUBMIT_SELECTOR }}
+          E2E_ADMIN_USERNAME: ${{ secrets.E2E_ADMIN_USERNAME }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          E2E_ADMIN_EXPECTED_TENANT: ${{ secrets.E2E_ADMIN_EXPECTED_TENANT }}
+          E2E_ATTENDANT_ADMIN_LIST_MATCH: ${{ secrets.E2E_ATTENDANT_ADMIN_LIST_MATCH }}
+        run: >-
+          pnpm --filter @zap-pronto/web test:e2e:oidc -- --grep
+          "recuperação idempotente"

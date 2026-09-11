@@ -103,21 +103,34 @@ async function oidcAccessTokenExpiration(page: Page): Promise<number> {
   });
 }
 
-async function userRow(page: Page, privateIdentifier: string) {
+function attendantAdministrativeEmail(): string {
+  const email = optional("E2E_ATTENDANT_ADMIN_LIST_MATCH")?.toLowerCase();
+  if (!email || /\s/.test(email) || !/^[^@]+@[^@]+$/.test(email)) {
+    throw new Error("E2E_ATTENDANT_ADMIN_LIST_MATCH_EXACT_EMAIL_REQUIRED");
+  }
+  return email;
+}
+
+async function userRow(page: Page, exactEmail: string) {
   const heading = page.getByRole("heading", { name: "Usuários" });
   await expect(heading).toBeVisible();
   const list = heading.locator("xpath=following-sibling::ul[1]");
-  const rows = list.locator("li");
+  const rows = list.locator(":scope > li");
   for (;;) {
-    const index = await rows.evaluateAll((elements, identifier) => elements.findIndex((element) =>
-      element.textContent?.includes(identifier)), privateIdentifier);
-    if (index >= 0) return rows.nth(index);
     const more = page.getByRole("button", { name: "Carregar mais usuários" });
-    if (await more.count() === 0) throw new Error("ATTENDANT_USER_ROW_NOT_FOUND");
+    if (await more.count() === 0) break;
     const previousCount = await rows.count();
     await more.click();
     await expect(rows).not.toHaveCount(previousCount);
   }
+  const indexes = await rows.evaluateAll((elements, expectedEmail) => elements.flatMap((element, index) => {
+    const identity = element.querySelector(":scope > div > small")?.textContent?.split(" · ", 1)[0]
+      ?.trim().toLowerCase();
+    return identity === expectedEmail ? [index] : [];
+  }), exactEmail.trim().toLowerCase());
+  if (indexes.length === 0) throw new Error("ATTENDANT_USER_ROW_NOT_FOUND");
+  if (indexes.length !== 1) throw new Error("ATTENDANT_USER_ROW_AMBIGUOUS");
+  return rows.nth(indexes[0]!);
 }
 
 async function reactivateAttendant(page: Page, privateIdentifier: string): Promise<void> {
@@ -134,12 +147,38 @@ async function reactivateAttendant(page: Page, privateIdentifier: string): Promi
   await expect(page.getByRole("heading", { name: "Administração de acesso" })).toBeVisible();
   const row = await userRow(page, privateIdentifier);
   const reactivate = row.getByRole("button", { name: "Reativar" });
-  if (await reactivate.count() === 0) return;
+  if (await reactivate.count() === 0) {
+    await expect(row.getByRole("button", { name: "Bloquear" }),
+      "A conta dedicada precisa estar ativa ou bloqueada, nunca revogada").toBeVisible();
+    return;
+  }
   await reactivate.click();
   await page.getByLabel("Motivo").fill("Limpeza obrigatória da homologação OIDC");
+  const response = page.waitForResponse((candidate) => candidate.request().method() === "POST"
+    && /\/v1\/users\/[^/]+\/lifecycle$/u.test(new URL(candidate.url()).pathname));
   await page.getByRole("button", { name: "Confirmar reativar" }).click();
+  expect((await response).status(), "A recuperação da conta dedicada precisa persistir").toBe(200);
   await expect((await userRow(page, privateIdentifier)).getByRole("button", { name: "Bloquear" })).toBeVisible();
 }
+
+test.describe("seleção administrativa exata", () => {
+  test("distingue e-mail completo de valores semelhantes", async ({ page }) => {
+    await page.setContent(`<section><h3>Usuários</h3><ul>
+      <li><div><strong>Similar</strong><small>attendant+copy@example.test · ACTIVE</small><ul><li>Centro</li></ul></div></li>
+      <li><div><strong>Exato</strong><small>Attendant@Example.Test · ACTIVE</small><ul><li>Centro</li></ul></div></li>
+    </ul></section>`);
+    await expect(await userRow(page, "attendant@example.test")).toContainText("Exato");
+  });
+
+  test("recusa ausência e duplicidade em vez de escolher uma conta arbitrária", async ({ page }) => {
+    await page.setContent(`<section><h3>Usuários</h3><ul>
+      <li><div><strong>Um</strong><small>attendant@example.test · ACTIVE</small></div></li>
+      <li><div><strong>Dois</strong><small>ATTENDANT@example.test · BLOCKED</small></div></li>
+    </ul></section>`);
+    await expect(userRow(page, "missing@example.test")).rejects.toThrow("ATTENDANT_USER_ROW_NOT_FOUND");
+    await expect(userRow(page, "attendant@example.test")).rejects.toThrow("ATTENDANT_USER_ROW_AMBIGUOUS");
+  });
+});
 
 test.describe("shell OIDC real", () => {
   test("administrador autentica, recebe /v1/me, vê RBAC e encerra a sessão", async ({ page }) => {
@@ -625,14 +664,15 @@ test.describe("shell OIDC real", () => {
       "Defina E2E_REQUIRE_BLOCK_REVOCATION=true para autorizar a mutação reversível da conta de teste.");
     const admin = account("ADMIN");
     const attendant = account("ATTENDANT");
-    const attendantListMatch = optional("E2E_ATTENDANT_ADMIN_LIST_MATCH") ?? attendant.username;
+    const attendantListMatch = attendantAdministrativeEmail();
     const adminContext = await browser.newContext();
     const attendantContext = await browser.newContext();
     const adminPage = await adminContext.newPage();
     const attendantPage = await attendantContext.newPage();
     let adminAuthenticated = false;
     try {
-      await login(adminPage, admin); adminAuthenticated = true; await openModule(adminPage, "Acessos");
+      await login(adminPage, admin); adminAuthenticated = true;
+      await reactivateAttendant(adminPage, attendantListMatch);
       await login(attendantPage, attendant);
       const row = await userRow(adminPage, attendantListMatch);
       await row.getByRole("button", { name: "Bloquear" }).click();
@@ -654,5 +694,12 @@ test.describe("shell OIDC real", () => {
         await adminContext.close();
       }
     }
+  });
+
+  test("recuperação idempotente reativa a conta dedicada da homologação", async ({ page }) => {
+    test.skip(!enabled || !requireBlockRevocation,
+      "Defina E2E_REQUIRE_BLOCK_REVOCATION=true para recuperar a conta dedicada.");
+    await login(page, account("ADMIN"));
+    await reactivateAttendant(page, attendantAdministrativeEmail());
   });
 });
