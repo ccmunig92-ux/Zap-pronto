@@ -161,9 +161,30 @@ command="/usr/local/sbin/zap-pronto-staging-inbox-e2e-controller",restrict ssh-e
 
 O controlador lê `SSH_ORIGINAL_COMMAND` e aceita exclusivamente `prepare CHAVE`, `verify CHAVE` ou
 `cleanup CHAVE`, em que `CHAVE` é `run_id-run_attempt`. Ele exige UID 0 e recusa shell, PTY, forwarding,
-comando adicional e chave malformada. O arquivo privado da fixture com tenant e unidade fica em
+comando adicional e chave malformada. O arquivo privado da fixture com tenant, unidade e a identidade da
+conta atendente dedicada fica em
 `/srv/zap-pronto/secrets/staging/inbox-e2e.json`, proprietário `root:root` e modo `0400`;
 esses identificadores não são enviados como argumentos nem cadastrados no GitHub.
+
+```json
+{
+  "tenantId": "UUID_DO_TENANT",
+  "unitId": "UUID_DA_UNIDADE",
+  "attendantUserId": "UUID_DA_CONTA_ATENDENTE_E2E"
+}
+```
+
+Os três UUIDs devem ser distintos. Antes de criar a fixture, o controlador exige que a conta esteja ativa,
+tenha exatamente o papel `ATTENDANT` e vínculo ativo na unidade, que a política da unidade esteja em
+`OBSERVE`, que a disponibilidade esteja no baseline `OFFLINE` com capacidade livre e que a conta não
+possua outro handoff ativo. A jornada autenticada promove `OFFLINE` para `AVAILABLE` antes do claim e a
+recuperação `always` restaura `OFFLINE`; `AVAILABLE` ou `PAUSED` no preflight são recusados para não
+encobrir estado residual de outra execução ou apagar uma pausa operacional. O
+controlador não corrige esses estados. Se qualquer precondição falhar, a execução termina
+com erro sanitizado, sem imprimir UUID, e-mail ou detalhe do banco. A verificação final exige que o claim e
+a devolução tenham sido executados exatamente por `attendantUserId` e que sua disponibilidade persistida
+já tenha retornado a `OFFLINE`. Como `verify` ocorre depois do `finally` do navegador e antes do cleanup da
+fixture, uma falha nessa restauração bloqueia a homologação sem remover antecipadamente sua evidência.
 
 Para o migrator administrativo rodar como UID 0 sem ampliar a leitura do secret canônico UID 1000, o
 controlador cria em `/run/zap-pronto-staging-inbox-e2e` uma cópia efêmera `root:root/0400` de
@@ -176,6 +197,12 @@ administrativo da VPS e execute o controlador com `cleanup <run_id>-<run_attempt
 Depois, rotacione a chave dedicada se houver suspeita de exposição. Uma execução só é aceita quando `verify`
 confirma exatamente uma mensagem `INBOUND/CUSTOMER`, nenhuma mensagem outbound, nenhuma ação Hermes/Meta e
 o handoff final `QUEUED` sem responsável.
+
+A conta atendente dedicada deve iniciar em `OFFLINE`, sem atendimentos ativos. A própria UI a coloca em
+`AVAILABLE` somente durante a jornada e retorna a `OFFLINE` no `finally`. Um job de recuperação separado,
+protegido pelo mesmo environment e executado com `needs: homologate` mais `always()`, limpa a fixture por SSH
+e repete as recuperações da conta e da disponibilidade de forma idempotente. Ele não altera disponibilidade
+diretamente no banco.
 
 ## Critérios de aceite
 

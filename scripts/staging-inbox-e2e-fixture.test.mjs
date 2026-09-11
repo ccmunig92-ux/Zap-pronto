@@ -11,6 +11,7 @@ import { deterministicUuid, fixtureFor, loadFixtureInputs, runFixtureAction, val
 const config = Object.freeze({
   tenantId: "10000000-0000-4000-8000-000000000001",
   unitId: "20000000-0000-4000-8000-000000000001",
+  attendantUserId: "30000000-0000-4000-8000-000000000001",
 });
 
 test("validates the external run key and derives stable, distinct UUID v4 identifiers", () => {
@@ -28,10 +29,12 @@ test("validates the external run key and derives stable, distinct UUID v4 identi
   assert.equal(fixture.messageBody, "Homologação externa Inbox 34569418102-1");
 });
 
-test("configuration permits only one existing tenant/unit pair", () => {
+test("configuration permits only one existing tenant/unit/dedicated-attendant tuple", () => {
   assert.deepEqual(validateFixtureConfig(config), config);
   assert.throws(() => validateFixtureConfig({ ...config, secret: "never" }), /KEYS_INVALID/);
   assert.throws(() => validateFixtureConfig({ ...config, unitId: config.tenantId }), /NOT_DISTINCT/);
+  assert.throws(() => validateFixtureConfig({ tenantId:config.tenantId, unitId:config.unitId }), /KEYS_INVALID/);
+  assert.throws(() => validateFixtureConfig({ ...config, attendantUserId:"not-a-uuid" }), /ATTENDANT_USER_ID_INVALID/);
 });
 
 test("private inputs require the owner database URL and never accept runtime credentials", async () => {
@@ -54,11 +57,14 @@ test("prepare is transactional, parameterized and verifies zero outbound or Herm
     async query(text, values) {
       calls.push([text, values]);
       if (text.includes("tenant_exists")) return { rowCount: 1, rows: [{ tenant_exists: true, unit_exists: true }] };
+      if (text.includes("actor_active")) return { rowCount:1, rows:[{ actor_active:true, membership_active:true,
+        policy_observe:true, capacity_available:true, no_active_work:true }] };
       if (text.includes("connection_type")) return { rowCount: 1, rows: [{ connection_type:"WHATSAPP",
         connection_scope:"CORPORATE", connection_status:"DISCONNECTED", secret_reference:null, unit_linked:true,
         contact_name:"E2E Inbox 34569418102-1", conversation_status:"OPEN", automation_status:"HUMAN_QUEUED",
         conversation_assignee:null, service_case_status:"WAITING_HUMAN", handoff_status:"QUEUED",
         handoff_assignee:null, conversation_version:1, service_case_version:1, handoff_version:1,
+        attendant_availability_status:"OFFLINE",
         inbound_count:1, outbound_count:0, hermes_count:0, claim_count:0, requeue_count:0,
         same_actor_journey_count:0, meta_receipt_count:0, meta_inbound_event_count:0,
         forbidden_outbox_count:0, forbidden_audit_count:0 }] };
@@ -69,7 +75,7 @@ test("prepare is transactional, parameterized and verifies zero outbound or Herm
   const result = await runFixtureAction("prepare", "34569418102-1", {
     databaseUrl:"postgresql://zap_pronto_owner:private@postgres/zap_pronto", config,
   }, FakeClient);
-  assert.equal(result.runKey, "34569418102-1");
+  assert.deepEqual(result, { status:"ok" });
   assert.equal(calls.some(([text]) => text === "BEGIN"), true);
   assert.equal(calls.some(([text]) => text === "COMMIT"), true);
   assert.equal(calls.some(([text]) => text.includes("pg_advisory_xact_lock")), true);
@@ -80,6 +86,10 @@ test("prepare is transactional, parameterized and verifies zero outbound or Herm
   assert.equal(calls.some(([text]) => text.includes("meta_delivery_status_receipts")), true);
   assert.equal(calls.some(([text]) => text.includes("forbidden_outbox_count")), true);
   assert.equal(calls.some(([text]) => text.includes("forbidden_audit_count")), true);
+  assert.equal(calls.some(([text]) => text.includes("membership.role='ATTENDANT'")), true);
+  assert.equal(calls.some(([text]) => text.includes("policy.mode='OBSERVE'")), true);
+  assert.equal(calls.some(([text]) => text.includes("availability.status='OFFLINE'")), true);
+  assert.equal(calls.some(([text]) => text.includes("no_active_work")), true);
   assert.equal(calls.some(([text]) => text.includes("34569418102-1")), false);
   assert.equal(calls.some(([text]) => /META|HERMES/.test(text) && text.startsWith("INSERT")), false);
   for (const [text, values] of calls.filter(([, values]) => values)) {
@@ -88,12 +98,29 @@ test("prepare is transactional, parameterized and verifies zero outbound or Herm
   }
 });
 
+test("prepare fails closed when the dedicated attendant is not operationally ready", async () => {
+  class UnreadyClient {
+    async connect() {}
+    async query(text) {
+      if (text.includes("tenant_exists")) return { rowCount:1, rows:[{ tenant_exists:true, unit_exists:true }] };
+      if (text.includes("actor_active")) return { rowCount:1, rows:[{ actor_active:true, membership_active:true,
+        policy_observe:true, capacity_available:false, no_active_work:true }] };
+      return { rowCount:0, rows:[] };
+    }
+    async end() {}
+  }
+  await assert.rejects(runFixtureAction("prepare", "34569418102-1", {
+    databaseUrl:"postgresql://zap_pronto_owner:private@postgres/zap_pronto", config,
+  }, UnreadyClient), /FIXTURE_ATTENDANT_NOT_READY/);
+});
+
 test("verify proves one claim and one requeue by the same actor and rejects a merely prepared fixture", async () => {
   const completed = { connection_type:"WHATSAPP", connection_scope:"CORPORATE", connection_status:"DISCONNECTED",
     secret_reference:null, unit_linked:true, contact_name:"E2E Inbox 34569418102-1", conversation_status:"OPEN",
     automation_status:"HUMAN_QUEUED", conversation_assignee:null, service_case_status:"WAITING_HUMAN",
     handoff_status:"QUEUED", handoff_assignee:null, conversation_version:3, service_case_version:3,
-    handoff_version:3, inbound_count:1, outbound_count:0, hermes_count:0, claim_count:1, requeue_count:1,
+    handoff_version:3, attendant_availability_status:"OFFLINE", inbound_count:1, outbound_count:0,
+    hermes_count:0, claim_count:1, requeue_count:1,
     same_actor_journey_count:1, meta_receipt_count:0, meta_inbound_event_count:0,
     forbidden_outbox_count:0, forbidden_audit_count:0 };
   class VerifyClient {
@@ -112,6 +139,17 @@ test("verify proves one claim and one requeue by the same actor and rejects a me
   await assert.rejects(runFixtureAction("verify", "34569418102-1", inputs, VerifyClient), /FIXTURE_STATE_INVALID/);
   VerifyClient.row = { ...completed, forbidden_outbox_count:1 };
   await assert.rejects(runFixtureAction("verify", "34569418102-1", inputs, VerifyClient), /FIXTURE_STATE_INVALID/);
+  VerifyClient.row = { ...completed, attendant_availability_status:"AVAILABLE" };
+  await assert.rejects(runFixtureAction("verify", "34569418102-1", inputs, VerifyClient), /FIXTURE_STATE_INVALID/);
+  const verifiedSql = [];
+  class SqlClient extends VerifyClient { async query(text, values) { verifiedSql.push([text, values]); return super.query(text); } }
+  VerifyClient.row = completed;
+  await runFixtureAction("verify", "34569418102-1", inputs, SqlClient);
+  const verification = verifiedSql.find(([text]) => text.includes("connection_type"));
+  assert.match(verification[0], /handoff_claim_commands[\s\S]*actor_id=\$10/);
+  assert.match(verification[0], /handoff_requeue_commands[\s\S]*actor_id=\$10/);
+  assert.match(verification[0], /attendant_unit_availability[\s\S]*user_id=\$10/);
+  assert.equal(verification[1][9], config.attendantUserId);
 });
 
 test("database failures roll back and the CLI never serializes inputs", async () => {

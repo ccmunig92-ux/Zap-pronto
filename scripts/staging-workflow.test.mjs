@@ -8,6 +8,9 @@ const oidcSpec = await readFile(new URL("../apps/web/e2e/shell-oidc.spec.ts", im
 const stagingReadme = await readFile(new URL("../deploy/staging/README.md", import.meta.url), "utf8");
 const apiDockerfile = await readFile(new URL("../Dockerfile.api", import.meta.url), "utf8");
 const webDockerfile = await readFile(new URL("../Dockerfile.web", import.meta.url), "utf8");
+const diagnosticStart = oidcSpec.indexOf("async function safeAvailabilitySnapshot");
+const diagnosticEnd = oidcSpec.indexOf("async function changeOwnAvailability", diagnosticStart);
+const safeDiagnosticSource = oidcSpec.slice(diagnosticStart, diagnosticEnd);
 
 test("publication is manual, default-branch-only and environment-scoped", () => {
   assert.match(source, /workflow_dispatch:/);
@@ -32,9 +35,10 @@ test("external OIDC uses the canonical harness in restricted external mode", () 
   assert.match(oidcSource, /E2E_OIDC_TARGET: "external"/);
   assert.match(oidcSource, /E2E_EXTERNAL_ACCOUNT_BLOCK_ALLOWED: "true"/);
   assert.match(oidcSource, /concurrency:[\s\S]*group: oidc-external-homologation[\s\S]*cancel-in-progress: false/);
-  assert.match(oidcSource, /if: \$\{\{ always\(\) && github\.ref_name == github\.event\.repository\.default_branch \}\}/);
+  assert.match(oidcSource, /homologate:[\s\S]*if: \$\{\{ github\.ref_name == github\.event\.repository\.default_branch && inputs\.mode == 'homologate' \}\}/);
+  assert.match(oidcSource, /recovery:[\s\S]*needs: homologate[\s\S]*if: \$\{\{ always\(\) && github\.ref_name == github\.event\.repository\.default_branch \}\}/);
   assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*recuperação idempotente/);
-  assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 1);
+  assert.equal((oidcSource.match(/environment: oidc-homologation/g) ?? []).length, 2);
   assert.match(oidcSource, /--grep/);
   assert.equal((oidcSource.match(/test:e2e:oidc --grep/g) ?? []).length, 3);
   assert.doesNotMatch(oidcSource, /test:e2e:oidc -- --grep/);
@@ -55,13 +59,25 @@ test("external Inbox fixture is isolated behind pinned SSH and always cleaned", 
   assert.equal((oidcSource.match(/UserKnownHostsFile=/g) ?? []).length, 3);
   assert.match(oidcSource, /Prepare isolated staging Inbox fixture[\s\S]*"prepare \$E2E_INBOX_FIXTURE_KEY"/);
   assert.match(oidcSource, /Verify isolated staging Inbox fixture[\s\S]*if: \$\{\{ always\(\) && inputs\.mode == 'homologate' \}\}[\s\S]*"verify \$E2E_INBOX_FIXTURE_KEY"/);
-  assert.match(oidcSource, /Cleanup isolated staging Inbox fixture[\s\S]*if: \$\{\{ always\(\) && inputs\.mode == 'homologate' \}\}[\s\S]*"cleanup \$E2E_INBOX_FIXTURE_KEY"/);
+  assert.match(oidcSource, /recovery:[\s\S]*Configure restricted staging fixture SSH for recovery[\s\S]*Cleanup isolated staging Inbox fixture[\s\S]*"cleanup \$E2E_INBOX_FIXTURE_KEY"[\s\S]*actions\/checkout@[a-f0-9]{40}[\s\S]*Recover dedicated attendant account/);
+  assert.match(oidcSource, /Cleanup isolated staging Inbox fixture[\s\S]*actions\/checkout@[a-f0-9]{40}[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*Install isolated recovery browser runtime[\s\S]*if: \$\{\{ always\(\) \}\}/);
   assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*inbound materializado permite claim e devolução segura à fila/);
   assert.match(oidcSource, /Exercise external Inbox claim reload and requeue[\s\S]*E2E_FORBID_SKIPS: "true"/);
+  assert.match(oidcSource, /Recover dedicated attendant account[\s\S]*E2E_ATTENDANT_USERNAME: \$\{\{ secrets\.E2E_ATTENDANT_USERNAME \}\}[\s\S]*"recuperação idempotente"/);
+  assert.match(oidcSpec, /recuperação idempotente restaura disponibilidade OFFLINE/);
   assert.match(oidcSpec, /if\(url\.origin!==baseOrigin\)crossOriginRequests\.push/);
   assert.match(oidcSpec, /expect\(crossOriginRequests\)\.toEqual\(\[\]\)/);
-  assert.match(oidcSpec, /expect\(requeue\?\.\[1\]\)\.toBe\(claim\?\.\[1\]\)/);
+  assert.match(oidcSpec, /expect\(requeue\?\.\[1\]\)\.toBe\(claimMutation\?\.\[1\]\)/);
   assert.match(oidcSpec, /expect\(forbiddenOutbound\)\.toEqual\(\[\]\)/);
+  assert.match(safeDiagnosticSource, /ASSIGNMENT_OUTSIDE_SHIFT/);
+  assert.match(safeDiagnosticSource, /availability_not_available/);
+  assert.match(safeDiagnosticSource, /capacity_exhausted/);
+  assert.match(safeDiagnosticSource, /unexpected_http_status/);
+  assert.match(oidcSpec, /changeOwnAvailability\(page:Page,targetStatus:"AVAILABLE"\|"OFFLINE"\)/);
+  assert.match(oidcSpec, /restoreOwnAvailabilityOffline/);
+  assert.match(oidcSpec, /expect\(initialAvailability\)\.toMatchObject\(\{status:"OFFLINE",activeCount:0\}\)/);
+  assert.match(oidcSpec, /mutations\.filter\(value=>value==="POST \/v1\/inbox\/availability"\)\)\.toHaveLength\(2\)/);
+  assert.doesNotMatch(safeDiagnosticSource, /console\.|\.text\(\)|correlationId|headers\(\)|url\(\)/);
   assert.doesNotMatch(oidcSource, /DATABASE_(?:URL|ADMIN_URL)/);
   assert.doesNotMatch(oidcSource, /sshpass|PreferredAuthentications=password|StrictHostKeyChecking=no/);
   assert.match(stagingReadme, /command="\/usr\/local\/sbin\/zap-pronto-staging-inbox-e2e-controller",restrict/);
