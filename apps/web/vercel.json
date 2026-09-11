@@ -2,8 +2,27 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/v1/:path*",
+      "destination": "https://staging.clinicaprontomedic.online/v1/:path*"
+    },
+    {
       "source": "/((?!v1(?:/|$)).*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/v1/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ]
 }
