@@ -16,7 +16,7 @@ Plataforma SaaS omnichannel, multiempresa, multiunidade e multiusuário para ate
 
 ## Estado atual
 
-O candidato local contém uma Inbox validada até a migration `0078`; esse checkpoint ainda não está
+O candidato local contém uma Inbox validada até a migration `0079`; esse checkpoint ainda não está
 integrado à `main`. O conjunto candidato inclui:
 
 - autenticação OIDC, RBAC e isolamento por tenant e unidade;
@@ -36,7 +36,7 @@ integrado à `main`. O conjunto candidato inclui:
 - alerta agregado opt-in de demanda sustentada quando há capacidade operacional, configurado no
   módulo de SLA e lido no refresh canônico da Inbox, sem ranking individual nem envio externo.
 
-As migrations `0068`–`0078` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
+As migrations `0068`–`0079` são incrementos canônicos desse mesmo fluxo; não representam uma segunda
 aplicação ou um contrato paralelo.
 
 Esse estado foi validado no overlay OIDC local. Ele **não** comprova staging ou produção, não conecta

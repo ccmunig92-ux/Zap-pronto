@@ -132,10 +132,13 @@ try {
       "0076_inbox_realtime_notifications.sql",
       "0077_channel_connection_admin_command.sql",
       "0078_channel_connection_admin_null_validation.sql",
+      "0079_initial_tenant_bootstrap.sql",
     ]) {
       const migration = await readFile(resolve("database/migrations", filename), "utf8");
       await target.query(migration);
     }
+
+    await target.query(await readFile(resolve("database/tests", "0012_initial_tenant_bootstrap.sql"), "utf8"));
 
     for (const filename of ["0001_rls.sql", "0002_integrity.sql"]) {
       const testSql = await readFile(resolve("database/tests", filename), "utf8");
@@ -469,6 +472,7 @@ try {
     globalHiddenTables.push("unit_capacity_alert_policy_versions","unit_capacity_alert_policy_commands");
     globalHiddenTables.push("unit_capacity_alert_episodes","unit_capacity_alert_episode_recipients","unit_capacity_alert_episode_commands");
     globalHiddenTables.push("channel_connection_metadata_commands");
+    globalHiddenTables.push("initial_tenant_bootstrap_commands");
     const allProtectedTables = [...catalogTables, ...protectedTables, ...globalHiddenTables].sort();
     const rlsCatalog = await target.query(`
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -564,6 +568,7 @@ try {
       "unit_capacity_alert_policy_versions", "unit_capacity_alert_policy_commands",
       "unit_capacity_alert_episodes", "unit_capacity_alert_episode_recipients", "unit_capacity_alert_episode_commands",
       "channel_connection_metadata_commands",
+      "initial_tenant_bootstrap_commands",
     ]);
     const workerReadable = new Set([
       "tenants", "units", "channel_connections", "channel_connection_units",

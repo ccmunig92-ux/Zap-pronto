@@ -2,14 +2,14 @@
 
 Este checklist transforma o estado validado no checkout canônico em uma evidência local reproduzível.
 Ele não substitui o cronograma e não autoriza deploy. O checkout canônico atual contém o checkpoint
-`0078`; a PR #15 e o CI pós-merge `32429870452` documentam apenas o corte anterior. Isso não homologa
+`0079`; a PR #15 e o CI pós-merge `32429870452` documentam apenas o corte anterior. Isso não homologa
 Meta, Hermes, IdP externo ou produção.
 
 ## Escopo
 
 - API, domínio, contratos, cliente gerado, web e banco do mesmo repositório canônico.
 - Cadeia append-only local validada de `0001_core.sql` até
-  `0078_channel_connection_admin_null_validation.sql`.
+  `0079_initial_tenant_bootstrap.sql`.
 - Overlay OIDC exclusivamente sintético, com quatro identidades locais: administrador, supervisor e dois atendentes.
 - Outbound externo e Hermes desativados.
 
@@ -275,7 +275,7 @@ o respectivo gate verde.
 
 ## Limite da declaração
 
-Com os gates locais verdes, a declaração permitida é **checkpoint 0078 presente no candidato local**,
+Com os gates locais verdes, a declaração permitida é **checkpoint 0079 presente no candidato local**,
 ainda não integrado à `main`. A PR #15
 teve aprovação distinta, checks `validate` verdes e CI pós-merge `32429870452` verde. Staging continua bloqueado até
 existirem artefato por digest, IdP externo, HTTPS, variáveis e segredos reais, contas sintéticas e
@@ -288,3 +288,7 @@ persistem episódios de capacidade e sua API; `0076` publica apenas identificado
 `0077` torna a administração de conexão idempotente e tenant-aware; `0078` rejeita explicitamente
 `NULL` em escopo e status antes da função legada. Nenhuma delas materializa segredo,
 habilita Meta real ou altera a fronteira do Hermes.
+
+`0079` acrescenta o bootstrap administrativo one-shot do primeiro tenant, unidade, administrador e
+identidade OIDC. Ele é inacessível aos papéis da aplicação, exige banco sem tenant no primeiro uso,
+serializa concorrência e só aceita replay com a mesma impressão digital.
