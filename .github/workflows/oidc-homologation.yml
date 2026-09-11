@@ -153,49 +153,11 @@ jobs:
     needs: homologate
     if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment: oidc-homologation
     env:
       E2E_INBOX_FIXTURE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - name: Configure restricted staging fixture SSH for recovery
-        env:
-          FIXTURE_HOST: ${{ vars.STAGING_FIXTURE_SSH_HOST }}
-          FIXTURE_PORT: ${{ vars.STAGING_FIXTURE_SSH_PORT }}
-          FIXTURE_USER: ${{ vars.STAGING_FIXTURE_SSH_USER }}
-          FIXTURE_PRIVATE_KEY: ${{ secrets.STAGING_FIXTURE_SSH_PRIVATE_KEY }}
-          FIXTURE_KNOWN_HOSTS: ${{ secrets.STAGING_FIXTURE_SSH_KNOWN_HOSTS }}
-        run: |
-          set -eu
-          : "${FIXTURE_HOST:?STAGING_FIXTURE_SSH_HOST_REQUIRED}"
-          : "${FIXTURE_USER:?STAGING_FIXTURE_SSH_USER_REQUIRED}"
-          : "${FIXTURE_PRIVATE_KEY:?STAGING_FIXTURE_SSH_PRIVATE_KEY_REQUIRED}"
-          : "${FIXTURE_KNOWN_HOSTS:?STAGING_FIXTURE_SSH_KNOWN_HOSTS_REQUIRED}"
-          FIXTURE_PORT="${FIXTURE_PORT:-22}"
-          case "$FIXTURE_HOST" in (*[!A-Za-z0-9.-]*|'') exit 64;; esac
-          case "$FIXTURE_USER" in (*[!a-z0-9_-]*|'') exit 64;; esac
-          case "$FIXTURE_USER" in ([a-z_]*) ;; (*) exit 64;; esac
-          case "$FIXTURE_PORT" in (*[!0-9]*|'') exit 64;; esac
-          test "$FIXTURE_PORT" -ge 1 && test "$FIXTURE_PORT" -le 65535
-          install -d -m 0700 "$RUNNER_TEMP/staging-fixture-ssh"
-          printf '%s\n' "$FIXTURE_PRIVATE_KEY" > "$RUNNER_TEMP/staging-fixture-ssh/id"
-          printf '%s\n' "$FIXTURE_KNOWN_HOSTS" > "$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
-          chmod 0600 "$RUNNER_TEMP/staging-fixture-ssh/id" "$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
-          ssh-keygen -y -f "$RUNNER_TEMP/staging-fixture-ssh/id" >/dev/null
-          if test "$FIXTURE_PORT" = 22; then lookup="$FIXTURE_HOST"; else lookup="[$FIXTURE_HOST]:$FIXTURE_PORT"; fi
-          ssh-keygen -F "$lookup" -f "$RUNNER_TEMP/staging-fixture-ssh/known_hosts" >/dev/null
-          printf 'FIXTURE_PORT=%s\n' "$FIXTURE_PORT" >> "$GITHUB_ENV"
-      - name: Cleanup isolated staging Inbox fixture
-        env:
-          FIXTURE_HOST: ${{ vars.STAGING_FIXTURE_SSH_HOST }}
-          FIXTURE_USER: ${{ vars.STAGING_FIXTURE_SSH_USER }}
-        run: >-
-          ssh -F /dev/null -i "$RUNNER_TEMP/staging-fixture-ssh/id"
-          -p "$FIXTURE_PORT" -o BatchMode=yes -o PasswordAuthentication=no
-          -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
-          -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
-          -o "UserKnownHostsFile=$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
-          "$FIXTURE_USER@$FIXTURE_HOST" "cleanup $E2E_INBOX_FIXTURE_KEY" >/dev/null
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ always() }}
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
@@ -235,4 +197,70 @@ jobs:
           E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
         run: >-
           pnpm --filter @zap-pronto/web test:e2e:oidc --grep
-          "recuperação idempotente"
+          "recuperação idempotente reativa a conta dedicada da homologação" shell-oidc.spec.ts
+      - name: Recover owned Inbox fixture and restore OFFLINE
+        if: ${{ always() }}
+        timeout-minutes: 5
+        env:
+          E2E_OIDC_ENABLED: "true"
+          E2E_OIDC_TARGET: "external"
+          E2E_FORBID_SKIPS: "true"
+          E2E_BASE_URL: ${{ vars.OIDC_E2E_WEB_URL }}
+          E2E_OIDC_TEST_TIMEOUT_MS: "120000"
+          E2E_OIDC_USERNAME_SELECTOR: ${{ vars.E2E_OIDC_USERNAME_SELECTOR }}
+          E2E_OIDC_PASSWORD_SELECTOR: ${{ vars.E2E_OIDC_PASSWORD_SELECTOR }}
+          E2E_OIDC_SUBMIT_SELECTOR: ${{ vars.E2E_OIDC_SUBMIT_SELECTOR }}
+          E2E_ATTENDANT_USERNAME: ${{ secrets.E2E_ATTENDANT_USERNAME }}
+          E2E_ATTENDANT_PASSWORD: ${{ secrets.E2E_ATTENDANT_PASSWORD }}
+          E2E_ATTENDANT_EXPECTED_TENANT: ${{ secrets.E2E_ATTENDANT_EXPECTED_TENANT }}
+        run: pnpm --filter @zap-pronto/web test:e2e:oidc inbox-recovery-oidc.spec.ts
+  cleanup:
+    needs: [homologate, recovery]
+    if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oidc-homologation
+    env:
+      E2E_INBOX_FIXTURE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Configure restricted staging fixture SSH for cleanup
+        id: fixture_ssh
+        if: ${{ always() }}
+        env:
+          FIXTURE_HOST: ${{ vars.STAGING_FIXTURE_SSH_HOST }}
+          FIXTURE_PORT: ${{ vars.STAGING_FIXTURE_SSH_PORT }}
+          FIXTURE_USER: ${{ vars.STAGING_FIXTURE_SSH_USER }}
+          FIXTURE_PRIVATE_KEY: ${{ secrets.STAGING_FIXTURE_SSH_PRIVATE_KEY }}
+          FIXTURE_KNOWN_HOSTS: ${{ secrets.STAGING_FIXTURE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          : "${FIXTURE_HOST:?STAGING_FIXTURE_SSH_HOST_REQUIRED}"
+          : "${FIXTURE_USER:?STAGING_FIXTURE_SSH_USER_REQUIRED}"
+          : "${FIXTURE_PRIVATE_KEY:?STAGING_FIXTURE_SSH_PRIVATE_KEY_REQUIRED}"
+          : "${FIXTURE_KNOWN_HOSTS:?STAGING_FIXTURE_SSH_KNOWN_HOSTS_REQUIRED}"
+          FIXTURE_PORT="${FIXTURE_PORT:-22}"
+          case "$FIXTURE_HOST" in (*[!A-Za-z0-9.-]*|'') exit 64;; esac
+          case "$FIXTURE_USER" in (*[!a-z0-9_-]*|'') exit 64;; esac
+          case "$FIXTURE_USER" in ([a-z_]*) ;; (*) exit 64;; esac
+          case "$FIXTURE_PORT" in (*[!0-9]*|'') exit 64;; esac
+          test "$FIXTURE_PORT" -ge 1 && test "$FIXTURE_PORT" -le 65535
+          install -d -m 0700 "$RUNNER_TEMP/staging-fixture-ssh"
+          printf '%s\n' "$FIXTURE_PRIVATE_KEY" > "$RUNNER_TEMP/staging-fixture-ssh/id"
+          printf '%s\n' "$FIXTURE_KNOWN_HOSTS" > "$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
+          chmod 0600 "$RUNNER_TEMP/staging-fixture-ssh/id" "$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/staging-fixture-ssh/id" >/dev/null
+          if test "$FIXTURE_PORT" = 22; then lookup="$FIXTURE_HOST"; else lookup="[$FIXTURE_HOST]:$FIXTURE_PORT"; fi
+          ssh-keygen -F "$lookup" -f "$RUNNER_TEMP/staging-fixture-ssh/known_hosts" >/dev/null
+          printf 'FIXTURE_PORT=%s\n' "$FIXTURE_PORT" >> "$GITHUB_ENV"
+      - name: Cleanup isolated staging Inbox fixture
+        if: ${{ always() && steps.fixture_ssh.outcome == 'success' }}
+        env:
+          FIXTURE_HOST: ${{ vars.STAGING_FIXTURE_SSH_HOST }}
+          FIXTURE_USER: ${{ vars.STAGING_FIXTURE_SSH_USER }}
+        run: >-
+          ssh -F /dev/null -i "$RUNNER_TEMP/staging-fixture-ssh/id"
+          -p "$FIXTURE_PORT" -o BatchMode=yes -o PasswordAuthentication=no
+          -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+          -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+          -o "UserKnownHostsFile=$RUNNER_TEMP/staging-fixture-ssh/known_hosts"
+          "$FIXTURE_USER@$FIXTURE_HOST" "cleanup $E2E_INBOX_FIXTURE_KEY" >/dev/null

@@ -43,11 +43,21 @@ test("private inputs require the owner database URL and never accept runtime cre
   const fixtureConfig = join(directory, "config.json");
   await writeFile(database, "postgresql://zap_pronto_owner:private@postgres/zap_pronto\n", { mode: 0o400 });
   await writeFile(fixtureConfig, JSON.stringify(config), { mode: 0o400 });
+  await chmod(database, 0o400);
+  await chmod(fixtureConfig, 0o400);
   const loaded = await loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig });
   assert.equal(loaded.config.tenantId, config.tenantId);
-  if (process.platform === "win32") await chmod(database, 0o600);
+  await chmod(database, 0o600);
   await writeFile(database, "postgresql://zap_pronto_runtime:private@postgres/zap_pronto\n", { mode: 0o400 });
+  await chmod(database, 0o400);
   await assert.rejects(loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig }), /DATABASE_URL_INVALID/);
+  if (process.platform === "linux") {
+    await chmod(database, 0o600);
+    await writeFile(database, "postgresql://zap_pronto_owner:private@postgres/zap_pronto\n");
+    await chmod(database, 0o400);
+    await chmod(fixtureConfig, 0o600);
+    await assert.rejects(loadFixtureInputs({ DATABASE_URL_FILE: database, INBOX_E2E_CONFIG_FILE: fixtureConfig }), /FIXTURE_FILE_PERMISSIONS_INVALID/);
+  }
 });
 
 test("prepare is transactional, parameterized and verifies zero outbound or Hermes messages", async () => {
@@ -57,6 +67,9 @@ test("prepare is transactional, parameterized and verifies zero outbound or Herm
     async query(text, values) {
       calls.push([text, values]);
       if (text.includes("tenant_exists")) return { rowCount: 1, rows: [{ tenant_exists: true, unit_exists: true }] };
+      if (text.includes("FROM human_handoffs") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("FROM conversations") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("transfer_exists")) return { rowCount:1, rows:[{ transfer_exists:false, takeover_exists:false }] };
       if (text.includes("actor_active")) return { rowCount:1, rows:[{ actor_active:true, membership_active:true,
         policy_observe:true, capacity_available:true, no_active_work:true }] };
       if (text.includes("connection_type")) return { rowCount: 1, rows: [{ connection_type:"WHATSAPP",
@@ -103,6 +116,9 @@ test("prepare fails closed when the dedicated attendant is not operationally rea
     async connect() {}
     async query(text) {
       if (text.includes("tenant_exists")) return { rowCount:1, rows:[{ tenant_exists:true, unit_exists:true }] };
+      if (text.includes("FROM human_handoffs") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("FROM conversations") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("transfer_exists")) return { rowCount:1, rows:[{ transfer_exists:false, takeover_exists:false }] };
       if (text.includes("actor_active")) return { rowCount:1, rows:[{ actor_active:true, membership_active:true,
         policy_observe:true, capacity_available:false, no_active_work:true }] };
       return { rowCount:0, rows:[] };
@@ -177,6 +193,9 @@ test("cleanup is replay-safe and leaves no deterministic fixture rows", async ()
     async query(text) {
       calls.push(text);
       if (text.includes("tenant_exists")) return { rowCount:1, rows:[{ tenant_exists:true, unit_exists:true }] };
+      if (text.includes("FROM human_handoffs") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("FROM conversations") && text.includes("FOR UPDATE")) return { rowCount:0, rows:[] };
+      if (text.includes("transfer_exists")) return { rowCount:1, rows:[{ transfer_exists:false, takeover_exists:false }] };
       if (text.includes("remaining")) return { rowCount:1, rows:[{ remaining:"0" }] };
       return { rowCount:0, rows:[] };
     }
@@ -187,4 +206,38 @@ test("cleanup is replay-safe and leaves no deterministic fixture rows", async ()
   await runFixtureAction("cleanup", "34569418102-1", inputs, CleanupClient);
   assert.equal(calls.filter((text) => text === "COMMIT").length, 2);
   assert.equal(calls.filter((text) => text.includes("DELETE FROM human_handoffs")).length, 2);
+});
+
+test("cleanup fails closed before every DELETE while fixture work is active or assigned", async () => {
+  for (const unsafe of [
+    { handoff:{ status:"ACTIVE", assigned_user_id:null }, conversation:null, commands:{ transfer_exists:false, takeover_exists:false } },
+    { handoff:{ status:"QUEUED", assigned_user_id:config.attendantUserId }, conversation:null, commands:{ transfer_exists:false, takeover_exists:false } },
+    { handoff:null, conversation:{ assigned_user_id:config.attendantUserId }, commands:{ transfer_exists:false, takeover_exists:false } },
+    { handoff:null, conversation:null, commands:{ transfer_exists:true, takeover_exists:false } },
+    { handoff:null, conversation:null, commands:{ transfer_exists:false, takeover_exists:true } },
+  ]) {
+    const calls = [];
+    class UnsafeCleanupClient {
+      async connect() {}
+      async query(text) {
+        calls.push(text);
+        if (text.includes("tenant_exists")) return { rowCount:1, rows:[{ tenant_exists:true, unit_exists:true }] };
+        if (text.includes("FROM human_handoffs") && text.includes("FOR UPDATE")) {
+          return { rowCount:unsafe.handoff?1:0, rows:unsafe.handoff?[unsafe.handoff]:[] };
+        }
+        if (text.includes("FROM conversations") && text.includes("FOR UPDATE")) {
+          return { rowCount:unsafe.conversation?1:0, rows:unsafe.conversation?[unsafe.conversation]:[] };
+        }
+        if (text.includes("transfer_exists")) return { rowCount:1, rows:[unsafe.commands] };
+        return { rowCount:0, rows:[] };
+      }
+      async end() {}
+    }
+    await assert.rejects(runFixtureAction("cleanup", "34569418102-1", {
+      databaseUrl:"postgresql://zap_pronto_owner:private@postgres/zap_pronto", config,
+    }, UnsafeCleanupClient), /FIXTURE_CLEANUP_ACTIVE_WORK_CONFLICT/);
+    assert.equal(calls.some((text) => text.startsWith("DELETE FROM")), false);
+    assert.equal(calls.includes("ROLLBACK"), true);
+    assert.equal(calls.includes("COMMIT"), false);
+  }
 });

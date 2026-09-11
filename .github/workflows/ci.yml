@@ -45,8 +45,9 @@ jobs:
       - run: pnpm build:all
       - run: >-
           node --test deploy/web/default-conf.test.mjs deploy/staging/rollback-web.test.mjs
-          deploy/staging/compose-meta.test.mjs
+          deploy/staging/compose-meta.test.mjs deploy/staging/staging-inbox-e2e-controller.test.mjs
           scripts/db-provision-runtime.test.mjs scripts/staging-preflight.test.mjs scripts/staging-workflow.test.mjs
+          scripts/staging-inbox-e2e-fixture.test.mjs scripts/oidc-inbox-recovery.test.mjs
           scripts/staging-init-database-secrets.test.mjs scripts/staging-bootstrap-tenant.test.mjs scripts/vercel-config.test.mjs
       - name: Validate operational shell scripts
         run: >-
