@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createUserManager: vi.fn(),
-  signinRedirectCallback: vi.fn(),
+  signinCallback: vi.fn(),
+  signinSilent: vi.fn(),
   removeUser: vi.fn(),
   clearStaleState: vi.fn(),
   getUser: vi.fn(),
@@ -24,6 +25,7 @@ beforeEach(() => {
   vi.stubEnv("VITE_OIDC_AUDIENCE", "");
   mocks.createUserManager.mockReturnValue(mocks);
   window.history.replaceState({}, "", "/callback");
+  window.sessionStorage.clear();
   delete window.__ZAP_PRONTO_AUTH__;
 });
 
@@ -35,6 +37,9 @@ describe("OIDC bootstrap", () => {
     expect(mocks.createUserManager).toHaveBeenCalledWith(expect.objectContaining({
       extraQueryParams: { audience: "https://api.example.test" },
       response_type: "code", scope: "openid profile email",
+      redirect_uri: "http://localhost:3000",
+      silent_redirect_uri: "http://localhost:3000",
+      maxSilentRenewTimeoutRetries: 0,
     }));
   });
 
@@ -47,12 +52,12 @@ describe("OIDC bootstrap", () => {
 
   it("removes the complete callback query and fragment before returning a sanitized error", async () => {
     window.history.replaceState({}, "", "/callback?error=access_denied&error_description=secret&vendor=value#access_token=token");
-    mocks.signinRedirectCallback.mockRejectedValueOnce(new Error("invalid state"));
+    mocks.signinCallback.mockRejectedValueOnce(new Error("invalid state"));
     const { initializeAuth } = await import("./auth.js");
     await expect(initializeAuth()).resolves.toEqual({ status: "error" });
     expect(window.location.href).toBe("http://localhost:3000/callback");
     expect(window.__ZAP_PRONTO_AUTH__).toBeUndefined();
-    expect(mocks.signinRedirectCallback).toHaveBeenCalledWith(
+    expect(mocks.signinCallback).toHaveBeenCalledWith(
       "http://localhost:3000/callback?error=access_denied&error_description=secret&vendor=value#access_token=token",
     );
   });
@@ -67,15 +72,69 @@ describe("OIDC bootstrap", () => {
 
   it("delivers the original callback to the SDK after removing it from the browser URL", async () => {
     window.history.replaceState({}, "", "/callback?code=ok&state=state-1#unexpected");
-    mocks.signinRedirectCallback.mockResolvedValueOnce(undefined);
+    mocks.signinCallback.mockResolvedValueOnce({ access_token: "memory-only" });
     const { initializeAuth, isAuthConfigured } = await import("./auth.js");
     await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
     expect(window.location.href).toBe("http://localhost:3000/callback");
-    expect(mocks.signinRedirectCallback).toHaveBeenCalledWith(
+    expect(mocks.signinCallback).toHaveBeenCalledWith(
       "http://localhost:3000/callback?code=ok&state=state-1#unexpected",
     );
     expect(isAuthConfigured()).toBe(true);
     expect(window.__ZAP_PRONTO_AUTH__).toBeDefined();
+    expect(window.sessionStorage.getItem("zap-pronto.auth.session")).toBe("1");
+  });
+
+  it("does not mount the application inside a silent callback iframe", async () => {
+    window.history.replaceState({}, "", "/callback?code=ok&state=silent-state");
+    mocks.signinCallback.mockResolvedValueOnce(undefined);
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "redirecting" });
+    expect(window.__ZAP_PRONTO_AUTH__).toBeUndefined();
+    expect(window.sessionStorage.getItem("zap-pronto.auth.session")).toBeNull();
+  });
+
+  it("does not attempt silent restoration without a session marker", async () => {
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(mocks.signinSilent).not.toHaveBeenCalled();
+  });
+
+  it("restores a marked session silently without persisting the user or token", async () => {
+    window.sessionStorage.setItem("zap-pronto.auth.session", "1");
+    mocks.getUser.mockResolvedValueOnce(undefined);
+    mocks.signinSilent.mockResolvedValueOnce({ access_token: "memory-only" });
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(mocks.signinSilent).toHaveBeenCalledWith({ forceIframeAuth: true });
+    expect(Object.keys(window.sessionStorage)).toEqual(["zap-pronto.auth.session"]);
+  });
+
+  it("clears a stale marker when the provider no longer has a session", async () => {
+    window.sessionStorage.setItem("zap-pronto.auth.session", "1");
+    mocks.getUser.mockResolvedValueOnce(undefined);
+    mocks.signinSilent.mockRejectedValueOnce(new Error("login_required"));
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(window.sessionStorage.getItem("zap-pronto.auth.session")).toBeNull();
+    expect(mocks.removeUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays logged out when cleanup also fails after silent restoration", async () => {
+    window.sessionStorage.setItem("zap-pronto.auth.session", "1");
+    mocks.getUser.mockResolvedValueOnce(undefined);
+    mocks.signinSilent.mockRejectedValueOnce(new Error("network_error"));
+    mocks.removeUser.mockRejectedValueOnce(new Error("storage_error"));
+    const { initializeAuth } = await import("./auth.js");
+    await expect(initializeAuth()).resolves.toEqual({ status: "ready" });
+    expect(window.sessionStorage.getItem("zap-pronto.auth.session")).toBeNull();
+  });
+
+  it("clears the non-sensitive marker when the local session is cleared", async () => {
+    window.sessionStorage.setItem("zap-pronto.auth.session", "1");
+    const { initializeAuth, clearAuthSession } = await import("./auth.js");
+    await initializeAuth();
+    await clearAuthSession();
+    expect(window.sessionStorage.getItem("zap-pronto.auth.session")).toBeNull();
   });
 
   it("keeps user tokens in memory and persists only redirect state", async () => {

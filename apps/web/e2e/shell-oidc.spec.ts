@@ -86,16 +86,20 @@ async function openModule(page: Page, name: "Acessos" | "Roteamento" | "Vínculo
 }
 
 async function oidcAccessTokenExpiration(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const expirations = Object.keys(sessionStorage).filter((key) => key.startsWith("oidc.user:"))
-      .map((key) => {
-        try {
-          const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as { expires_at?: unknown } | null;
-          return typeof value?.expires_at === "number" ? value.expires_at : undefined;
-        } catch { return undefined; }
-      }).filter((value): value is number => value !== undefined);
-    if (expirations.length !== 1) throw new Error("SINGLE_OIDC_ACCESS_TOKEN_EXPIRATION_REQUIRED");
-    return expirations[0]!;
+  return page.evaluate(async () => {
+    if ([...Object.keys(sessionStorage), ...Object.keys(localStorage)]
+      .some((key) => key.startsWith("oidc.user:"))) {
+      throw new Error("OIDC_TOKEN_STORAGE_FORBIDDEN");
+    }
+    const auth = (window as Window & { __ZAP_PRONTO_AUTH__?: {
+      getAccessToken(): Promise<string | undefined> } }).__ZAP_PRONTO_AUTH__;
+    const token = await auth?.getAccessToken();
+    const payload = token?.split(".")[1];
+    if (!payload) throw new Error("OIDC_ACCESS_TOKEN_REQUIRED");
+    const normalized = payload.replaceAll("-", "+").replaceAll("_", "/");
+    const parsed = JSON.parse(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="))) as { exp?: unknown };
+    if (typeof parsed.exp !== "number") throw new Error("OIDC_ACCESS_TOKEN_EXPIRATION_REQUIRED");
+    return parsed.exp;
   });
 }
 
